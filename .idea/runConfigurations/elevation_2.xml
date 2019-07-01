@@ -1,0 +1,7 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="elevation 2" type="CMakeRunConfiguration" factoryName="Application" PROGRAM_PARAMS="--command=elevation --first-day=2018-01-01 --last-day=2018-01-10 --output=elevation_2018_01_01-10.csv" PASS_PARENT_ENVS_2="true" PROJECT_NAME="quake" TARGET_NAME="quake-main" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="quake" RUN_TARGET_NAME="quake-main">
+    <method v="2">
+      <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+    </method>
+  </configuration>
+</component>

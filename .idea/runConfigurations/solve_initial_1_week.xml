@@ -1,0 +1,7 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="solve initial 1 week" type="CMakeRunConfiguration" factoryName="Application" PROGRAM_PARAMS="--command=solve-inventory-cp --input=$PROJECT_DIR$/data/minizinc/all_linear_1week_2019-01-8.dzn --cloud-cover=$PROJECT_DIR$/data/cloud_cover/january_2019.csv --failure-scaling-factor=1000 --objective_function=surplus-envelope --output=all_1week_2019-01-08_cloud_cover_solution_test.json --output_initial_guess=all_1week_2019-01-08_initial_guess_test1.json" PASS_PARENT_ENVS_2="true" PROJECT_NAME="quake" TARGET_NAME="quake-main" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="quake" RUN_TARGET_NAME="quake-main">
+    <method v="2">
+      <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+    </method>
+  </configuration>
+</component>

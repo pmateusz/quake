@@ -1,0 +1,23 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="compare-solutions" type="PythonConfigurationType" factoryName="Python">
+    <module name="quake" />
+    <option name="INTERPRETER_OPTIONS" value="" />
+    <option name="PARENT_ENVS" value="true" />
+    <envs>
+      <env name="PYTHONUNBUFFERED" value="1" />
+    </envs>
+    <option name="SDK_HOME" value="/usr/bin/python3.5" />
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/python" />
+    <option name="IS_MODULE_SDK" value="false" />
+    <option name="ADD_CONTENT_ROOTS" value="true" />
+    <option name="ADD_SOURCE_ROOTS" value="true" />
+    <option name="SCRIPT_NAME" value="$PROJECT_DIR$/python/plot-quake.py" />
+    <option name="PARAMETERS" value="compare --problem=$PROJECT_DIR$/data/simulation/week_2018-01-01.dzn --weather=$PROJECT_DIR$/data/simulation/cloud_cover_2018-01-01.csv --baseline-solution=$PROJECT_DIR$/cmake-build-debug/solution_mip_2018-01-01_basic_blocks_v1.json --other-solution=$PROJECT_DIR$/cmake-build-debug/solution_mip_2018-01-01_basic_blocks_v10.json" />
+    <option name="SHOW_COMMAND_LINE" value="false" />
+    <option name="EMULATE_TERMINAL" value="false" />
+    <option name="MODULE_MODE" value="false" />
+    <option name="REDIRECT_INPUT" value="false" />
+    <option name="INPUT_FILE" value="" />
+    <method v="2" />
+  </configuration>
+</component>

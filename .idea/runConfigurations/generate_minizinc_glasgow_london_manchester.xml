@@ -1,0 +1,7 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="generate minizinc glasgow london manchester" type="CMakeRunConfiguration" factoryName="Application" PROGRAM_PARAMS="--command=minizinc --first_day=2019-03-1 --last_day=2019-03-8 --time_step=1 --output=3s_1week_2019-03-1.dzn --convert-float-to-int --v=1" PASS_PARENT_ENVS_2="true" PROJECT_NAME="quake" TARGET_NAME="quake-cp" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="quake" RUN_TARGET_NAME="quake-cp">
+    <method v="2">
+      <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+    </method>
+  </configuration>
+</component>

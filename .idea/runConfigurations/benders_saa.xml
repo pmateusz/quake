@@ -1,0 +1,7 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="benders saa" type="CMakeRunConfiguration" factoryName="Application" PROGRAM_PARAMS="--input=$PROJECT_DIR$/data/problem/week_2018-01-01.dzn --output=benders_test.json --cloud_cover=$PROJECT_DIR$/data/cloud_cover/cloud_cover_2018-01-01.csv --time_step=00:00:15 --gap=0.05 --v=1" PASS_PARENT_ENVS_2="true" PROJECT_NAME="quake" TARGET_NAME="quake-saa" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="quake" RUN_TARGET_NAME="quake-saa">
+    <method v="2">
+      <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+    </method>
+  </configuration>
+</component>
