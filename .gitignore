@@ -1,0 +1,11 @@
+.idea
+
+build/
+cmake-build-debug/
+venv/
+.data/
+python/quake/__pycache__/
+plots/
+
+*.out
+*.png

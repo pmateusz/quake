@@ -1,0 +1,56 @@
+//
+// Copyright 2018 Mateusz Polnik, Annalisa Riccardi
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+#include <cmath>
+
+#include "util/constants.h"
+
+#include "kepler_elements.h"
+
+quake::KeplerElements::KeplerElements(double semimajor_axis,
+                                      double eccentricity,
+                                      double inclination,
+                                      double ascending_node_longitude,
+                                      double periapsis_argument,
+                                      double true_anomaly)
+        : semimajor_axis_{semimajor_axis},
+          eccentricity_{eccentricity},
+          inclination_{inclination},
+          ascending_node_longitude_{ascending_node_longitude},
+          periapsis_argument_{periapsis_argument},
+          true_anomaly_{true_anomaly},
+          mean_motion_{sqrt(util::EARTH_STANDARD_GRAVITATIONAL_PARAM / pow(semimajor_axis_, 3.0))},
+          orbital_period_{2 * M_PI / mean_motion_},
+          circular_orbit_velocity_{2 * M_PI / orbital_period_},
+          semilatus_rectum_{semimajor_axis_ * (1.0 - pow(eccentricity_, 2.0))},
+          ascending_node_longitude_variation_{-1.5
+                                              * mean_motion_
+                                              * util::NODAL_PRECESSION_EARTH
+                                              * pow(util::EARTH_EQUATORIAL_RADIUS_KM / semilatus_rectum_, 2.0)
+                                              * cos(inclination_)} {}
+
+const quake::KeplerElements quake::KeplerElements::DEFAULT{
+        util::EARTH_EQUATORIAL_RADIUS_KM + 674,
+        0,
+        90.0 * M_PI / 180.0,
+        M_PI / 2.0,
+        0,
+        0};

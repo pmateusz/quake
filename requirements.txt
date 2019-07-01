@@ -1,0 +1,7 @@
+matplotlib
+numpy
+pandas
+odfpy
+pytz
+requests
+tabulate
