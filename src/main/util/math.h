@@ -22,6 +22,8 @@
 #ifndef QUAKE_MATH_H
 #define QUAKE_MATH_H
 
+#include <glog/logging.h>
+
 #include <boost/config.hpp>
 #include <boost/math/constants/constants.hpp>
 #include <boost/numeric/ublas/matrix.hpp>
@@ -41,12 +43,20 @@ namespace quake {
             return radians * boost::math::constants::radian<double>();
         }
 
-        inline bool is_close_to_zero(double value) {
-            return value < BINARY_PRECISION && value > -1.0 * BINARY_PRECISION;
+        inline void check_near(double left, double right) {
+            CHECK_NEAR(left, right, BINARY_PRECISION);
         }
 
-        inline bool is_close_to_one(double value) {
-            return value > 1.0 - BINARY_PRECISION && value < 1.0 + BINARY_PRECISION;
+        inline bool is_nearly_eq(double left, double right) {
+            return abs(left - right) < BINARY_PRECISION;
+        }
+
+        inline bool is_surely_gt(double left, double right) {
+            return left - right > BINARY_PRECISION;
+        }
+
+        inline bool is_surely_lt(double left, double right) {
+            return left - right > -BINARY_PRECISION;
         }
     }
 }

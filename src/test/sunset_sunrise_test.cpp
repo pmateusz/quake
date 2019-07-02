@@ -302,20 +302,20 @@ TEST(ElavationTest, ElevationInMatlabIsConsistentWithSP4) {
 
     boost::posix_time::ptime start_time{{2030, 12, 21}};
     boost::posix_time::ptime end_time{{2030, 12, 22}};
-    const auto observation_time = end_time - start_time;
+    boost::posix_time::time_period observation_period(start_time, end_time);
     const auto time_step = boost::posix_time::seconds(1);
 
     // when
     const auto matlab_elevations = quake::GetMatlabElevation(ground_station,
                                                              initial_satellite_position,
                                                              start_time,
-                                                             observation_time,
+                                                             observation_period.length(),
                                                              time_step);
 
     const auto elevations = quake::GetElevation(ground_station,
                                                 initial_satellite_position,
                                                 start_time,
-                                                observation_time,
+                                                observation_period,
                                                 time_step);
 
     // then
@@ -360,9 +360,11 @@ TEST(GenerateProblemTest, CanGenerateCorrectTransferRate) {
     quake::ProblemGenerator generator;
     std::vector<quake::GroundStation> stations{quake::GroundStation::London, quake::GroundStation::Glasgow};
     boost::gregorian::date first_day{2019, 3, 29};
+    boost::posix_time::ptime first_time{first_day};
     boost::gregorian::date next_day{2019, 3, 30};
-    auto problem = generator.Create(stations, boost::posix_time::time_period{boost::posix_time::ptime{first_day},
-                                                                             boost::posix_time::hours(48)});
+    auto problem = generator.Create(stations,
+                                    first_time,
+                                    boost::posix_time::time_period{first_time, boost::posix_time::hours(48)});
 
     std::vector<double> elevation_angle{
             -21.159388669960816,
@@ -582,9 +584,9 @@ TEST(GenerateTransferWeightTest, CanUseMaxFlow) {
     };
     boost::gregorian::date first_day{2019, 3, 29};
     boost::gregorian::date next_day{2019, 3, 30};
-    auto problem = generator.Create(stations, boost::posix_time::time_period{boost::posix_time::ptime{first_day},
-                                                                             boost::posix_time::hours(48)});
-
+    boost::posix_time::time_period observation_period{boost::posix_time::ptime{first_day},
+                                                      boost::posix_time::hours(48)};
+    auto problem = generator.Create(stations, observation_period.begin(), observation_period);
     using Traits = boost::adjacency_list_traits<boost::vecS, boost::vecS, boost::directedS>;
     using Graph =  boost::adjacency_list<boost::vecS, boost::vecS, boost::directedS,
             boost::property<boost::vertex_name_t, std::string>,

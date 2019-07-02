@@ -24,6 +24,7 @@
 
 #include <boost/config.hpp>
 #include <boost/exception/diagnostic_information.hpp>
+#include <util/math.h>
 
 #include "sample_average_mip_model.h"
 #include "fixed_discretisation_scheme.h"
@@ -75,7 +76,8 @@ quake::SampleAverageMipModel::SampleAverageCallback::SampleAverageCallback(quake
     dual_scenarios_.reserve(num_scenarios);
 }
 
-static bool descending_comparator(const std::pair<std::size_t, double> &left, const std::pair<std::size_t, double> &right) {
+static bool
+descending_comparator(const std::pair<std::size_t, double> &left, const std::pair<std::size_t, double> &right) {
     return left.second > right.second;
 }
 
@@ -183,9 +185,8 @@ void quake::SampleAverageMipModel::SampleAverageCallback::callback() {
                 const auto primal_value = (num_dual_scenarios * target_traffic_index_
                                            - keys_delivered_cumulative / model_.TransferShare(station_index))
                                           / num_other_scenarios;
-                CHECK_NEAR(primal_value, final_dual_value, 0.01);
-                // TODO: compare with precision
-                if (primal_value > getSolution(target_distance_var_)) {
+                util::check_near(primal_value, final_dual_value);
+                if (util::is_surely_gt(primal_value, getSolution(target_distance_var_))) {
                     VLOG(1) << "Adding optimality cut: " << primal_value
                             << " < index (current value: " << getSolution(target_distance_var_) << ")";
                     GRBLinExpr keys_delivered_cumulative_expr;

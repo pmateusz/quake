@@ -113,43 +113,44 @@ int main(int argc, char *argv[]) {
     forecast_scenarios.insert(forecast_scenarios.begin(), primary_forecast);
     LOG(INFO) << "Generated " << NUM_SCENARIOS << " scenarios";
 
-    LOG(INFO) << "Computing Worst Case";
-    quake::WorstCaseMipModel worst_case_model(&model, arguments.TimeStep, forecast_scenarios);
-    const auto worst_case_solution_opt = worst_case_model.Solve(arguments.TimeLimit,
-                                                                arguments.Gap,
-                                                                boost::none);
-    CHECK(worst_case_solution_opt) << "Failed to find the worst case solution";
-
-    LOG(INFO) << "Computing Average Case";
-    quake::AverageCaseMipModel average_case_model(&model, arguments.TimeStep, forecast_scenarios);
-    const auto average_case_solution_opt = average_case_model.Solve(arguments.TimeLimit,
-                                                                    arguments.Gap,
-                                                                    boost::none);
-    CHECK(average_case_solution_opt) << "Failed to find the average case solution";
-
-    LOG(INFO) << "Computing Deterministic Case";
+//    LOG(INFO) << "Computing Worst Case";
+//    quake::WorstCaseMipModel worst_case_model(&model, arguments.TimeStep, forecast_scenarios);
+//    const auto worst_case_solution_opt = worst_case_model.Solve(arguments.TimeLimit,
+//                                                                arguments.Gap,
+//                                                                boost::none);
+//    CHECK(worst_case_solution_opt) << "Failed to find the worst case solution";
+//
+//    LOG(INFO) << "Computing Average Case";
+//    quake::AverageCaseMipModel average_case_model(&model, arguments.TimeStep, forecast_scenarios);
+//    const auto average_case_solution_opt = average_case_model.Solve(arguments.TimeLimit,
+//                                                                    arguments.Gap,
+//                                                                    boost::none);
+//    CHECK(average_case_solution_opt) << "Failed to find the average case solution";
+//
+//    LOG(INFO) << "Computing Deterministic Case";
     quake::AverageCaseMipModel best_case_model(&model, arguments.TimeStep,
                                                std::vector<quake::Forecast>{primary_forecast});
-    const auto best_case_solution_opt = best_case_model.Solve(arguments.TimeLimit,
-                                                              arguments.Gap,
-                                                              boost::none);
-    CHECK(best_case_solution_opt) << "Failed to find the best case solution";
-
-    LOG(INFO) << "Computing Sample Average Approximation";
-    const auto saa_target_traffic_index = worst_case_model.GetTrafficIndex(*worst_case_solution_opt) * 1.25;
-    quake::SampleAverageMipModel mip_model(&model, arguments.TimeStep, forecast_scenarios, saa_target_traffic_index);
-    const auto saa_solution_opt = mip_model.Solve(arguments.TimeLimit,
-                                                  arguments.Gap,
-                                                  boost::none);
-    CHECK(saa_solution_opt) << "Failed to find the solution for Sample Average Approximation";
-
-    LOG(INFO) << "Worst case: " << best_case_model.GetTrafficIndex(*worst_case_solution_opt);
-    LOG(INFO) << "Average case: " << best_case_model.GetTrafficIndex(*average_case_solution_opt);
-    LOG(INFO) << "Deterministic case: " << best_case_model.GetTrafficIndex(*best_case_solution_opt);
-    LOG(INFO) << "Sample Average Approximation case: " << best_case_model.GetTrafficIndex(*saa_solution_opt);
+//    const auto best_case_solution_opt = best_case_model.Solve(arguments.TimeLimit,
+//                                                              arguments.Gap,
+//                                                              boost::none);
+//    CHECK(best_case_solution_opt) << "Failed to find the best case solution";
+//
+//    LOG(INFO) << "Computing Sample Average Approximation";
+//    const auto saa_target_traffic_index = worst_case_model.GetTrafficIndex(*worst_case_solution_opt) * 1.25;
+//    quake::SampleAverageMipModel mip_model(&model, arguments.TimeStep, forecast_scenarios, saa_target_traffic_index);
+//    const auto saa_solution_opt = mip_model.Solve(arguments.TimeLimit,
+//                                                  arguments.Gap,
+//                                                  boost::none);
+//    CHECK(saa_solution_opt) << "Failed to find the solution for Sample Average Approximation";
+//
+//    LOG(INFO) << "Worst case: " << best_case_model.GetTrafficIndex(*worst_case_solution_opt);
+//    LOG(INFO) << "Average case: " << best_case_model.GetTrafficIndex(*average_case_solution_opt);
+//    LOG(INFO) << "Deterministic case: " << best_case_model.GetTrafficIndex(*best_case_solution_opt);
+//    LOG(INFO) << "Sample Average Approximation case: " << best_case_model.GetTrafficIndex(*saa_solution_opt);
 
     LOG(INFO) << "Computing Conditional Value at Risk (epsilon: 0.05)";
-    const auto cvar_target_traffic_index = worst_case_model.GetTrafficIndex(*worst_case_solution_opt) * 1.10;
+//    const auto cvar_target_traffic_index = worst_case_model.GetTrafficIndex(*worst_case_solution_opt) * 1.10;
+    const auto cvar_target_traffic_index = 2.64726e+06 * 1.1;
     quake::CVarMipModel cvar_mip_model(&model, arguments.TimeStep, forecast_scenarios, cvar_target_traffic_index, 0.05);
     const auto cvar_solution_opt = cvar_mip_model.Solve(arguments.TimeLimit, arguments.Gap, boost::none);
     CHECK(cvar_solution_opt) << "Failed to find the solution using CVar optimization";

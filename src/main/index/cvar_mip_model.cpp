@@ -24,6 +24,7 @@
 #include <boost/config.hpp>
 #include <boost/exception/diagnostic_information.hpp>
 
+#include "util/math.h"
 #include "cvar_mip_model.h"
 
 quake::CVarMipModel::CVarMipModel(quake::InferredModel const *model,
@@ -75,7 +76,8 @@ quake::CVarMipModel::CVarCallback::CVarCallback(quake::CVarMipModel &model, doub
         : BendersCallback{model, target_index},
           epsilon_{epsilon} {}
 
-static bool descending_comparator(const std::pair<std::size_t, double> &left, const std::pair<std::size_t, double> &right) {
+static bool
+descending_comparator(const std::pair<std::size_t, double> &left, const std::pair<std::size_t, double> &right) {
     return left.second > right.second;
 }
 
@@ -113,8 +115,7 @@ void quake::CVarMipModel::CVarCallback::callback() {
                 double final_cumulative_target_distance = num_scenarios * target_traffic_index_
                                                           - keys_transferred / model_.TransferShare(station_index);
 
-                // TODO: should compare with precision
-                CHECK_EQ(distance_sum, final_cumulative_target_distance);
+                util::check_near(distance_sum, final_cumulative_target_distance);
                 VLOG(1) << "Adding feasibility cut: " << distance_sum
                         << " (cumulative target distance) <= 0 (at station: " << station_index << ")";
                 addLazy(cumulative_target_distance_expr <= 0.0);
@@ -189,7 +190,7 @@ void quake::CVarMipModel::CVarCallback::callback() {
 
                     const auto primal_value = cumulative_distance_scenarios / denominator
                                               + (1.0 - scenarios_to_sum / denominator) * distance_last_scenario;
-                    CHECK_NEAR(primal_value, final_dual_value, 1E-6);
+                    util::check_near(primal_value, final_dual_value);
                     VLOG(1) << "Adding optimality cut: " << final_dual_value
                             << " <= 0 (at station: " << station_index << ")";
                     addLazy(cumulative_distance_scenarios_expr / denominator
