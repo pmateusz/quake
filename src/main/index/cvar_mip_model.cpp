@@ -113,6 +113,7 @@ void quake::CVarMipModel::CVarCallback::callback() {
                 double final_cumulative_target_distance = num_scenarios * target_traffic_index_
                                                           - keys_transferred / model_.TransferShare(station_index);
 
+                // TODO: should compare with precision
                 CHECK_EQ(distance_sum, final_cumulative_target_distance);
                 VLOG(1) << "Adding feasibility cut: " << distance_sum
                         << " (cumulative target distance) <= 0 (at station: " << station_index << ")";

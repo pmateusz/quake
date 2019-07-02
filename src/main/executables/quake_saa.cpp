@@ -136,22 +136,24 @@ int main(int argc, char *argv[]) {
     CHECK(best_case_solution_opt) << "Failed to find the best case solution";
 
     LOG(INFO) << "Computing Sample Average Approximation";
-    const auto target_traffic_index = worst_case_model.GetTrafficIndex(*worst_case_solution_opt) * 1.25;
-    quake::SampleAverageMipModel mip_model(&model, arguments.TimeStep, forecast_scenarios, target_traffic_index);
+    const auto saa_target_traffic_index = worst_case_model.GetTrafficIndex(*worst_case_solution_opt) * 1.25;
+    quake::SampleAverageMipModel mip_model(&model, arguments.TimeStep, forecast_scenarios, saa_target_traffic_index);
     const auto saa_solution_opt = mip_model.Solve(arguments.TimeLimit,
                                                   arguments.Gap,
                                                   boost::none);
     CHECK(saa_solution_opt) << "Failed to find the solution for Sample Average Approximation";
 
-    LOG(INFO) << "Computing Conditional Value at Risk (epsilon: 0.05)";
-    quake::CVarMipModel cvar_mip_model(&model, arguments.TimeStep, forecast_scenarios, target_traffic_index, 0.05);
-    const auto cvar_solution_opt = cvar_mip_model.Solve(arguments.TimeLimit, arguments.Gap, boost::none);
-    CHECK(cvar_solution_opt) << "Failed to find the solution using CVar optimization";
-
     LOG(INFO) << "Worst case: " << best_case_model.GetTrafficIndex(*worst_case_solution_opt);
     LOG(INFO) << "Average case: " << best_case_model.GetTrafficIndex(*average_case_solution_opt);
     LOG(INFO) << "Deterministic case: " << best_case_model.GetTrafficIndex(*best_case_solution_opt);
     LOG(INFO) << "Sample Average Approximation case: " << best_case_model.GetTrafficIndex(*saa_solution_opt);
+
+    LOG(INFO) << "Computing Conditional Value at Risk (epsilon: 0.05)";
+    const auto cvar_target_traffic_index = worst_case_model.GetTrafficIndex(*worst_case_solution_opt) * 1.10;
+    quake::CVarMipModel cvar_mip_model(&model, arguments.TimeStep, forecast_scenarios, cvar_target_traffic_index, 0.05);
+    const auto cvar_solution_opt = cvar_mip_model.Solve(arguments.TimeLimit, arguments.Gap, boost::none);
+    CHECK(cvar_solution_opt) << "Failed to find the solution using CVar optimization";
+
     LOG(INFO) << "Conditional Value at Risk case (epsilon: 0.05): "
               << best_case_model.GetTrafficIndex(*cvar_solution_opt);
     return EXIT_SUCCESS;

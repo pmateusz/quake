@@ -19,6 +19,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include <numeric>
 #include <utility>
 
 #include <boost/config.hpp>
@@ -183,6 +184,7 @@ void quake::SampleAverageMipModel::SampleAverageCallback::callback() {
                                            - keys_delivered_cumulative / model_.TransferShare(station_index))
                                           / num_other_scenarios;
                 CHECK_NEAR(primal_value, final_dual_value, 0.01);
+                // TODO: compare with precision
                 if (primal_value > getSolution(target_distance_var_)) {
                     VLOG(1) << "Adding optimality cut: " << primal_value
                             << " < index (current value: " << getSolution(target_distance_var_) << ")";
