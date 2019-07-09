@@ -374,164 +374,6 @@ def plot_bundle(args):
     save_figure(output_file + '_auto_scale')
 
 
-#
-# def plot_solution(args):
-#     solution_input_file = getattr(args, 'solution_input')
-#     key_rate_input_file = getattr(args, 'key_rate_input')
-#     elevation_input_file = getattr(args, 'elevation_input')
-#     model_input_file = getattr(args, 'model_input')
-#     output_file = getattr(args, 'output')
-#     min_jobs = getattr(args, 'min_jobs')
-#
-#     solution_bundle = load_solution_bundle(solution_input_file)
-#
-#     max_total_key_rate = 0
-#     solution = None
-#     for candidate_solution in solution_bundle.solutions:
-#         if candidate_solution.total_key_rate >= max_total_key_rate and len(candidate_solution.jobs) >= min_jobs:
-#             solution = candidate_solution
-#             max_total_key_rate = solution.total_key_rate
-#
-#     data = []
-#     for job in solution.jobs:
-#         data.append([job.station, job.start_time, job.end_time, job.key_rate])
-#     solution_data_frame = pandas.DataFrame(columns=['Station', 'StartTime', 'EndTime', 'KeyRate'], data=data)
-#
-#     def get_solution_slices(solution_data_frame):
-#         solution_slices = []
-#         solution_data_frame = solution_data_frame.sort_values(by=['StartTime'])
-#         record_it = solution_data_frame.iterrows()
-#         record = next(record_it, None)
-#         start_record = prev_record = None
-#         while record:
-#             if not start_record:
-#                 start_record = prev_record = record
-#             else:
-#                 if prev_record[1]['EndTime'] == record[1]['StartTime']:
-#                     prev_record = record
-#
-#             if prev_record[1]['EndTime'] - start_record[1]['StartTime'] > datetime.timedelta(hours=20):
-#                 solution_slices.append((start_record[0], prev_record[0]))
-#                 start_record = None
-#             record = next(record_it, None)
-#         if start_record:
-#             solution_slices.append((start_record[0], prev_record[0]))
-#         return solution_slices
-#
-#     solution_slices = get_solution_slices(solution_data_frame)
-#
-#     def get_slice_numbers(solution_slices):
-#         current_number = 1
-#         slice_numbers = []
-#         for slice_begin, slice_end in solution_slices:
-#             slice_numbers.extend([current_number] * (slice_end - slice_begin + 1))
-#             current_number += 1
-#         return slice_numbers
-#
-#     slice_numbers = get_slice_numbers(solution_slices)
-#
-#     solution_data_frame['Day'] = solution_data_frame['StartTime'].dt.date
-#     solution_data_frame['Slice'] = slice_numbers
-#
-#     aggregated_result = solution_data_frame.groupby(['Station', 'Slice'], as_index=False)[['KeyRate']].sum()
-#
-#     aggregated_data = []
-#     stations = solution_data_frame['Station'].unique()
-#     slices = solution_data_frame['Slice'].sort_values().unique()
-#     for current_slice in slices:
-#         row = []
-#         for station in stations:
-#             result_frame = aggregated_result[(aggregated_result['Station'] == station)
-#                                              & (aggregated_result['Slice'] == current_slice)]
-#             if result_frame.empty:
-#                 row.append(0)
-#             else:
-#                 row.append(result_frame['KeyRate'].iloc[0])
-#         aggregated_data.append(row)
-#
-#     raw_histogram = pandas.DataFrame(columns=stations, data=aggregated_data, index=slices)
-#
-#     figure, axis = matplotlib.pyplot.subplots()
-#     index = numpy.arange(1, len(slices) + 1, 1)
-#     offset = 0
-#     width = 0.1
-#     handles = []
-#     for station in raw_histogram.columns.values:
-#         values = raw_histogram[station]
-#         handle = axis.bar(index + offset * width, values, width)
-#         handles.append(handle)
-#         offset += 1
-#     axis.legend(handles,
-#                 raw_histogram.columns.values,
-#                 loc='upper center',
-#                 bbox_to_anchor=(0.5, -0.05),
-#                 ncol=3)
-#     figure.tight_layout()
-#     figure.subplots_adjust(bottom=0.25)
-#     save_figure('aggregated_figure')
-#
-#     elevation_frame = load_elevation(elevation_input_file)
-#     figure, axis = matplotlib.pyplot.subplots()
-#     axis.scatter(elevation_frame['Time'].values, elevation_frame['London'].values, s=0.5)
-#     matplotlib.pyplot.show()
-#
-#     transfer_elevation_frame = load_key_rates(key_rate_input_file)
-#     transfer_frame = load_key_rate(elevation_frame, transfer_elevation_frame, '633')
-#     model_frame = load_model(model_input_file)
-#     selected_transfer_frame = transfer_frame[transfer_frame.max(axis=1, numeric_only=True) > 0]
-#
-#     def get_transfer_slices(selected_transfer_frame):
-#         transfer_slices = []
-#         record_it = selected_transfer_frame.iterrows()
-#         record = next(record_it, None)
-#         last_index = None
-#         start_index = None
-#         while record:
-#             current_index, row = record
-#             if start_index:
-#                 if current_index - last_index > 1:
-#                     transfer_slices.append((start_index, last_index))
-#                     start_index = last_index = current_index
-#                 else:
-#                     last_index = current_index
-#             else:
-#                 start_index = last_index = current_index
-#             record = next(record_it, None)
-#         if start_index:
-#             transfer_slices.append((start_index, last_index))
-#         return transfer_slices
-#
-#     transfer_slices = get_transfer_slices(selected_transfer_frame)
-#
-#     def get_transfer_slice(date_time):
-#         for current_slice in transfer_slices:
-#             if transfer_frame.loc[current_slice[0]]['Time'] \
-#                     <= date_time <= transfer_frame.loc[current_slice[1]]['Time']:
-#                 return current_slice
-#
-#     for solution_slice in solution_slices:
-#         slice_solution_frame = solution_data_frame.loc[solution_slice[0]:solution_slice[1]]
-#         first_start_slot = get_transfer_slice(solution_data_frame.loc[solution_slice[0]]['StartTime'])
-#         last_start_slot = get_transfer_slice(solution_data_frame.loc[solution_slice[1]]['StartTime'])
-#         slice_transfer_frame = transfer_frame.loc[first_start_slot[0]:last_start_slot[1]]
-#
-#         plot_frame(slice_transfer_frame, 'Key Rate', slice_solution_frame)
-#         save_figure('stage_{0}_{1}'.format(slice_transfer_frame['Time'].min().date(),
-#                                            slice_transfer_frame['Time'].max().date()))
-#
-#     # plot_frame(transfer_frame, 'Key Rate', solution_data_frame, solution, solution_bundle,
-#     #            output_file + '_key_rate')
-#     # save_figure(output_file + '_key_rate')
-#     #
-#     # plot_frame(elevation_frame, 'Elevation Angle', solution_data_frame, solution, solution_bundle,
-#     #            output_file + '_elevation_plot')
-#     # save_figure(output_file + '_elevation_plot')
-#     #
-#     # plot_frame(model_frame, 'Key Rate', solution_data_frame, solution, solution_bundle,
-#     #            output_file + '_model_rate')
-#     # save_figure(output_file + '_model_rate')
-
-
 def get_cities(names):
     cities = [quake.city.City.from_name(name) for name in names]
     cities.sort(key=operator.attrgetter('latitude'), reverse=True)
@@ -618,6 +460,12 @@ def plot_long_term_performance(args):
     axis.set_ylabel('Traffic Index')
     fig.tight_layout()
     save_figure('long_term_lambda_' + os.path.basename(solution_dir))
+
+
+def load_transfer_index():
+    transfer_index = quake.transfer_rate.TransferRateIndex \
+        .from_odf('/home/pmateusz/dev/quake/network_share/key_rate/data_24_05eff.ods')
+    return transfer_index
 
 
 def plot_aggregate(args):
@@ -716,8 +564,7 @@ def plot_aggregate(args):
         cloud_cover_data_frame = pandas.read_hdf(cloud_cover_data_frame_path)
 
     if not os.path.isfile(transfer_frame_path):
-        transfer_index = quake.transfer_rate.TransferRateIndex \
-            .from_odf('/home/pmateusz/dev/quake/data/key_rate/data_025eff.ods')
+        transfer_index = load_transfer_index()
 
         transfer_rows = []
         for timestamp in tqdm.tqdm(elevation_data_frame.index.tolist(), desc='Building transfer data frame'):
@@ -1102,26 +949,26 @@ def plot_service_level(args):
 def plot_all_service_levels(args):
     config_static = [('/home/pmateusz/dev/quake/data/simulation_upgrade',
                       '/home/pmateusz/dev/quake/data/simulation_upgrade/run_1')]
-    config_perturbed = [('/home/pmateusz/dev/quake/data/simulation_upgrade_disturbed_1',
-                         '/home/pmateusz/dev/quake/data/simulation_upgrade/run_1_disturbed10'),
-                        ('/home/pmateusz/dev/quake/data/simulation_upgrade_disturbed_2',
-                         '/home/pmateusz/dev/quake/data/simulation_upgrade/run_2_disturbed10'),
-                        ('/home/pmateusz/dev/quake/data/simulation_upgrade_disturbed_3',
-                         '/home/pmateusz/dev/quake/data/simulation_upgrade/run_3_disturbed10'),
-                        ('/home/pmateusz/dev/quake/data/simulation_upgrade_disturbed_4',
-                         '/home/pmateusz/dev/quake/data/simulation_upgrade/run_4_disturbed10'),
-                        ('/home/pmateusz/dev/quake/data/simulation_upgrade_disturbed_5',
-                         '/home/pmateusz/dev/quake/data/simulation_upgrade/run_5_disturbed10'),
-                        ('/home/pmateusz/dev/quake/data/simulation_upgrade_disturbed_6',
-                         '/home/pmateusz/dev/quake/data/simulation_upgrade/run_6_disturbed10'),
-                        ('/home/pmateusz/dev/quake/data/simulation_upgrade_disturbed_7',
-                         '/home/pmateusz/dev/quake/data/simulation_upgrade/run_7_disturbed10'),
-                        ('/home/pmateusz/dev/quake/data/simulation_upgrade_disturbed_8',
-                         '/home/pmateusz/dev/quake/data/simulation_upgrade/run_8_disturbed10'),
-                        ('/home/pmateusz/dev/quake/data/simulation_upgrade_disturbed_9',
-                         '/home/pmateusz/dev/quake/data/simulation_upgrade/run_9_disturbed10'),
-                        ('/home/pmateusz/dev/quake/data/simulation_upgrade_disturbed_10',
-                         '/home/pmateusz/dev/quake/data/simulation_upgrade/run_10_disturbed10')]
+    config_perturbed = [('/home/pmateusz/dev/quake/network_share/simulation_upgrade_disturbed_1',
+                         '/home/pmateusz/dev/quake/network_share/simulation_upgrade/run_1_disturbed10'),
+                        ('/home/pmateusz/dev/quake/network_share/simulation_upgrade_disturbed_2',
+                         '/home/pmateusz/dev/quake/network_share/simulation_upgrade/run_2_disturbed10'),
+                        ('/home/pmateusz/dev/quake/network_share/simulation_upgrade_disturbed_3',
+                         '/home/pmateusz/dev/quake/network_share/simulation_upgrade/run_3_disturbed10'),
+                        ('/home/pmateusz/dev/quake/network_share/simulation_upgrade_disturbed_4',
+                         '/home/pmateusz/dev/quake/network_share/simulation_upgrade/run_4_disturbed10'),
+                        ('/home/pmateusz/dev/quake/network_share/simulation_upgrade_disturbed_5',
+                         '/home/pmateusz/dev/quake/network_share/simulation_upgrade/run_5_disturbed10'),
+                        ('/home/pmateusz/dev/quake/network_share/simulation_upgrade_disturbed_6',
+                         '/home/pmateusz/dev/quake/network_share/simulation_upgrade/run_6_disturbed10'),
+                        ('/home/pmateusz/dev/quake/network_share/simulation_upgrade_disturbed_7',
+                         '/home/pmateusz/dev/quake/network_share/simulation_upgrade/run_7_disturbed10'),
+                        ('/home/pmateusz/dev/quake/network_share/simulation_upgrade_disturbed_8',
+                         '/home/pmateusz/dev/quake/network_share/simulation_upgrade/run_8_disturbed10'),
+                        ('/home/pmateusz/dev/quake/network_share/simulation_upgrade_disturbed_9',
+                         '/home/pmateusz/dev/quake/network_share/simulation_upgrade/run_9_disturbed10'),
+                        ('/home/pmateusz/dev/quake/network_share/simulation_upgrade_disturbed_10',
+                         '/home/pmateusz/dev/quake/network_share/simulation_upgrade/run_10_disturbed10')]
 
     # config_static = [('/home/pmateusz/dev/quake/data/simulation', '/home/pmateusz/dev/quake/data/simulation/run_11'),
     #                  ('/home/pmateusz/dev/quake/data/simulation', '/home/pmateusz/dev/quake/data/simulation/run_12'),
@@ -1950,6 +1797,23 @@ def plot_compare(args):
     print(tabulate.tabulate(frame, headers='keys', tablefmt='psql'))
 
 
+def plot_key_rate(args):
+    transfer_index = load_transfer_index()
+    data_frame = transfer_index.data_frame
+
+    bit_rate_frame = data_frame[data_frame['Config'] == '633'].copy()
+
+    fig, ax = matplotlib.pyplot.subplots(1, 1)
+    ax.plot(bit_rate_frame['Elevation'].values, bit_rate_frame['BitRate'].values)
+    ax.set_ylim(bottom=0)
+    ax.set_ylabel('Bitrate [kbit/s]')
+    ax.set_xlabel('Elevation [°]')
+    ax.set_xticks([0, 15, 30, 45, 60, 75, 90])
+    fig.tight_layout()
+
+    save_figure('key_rate')
+
+
 def parse_args():
     parser = argparse.ArgumentParser(prog='quake-plot')
     subparsers = parser.add_subparsers(title='commands', dest='command')
@@ -2024,6 +1888,8 @@ def parse_args():
     compare_parser.add_argument('--baseline-solution')
     compare_parser.add_argument('--other-solution')
 
+    key_rate_parser = subparsers.add_parser('key-rate')
+
     return parser.parse_args()
 
 
@@ -2066,3 +1932,5 @@ if __name__ == '__main__':
         plot_all_service_levels(args_)
     elif command == 'compare':
         plot_compare(args_)
+    elif command == 'key-rate':
+        plot_key_rate(args_)

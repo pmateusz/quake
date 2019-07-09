@@ -22,6 +22,7 @@
 
 import bisect
 import copy
+import logging
 
 import odf.opendocument
 import odf.table
@@ -42,7 +43,8 @@ MIN_ANGLE = 10.0
 def adjust_128_to_256(value):
     def __adjust_bundle_in_place(bundle):
         if bundle.metadata.total_keys_transferred.upper_bound:
-            bundle.metadata.total_keys_transferred.upper_bound = adjust_128_to_256(bundle.metadata.total_keys_transferred.upper_bound)
+            bundle.metadata.total_keys_transferred.upper_bound = adjust_128_to_256(
+                bundle.metadata.total_keys_transferred.upper_bound)
         if bundle.metadata.station_key_rate.upper_bound:
             bundle.metadata.station_key_rate.upper_bound \
                 = adjust_128_to_256(bundle.metadata.station_key_rate.upper_bound)
@@ -65,9 +67,10 @@ def adjust_128_to_256(value):
 
 class TransferRateIndex:
 
-    def __init__(self, angles, transfers):
+    def __init__(self, angles, transfers, data_frame):
         self.__angles = angles
         self.__transfers = transfers
+        self.__data_frame = data_frame
 
     def __call__(self, elevation):
         if elevation < MIN_ANGLE:
@@ -92,6 +95,10 @@ class TransferRateIndex:
         assert position == 0
         return adjust_128_to_256(self.__transfers[0])
 
+    @property
+    def data_frame(self):
+        return self.__data_frame
+
     @staticmethod
     def from_odf(file_path):
         spreadsheet = odf.opendocument.load(file_path)
@@ -104,12 +111,14 @@ class TransferRateIndex:
             header_row = next(table_row_it, None)
 
             header_cells = [str(cell) for cell in header_row.getElementsByType(odf.table.TableCell)]
-            if header_cells != ['Elevation', 'Rate of Secrete Keys', 'Rate of Secrete bits']:
+            if len(header_cells) < 3 \
+                    or header_cells[0:3] != ['Elevation', 'Rate of Secrete Keys', 'Rate of Secrete bits']:
                 raise RuntimeError('Unexpected header names')
 
             for row in table_row_it:
                 row_cells = row.getElementsByType(odf.table.TableCell)
-                if len(row_cells) != 3:
+                if len(row_cells) < 3:
+                    logging.warning('Some cells of the spreadsheet are ignored due to unsupported format')
                     continue
                 data.append({
                     CONFIG_KEY: config,
@@ -122,4 +131,4 @@ class TransferRateIndex:
         filtered_frame = frame[frame[CONFIG_KEY] == KEY_RATE_CONFIG].copy()
         angles = list(filtered_frame[ELEVATION_KEY].values)
         transfers = list(filtered_frame[KEY_RATE_KEY].values)
-        return TransferRateIndex(angles, transfers)
+        return TransferRateIndex(angles, transfers, frame)

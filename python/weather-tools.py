@@ -28,10 +28,13 @@ import logging
 import warnings
 import argparse
 
+import numpy
 import pandas
+import tabulate
 import tqdm
 import matplotlib.pyplot
 import matplotlib.dates
+import matplotlib.ticker
 
 import quake.city
 
@@ -39,8 +42,11 @@ import quake.city
 
 BUILD_CACHE_COMMAND = 'build-cache'
 PLOT_COMMAND = 'plot-cloud-cover'
-CACHE_FILE = 'forecast.hdf'
-CACHE_FILE_TABLE = 'a'
+COVARIANCE_COMMAND = 'compute-covariance'
+FORECAST_CACHE_FILE = 'forecast.hdf'
+OBSERVATION_CACHE_FILE = 'observation.hdf'
+FILE_TABLE = 'a'
+FILE_MODE = 'w'
 
 
 def parse_args():
@@ -50,6 +56,7 @@ def parse_args():
     build_cache_parser = sub_parsers.add_parser(BUILD_CACHE_COMMAND)
     plot_parser = sub_parsers.add_parser(PLOT_COMMAND)
     plot_parser.add_argument('--from')
+    covariance_parser = sub_parsers.add_parser(COVARIANCE_COMMAND)
 
     return parser.parse_args()
 
@@ -97,7 +104,19 @@ def build_cache_command(args):
                     logging.exception('%s generated error %s', file_path, ex)
     master_data_frame = pandas.concat(data_frames)
     master_data_frame.drop_duplicates(inplace=True)
-    master_data_frame.to_hdf(CACHE_FILE, CACHE_FILE_TABLE)
+    master_data_frame.to_hdf(FORECAST_CACHE_FILE, FILE_TABLE, mode=FILE_MODE)
+
+    observation_frame = pandas.read_csv('/home/pmateusz/dev/quake/data/weather/ground_station_data_set_filled.csv')
+    observation_frame['date_time'] = observation_frame['dt_iso'].apply(
+        lambda date_string: datetime.datetime.strptime(date_string, '%Y-%m-%d %H:%M:%S %z %Z'))
+    observation_frame.drop(columns=['weather_id', 'weather_icon', 'dt', 'dt_iso',
+                                    'lat', 'lon',
+                                    'rain_today', 'snow_today',
+                                    'rain_1h', 'snow_1h',
+                                    'rain_3h', 'snow_3h',
+                                    'rain_24h', 'snow_24h'], inplace=True)
+    observation_frame['city_name'] = observation_frame['city_id'].apply(quake.city.from_key)
+    observation_frame.to_hdf(OBSERVATION_CACHE_FILE, FILE_TABLE, mode=FILE_MODE)
 
 
 def plot_command(args):
@@ -107,7 +126,7 @@ def plot_command(args):
     else:
         left_time_limit = None
 
-    master_data_frame = pandas.read_hdf(CACHE_FILE, CACHE_FILE_TABLE)
+    master_data_frame = load_forecast_cache()
     if left_time_limit:
         master_data_frame = master_data_frame[master_data_frame['DateTime'] > left_time_limit].copy()
 
@@ -139,6 +158,61 @@ def plot_command(args):
             matplotlib.pyplot.close(figure)
 
 
+def covariance_command(args):
+    def save_matrix(matrix, file_name):
+        csv_file = file_name + '.csv'
+        with open(csv_file, 'w') as output_stream:
+            matrix.to_csv(output_stream)
+        txt_file = file_name + '.txt'
+        with open(txt_file, 'w') as output_stream:
+            print(tabulate.tabulate(matrix), file=output_stream)
+
+    observation_frame = load_observation_cache()
+
+    # compute spatial covariance
+    pivot_frame = observation_frame.pivot_table(columns=['city_name'], values=['clouds_all'], index=['date_time'])
+    pivot_frame.columns = pivot_frame.columns.droplevel(0)
+    spatial_covariance_frame = pivot_frame.cov()
+    save_matrix(spatial_covariance_frame, 'spatial_covariance')
+
+    # compute temporal covariance
+    time_deltas = []
+    delta = datetime.timedelta()
+    while delta <= datetime.timedelta(hours=5 * 24):
+        time_deltas.append(delta)
+        delta += datetime.timedelta(hours=3)
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore', '', tqdm.TqdmSynchronisationWarning)
+        for city in observation_frame['city_name'].unique():
+            city_frame = observation_frame[observation_frame['city_name'] == city].copy()
+
+            reference_dict = dict()
+            for row in city_frame.itertuples():
+                reference_dict[row.date_time] = row.clouds_all
+
+            data = []
+            for date_time in tqdm.tqdm(city_frame.date_time, desc=city.name):
+                row = [date_time]
+                for time_delta in time_deltas:
+                    reference_time = date_time + time_delta
+                    cloud_cover = reference_dict[reference_time] if reference_time in reference_dict else numpy.nan
+                    row.append(cloud_cover)
+                data.append(row)
+            cloud_cover_frame = pandas.DataFrame(data=data,
+                                                 columns=['DateTime', *(str(delta) for delta in time_deltas)])
+            temporal_covariance = cloud_cover_frame.cov()
+            save_matrix(temporal_covariance, '{0}_temporal_covariance'.format(city.name))
+
+
+def load_forecast_cache():
+    return pandas.read_hdf(FORECAST_CACHE_FILE, FILE_TABLE)
+
+
+def load_observation_cache():
+    return pandas.read_hdf(OBSERVATION_CACHE_FILE, FILE_TABLE)
+
+
 if __name__ == '__main__':
     args = parse_args()
     command = getattr(args, 'command')
@@ -147,3 +221,5 @@ if __name__ == '__main__':
         build_cache_command(args)
     elif command == PLOT_COMMAND:
         plot_command(args)
+    elif command == COVARIANCE_COMMAND:
+        covariance_command(args)

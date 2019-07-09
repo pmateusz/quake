@@ -67,6 +67,11 @@ class City:
     def __str__(self):
         return self.name
 
+    def __lt__(self, other):
+        assert isinstance(other, City)
+
+        return self.name < other.name
+
 
 NONE = City(0, "None", "", 0, 0)
 BIRMINGHAM = City(2655603, "Birmingham", "GB", -1.89983, 52.481419)
