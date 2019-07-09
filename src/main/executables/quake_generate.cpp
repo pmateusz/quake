@@ -110,7 +110,9 @@ int main(int argc, char *argv[]) {
     const auto arguments = SetupLogsAndParseArgs(argc, argv);
 
     quake::ProblemGenerator generator;
-    const auto problem = generator.Create(quake::GroundStation::All, arguments.InitialEpoch, arguments.ObservationTime);
-    Save(arguments, problem.Round(2));
+    const auto problem = generator.CreateExtendedProblem(quake::GroundStation::All,
+                                                         arguments.InitialEpoch,
+                                                         arguments.ObservationTime);
+//    Save(arguments, problem.Round(2));
     return EXIT_SUCCESS;
 }

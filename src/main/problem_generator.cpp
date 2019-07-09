@@ -29,13 +29,18 @@
 
 #include "util/resources.h"
 #include "util/hash.h"
+#include "util/constants.h"
 
 #include "transfer_rate_reader.h"
 #include "kepler_elements.h"
 #include "elevation.h"
 #include "sunset_sunrise_reader.h"
 #include "problem.h"
+#include "problem.h"
 #include "key_consumption_engine.h"
+
+// TODO: avoid copy paste programming
+// TODO: test extended problem and problem are equivalent
 
 static bool inline can_transfer(double elevation_angle) {
     return elevation_angle >= quake::util::MIN_ELEVATION;
@@ -376,4 +381,245 @@ quake::Problem quake::ProblemGenerator::Create(std::vector<quake::GroundStation>
             std::move(key_consumption),
             std::move(transfer_rate_data),
             DEFAULT_SWITCH_DURATION};
+}
+
+
+struct ElevationToTransferIndex {
+public:
+    static const auto ANGLE_REF = 0;
+    static const auto KEY_RATE_REF = 1;
+    static const auto BIT_RATE_REF = 2;
+
+    ElevationToTransferIndex(std::vector<std::tuple<double, double, double> > elevation_to_transfer_index)
+            : elevation_to_transfer_index_{std::move(elevation_to_transfer_index)} {}
+
+    double KeyRate(double elevation) const { return Extract<KEY_RATE_REF>(elevation); }
+
+    double BitRate(double elevation) const { return Extract<BIT_RATE_REF>(elevation); }
+
+private:
+    inline static bool ReferenceComparator(const std::tuple<double, double, double> &row, double angle) {
+        return std::get<ANGLE_REF>(row) < angle;
+    }
+
+    template<unsigned int field>
+    double Extract(double angle) const {
+        if (angle < quake::util::MIN_ELEVATION) {
+            return 0.0;
+        }
+
+        double transfer_rate = 0.0;
+        auto lower_bound_it = std::lower_bound(std::cbegin(elevation_to_transfer_index_),
+                                               std::cend(elevation_to_transfer_index_),
+                                               angle,
+                                               ReferenceComparator);
+        if (lower_bound_it == std::cend(elevation_to_transfer_index_)) {
+            // all elements are smaller than the reference
+            transfer_rate
+                    = std::get<field>(elevation_to_transfer_index_[elevation_to_transfer_index_.size() - 1]);
+        } else if (lower_bound_it == std::cbegin(elevation_to_transfer_index_)) {
+            // all elements are larger than the reference
+            transfer_rate = std::get<field>(*lower_bound_it);
+        } else {
+            auto right_it = lower_bound_it;
+            auto left_it = lower_bound_it - 1;
+            const auto lower_bound_angle = std::get<ANGLE_REF>(*left_it);
+            const auto upper_bound_angle = std::get<ANGLE_REF>(*right_it);
+            if (angle - lower_bound_angle > upper_bound_angle - angle) {
+                transfer_rate = std::get<field>(*right_it);
+            } else {
+                transfer_rate = std::get<field>(*left_it);
+            }
+        }
+        return transfer_rate;
+    }
+
+    std::vector<std::tuple<double, double, double> > elevation_to_transfer_index_;
+};
+
+quake::ExtendedProblem quake::ProblemGenerator::CreateExtendedProblem(std::vector<quake::GroundStation> ground_stations,
+                                                                      boost::posix_time::ptime initial_epoch,
+                                                                      boost::posix_time::time_period time_period) const {
+    static const auto TIME_STEP = boost::posix_time::seconds(1);
+
+    std::unordered_map<quake::GroundStation, std::vector<double>> elevation_angle_data;
+    for (const auto &ground_station : ground_stations) {
+        auto elevation = GetElevation(
+                ground_station,
+                KeplerElements::DEFAULT,
+                initial_epoch,
+                time_period,
+                TIME_STEP);
+        std::transform(std::begin(elevation), std::end(elevation), std::begin(elevation), Util::RadiansToDegrees);
+        elevation_angle_data.emplace(ground_station, std::move(elevation));
+    }
+
+    quake::util::Resources resources{"~/dev/quake/data"};
+    quake::SunsetSunriseReader sunset_sunrise_reader{quake::util::Resources::DEFAULT_LOCAL_TIME_ZONE};
+    std::unordered_map<quake::GroundStation,
+            std::unordered_map<boost::gregorian::date,
+                    std::pair<boost::posix_time::ptime, boost::posix_time::ptime> > > sunset_sunrise_data;
+
+    for (const auto &ground_station : ground_stations) {
+        auto sunset_sunrise_pairs = sunset_sunrise_reader.Read(resources.SunsetSunriseData(ground_station));
+        DCHECK_EQ(ground_station, sunset_sunrise_pairs.first);
+
+        std::unordered_map<boost::gregorian::date,
+                std::pair<boost::posix_time::ptime, boost::posix_time::ptime>> sunset_sunrise_row{};
+        for (const auto &sunset_sunrise_pair : sunset_sunrise_pairs.second) {
+            DCHECK_EQ(sunset_sunrise_pair.first.date(), sunset_sunrise_pair.second.date());
+
+            sunset_sunrise_row.emplace(sunset_sunrise_pair.first.date(), sunset_sunrise_pair);
+        }
+        sunset_sunrise_data.emplace(ground_station, sunset_sunrise_row);
+    }
+
+    const auto start_time = time_period.begin();
+    std::unordered_map<quake::GroundStation, std::vector<boost::posix_time::time_period>> transfer_window_data;
+    for (const auto &ground_station : ground_stations) {
+        const auto &ground_station_elevation = elevation_angle_data[ground_station];
+
+        std::vector<boost::posix_time::time_period> elevation_windows;
+        const auto elevation_size = ground_station_elevation.size();
+        for (auto begin_transfer_delta = 0; begin_transfer_delta < elevation_size; ++begin_transfer_delta) {
+            if (can_transfer(ground_station_elevation[begin_transfer_delta])) {
+                auto end_transfer_delta = begin_transfer_delta + 1;
+                for (; end_transfer_delta < elevation_size
+                       && can_transfer(ground_station_elevation[end_transfer_delta]);
+                       ++end_transfer_delta);
+
+                elevation_windows.emplace_back(boost::posix_time::time_period(
+                        start_time + boost::posix_time::seconds(begin_transfer_delta),
+                        boost::posix_time::seconds(end_transfer_delta - begin_transfer_delta)));
+                begin_transfer_delta = end_transfer_delta;
+            }
+        }
+
+        std::vector<boost::posix_time::time_period> night_windows;
+        for (auto current_day = start_time.date(); current_day < time_period.end().date();) {
+            const auto next_day = current_day + boost::gregorian::days(1);
+            const auto sunset_it = sunset_sunrise_data[ground_station].find(current_day);
+            if (sunset_it == std::end(sunset_sunrise_data[ground_station])) {
+                std::stringstream msg;
+                msg << "Sunset not known for " << ground_station << " for day " << start_time.date();
+                throw std::runtime_error(msg.str());
+            }
+
+            const auto sunrise_it = sunset_sunrise_data[ground_station].find(next_day);
+            if (sunset_it == std::end(sunset_sunrise_data[ground_station])) {
+                std::stringstream msg;
+                msg << "Sunset not known for " << ground_station << " for day " << start_time.date();
+                throw std::runtime_error(msg.str());
+            }
+
+            const auto sunset = sunset_it->second.second;
+            const auto sunrise = sunrise_it->second.first;
+            night_windows.emplace_back(sunset, sunrise);
+
+            current_day = next_day;
+        }
+
+        std::vector<boost::posix_time::time_period> transfer_windows;
+        auto elevation_window_it = std::cbegin(elevation_windows);
+        auto night_window_it = std::cbegin(night_windows);
+        const auto elevation_window_end_it = std::cend(elevation_windows);
+        const auto night_window_end_it = std::cend(night_windows);
+        for (; elevation_window_it != elevation_window_end_it && night_window_it != night_window_end_it;) {
+            const auto elevation_window = *elevation_window_it;
+            const auto night_window = *night_window_it;
+
+            if (elevation_window.is_after(night_window.end())) {
+                ++night_window_it;
+                continue;
+            } else if (elevation_window.is_before(night_window.begin())) {
+                ++elevation_window_it;
+                continue;
+            } else {
+                DCHECK(elevation_window.intersects(night_window) || night_window.contains(elevation_window));
+
+                if (night_window.contains(elevation_window)) {
+                    transfer_windows.push_back(elevation_window);
+                } else {
+                    auto intersection_window = elevation_window.intersection(night_window);
+                    if (intersection_window.length() > boost::posix_time::seconds(0)) {
+                        transfer_windows.emplace_back(intersection_window);
+                    }
+                }
+
+                ++elevation_window_it;
+            }
+        }
+
+        transfer_window_data.emplace(ground_station, std::move(transfer_windows));
+    }
+
+    quake::TransferRateReader transfer_rate_reader;
+    auto transfer_rate_data = transfer_rate_reader.Read(resources.TransferRate(DEFAULT_TRANSFER_RATE));
+    ElevationToTransferIndex elevation_transfer_index(std::move(transfer_rate_data));
+
+    std::unordered_map<quake::GroundStation,
+            std::vector<ExtendedProblem::CommunicationWindowData> > transfer_window_records;
+    for (const auto &ground_station : ground_stations) {
+        std::vector<ExtendedProblem::CommunicationWindowData> local_window_records;
+
+        const auto &station_elevation_data = elevation_angle_data.at(ground_station);
+        for (const auto &transfer_window : transfer_window_data.at(ground_station)) {
+            const auto begin_elevation_index = (transfer_window.begin() - start_time).total_seconds();
+            const auto end_elevation_index = (transfer_window.end() - start_time).total_seconds();
+
+            const auto window_duration = transfer_window.length().total_seconds();
+            std::vector<double> elevation_angles;
+            elevation_angles.reserve(window_duration);
+
+            std::vector<double> transfer_rates;
+            transfer_rates.reserve(window_duration);
+
+            std::copy(std::cbegin(station_elevation_data) + begin_elevation_index,
+                      std::cbegin(station_elevation_data) + end_elevation_index,
+                      std::back_inserter(elevation_angles));
+            for (const auto angle : elevation_angles) {
+                CHECK_GE(angle, util::MIN_ELEVATION);
+                transfer_rates.emplace_back(elevation_transfer_index.KeyRate(angle));
+            }
+
+            local_window_records.emplace_back(transfer_window, std::move(elevation_angles), std::move(transfer_rates));
+        }
+        transfer_window_records.emplace(ground_station, std::move(local_window_records));
+    }
+
+    const auto length_days = time_period.length().hours() / 24;
+    const auto distribution_coefficients = GetLinearDistributionCoefficients(ground_stations);
+    const auto initial_buffers = GetInitialBuffers(distribution_coefficients, length_days);
+    const auto key_consumption = GetDailyKeyConsumption(initial_buffers, length_days);
+
+    // TODO: build station data
+
+    if (VLOG_IS_ON(1)) {
+        std::ostringstream output;
+
+        output << "Generated problem: " << std::endl;
+        for (const auto &station_data : transfer_window_data) {
+            output << "Station: " << station_data.first << std::endl;
+            output << " - Transfer windows: ";
+
+            auto window_it = std::cbegin(station_data.second);
+            const auto window_end_it = std::cend(station_data.second);
+            if (window_it != window_end_it) {
+                output << *window_it;
+                ++window_it;
+            }
+
+            for (; window_it != window_end_it; ++window_it) {
+                output << " ";
+                output << *window_it;
+            }
+            output << std::endl;
+            output << " - Distribution coefficient: " << distribution_coefficients.at(station_data.first) << std::endl;
+        }
+
+        VLOG(1) << output.str();
+    }
+
+    return {ExtendedProblem::MetaData(time_period, DEFAULT_SWITCH_DURATION),
+            std::vector<ExtendedProblem::StationData>()};
 }

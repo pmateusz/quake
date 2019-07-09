@@ -5,3 +5,4 @@ odfpy
 pytz
 requests
 tabulate
+statsmodels

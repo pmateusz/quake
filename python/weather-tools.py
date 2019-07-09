@@ -43,6 +43,7 @@ import quake.city
 BUILD_CACHE_COMMAND = 'build-cache'
 PLOT_COMMAND = 'plot-cloud-cover'
 COVARIANCE_COMMAND = 'compute-covariance'
+VAR_COMMAND = 'compute-var'
 FORECAST_CACHE_FILE = 'forecast.hdf'
 OBSERVATION_CACHE_FILE = 'observation.hdf'
 FILE_TABLE = 'a'
@@ -205,6 +206,10 @@ def covariance_command(args):
             save_matrix(temporal_covariance, '{0}_temporal_covariance'.format(city.name))
 
 
+def compute_vector_auto_regression(args):
+    pass
+
+
 def load_forecast_cache():
     return pandas.read_hdf(FORECAST_CACHE_FILE, FILE_TABLE)
 
@@ -223,3 +228,5 @@ if __name__ == '__main__':
         plot_command(args)
     elif command == COVARIANCE_COMMAND:
         covariance_command(args)
+    elif command == VAR_COMMAND:
+        compute_vector_auto_regression(args)

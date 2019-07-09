@@ -19,40 +19,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#ifndef QUAKE_PROBLEM_GENERATOR_H
-#define QUAKE_PROBLEM_GENERATOR_H
-
-#include <vector>
-#include <unordered_map>
-
-#include <boost/config.hpp>
-#include <boost/date_time.hpp>
-
-#include "ground_station.h"
 #include "extended_problem.h"
 
-namespace quake {
+quake::ExtendedProblem::ExtendedProblem(quake::ExtendedProblem::MetaData metadata,
+                                        std::vector<quake::ExtendedProblem::StationData> station_data) {
 
-    class GroundStation;
-
-    class Problem;
-
-    class ExtendedProblem;
-
-    class ProblemGenerator {
-    public:
-        static std::unordered_map<GroundStation, double>
-        GetLinearDistributionCoefficients(const std::vector<GroundStation> &ground_stations);
-
-        Problem Create(std::vector<GroundStation> ground_stations,
-                       boost::posix_time::ptime initial_epoch,
-                       boost::posix_time::time_period time_period) const;
-
-        ExtendedProblem CreateExtendedProblem(std::vector<GroundStation> ground_stations,
-                                              boost::posix_time::ptime initial_epoch,
-                                              boost::posix_time::time_period time_period) const;
-    };
 }
-
-
-#endif //QUAKE_PROBLEM_GENERATOR_H
