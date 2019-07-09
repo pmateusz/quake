@@ -48,6 +48,7 @@
 #include <boost/date_time/gregorian_calendar.hpp>
 #include <boost/graph/push_relabel_max_flow.hpp>
 #include <boost/graph/adjacency_list.hpp>
+#include <boost/date_time.hpp>
 
 #include "util/resources.h"
 #include "util/hash.h"
@@ -66,6 +67,48 @@
 #include "sunset_sunrise_database.h"
 #include "inferred_model.h"
 #include "forecast.h"
+
+TEST(ProblemGeneratorTest, CanGenerateEquivalentProblems) {
+    // given
+    quake::ProblemGenerator generator;
+
+    const auto start_time = boost::posix_time::ptime(boost::gregorian::date(2019, 07, 10),
+                                                     boost::posix_time::time_duration());
+    const auto end_time = boost::posix_time::ptime(boost::gregorian::date(2019, 07, 12),
+                                                   boost::posix_time::time_duration());
+
+    const auto ground_stations = quake::GroundStation::All;
+    const boost::posix_time::time_period observation_period(start_time, end_time);
+
+    const auto problem = generator.Create(ground_stations,
+                                          start_time,
+                                          observation_period);
+
+    const auto extended_problem = generator.CreateExtendedProblem(ground_stations,
+                                                                  start_time,
+                                                                  observation_period);
+
+    // when
+    // then
+    EXPECT_EQ(problem.GroundStations(), extended_problem.GroundStations());
+    EXPECT_EQ(problem.StartTime(), extended_problem.StartTime());
+    EXPECT_EQ(problem.SwitchDuration(), extended_problem.SwitchDuration());
+    for (const auto &ground_station : ground_stations) {
+        EXPECT_EQ(problem.InitialBuffer(ground_station), extended_problem.InitialBuffer(ground_station));
+        EXPECT_EQ(problem.KeyConsumption(ground_station), extended_problem.KeyConsumption(ground_station));
+        EXPECT_EQ(problem.TransferWindows(ground_station), extended_problem.TransferWindows(ground_station));
+        for (const auto &transfer_window : problem.TransferWindows(ground_station)) {
+            for (auto time = transfer_window.begin();
+                 time < transfer_window.end(); time += boost::posix_time::seconds(1)) {
+                EXPECT_EQ(problem.ElevationAngle(ground_station, time),
+                          extended_problem.ElevationAngle(ground_station, time));
+
+                EXPECT_EQ(problem.KeyRate(ground_station, time),
+                          extended_problem.KeyRate(ground_station, time));
+            }
+        }
+    }
+}
 
 TEST(ResourcesTest, CanFindResourceFile) {
     // given

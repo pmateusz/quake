@@ -39,6 +39,11 @@ namespace quake {
 
         boost::numeric::ublas::matrix<double> covariance(const boost::numeric::ublas::matrix<double> &matrix);
 
+        inline double round(double value, unsigned int precision) {
+            static const auto factor = pow(10.0, precision);
+            return std::round(value * factor) / factor;
+        }
+
         inline double degrees(double radians) {
             return radians * boost::math::constants::radian<double>();
         }

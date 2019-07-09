@@ -95,7 +95,7 @@ Arguments SetupLogsAndParseArgs(int argc, char *argv[]) {
     return args;
 }
 
-void Save(const Arguments &arguments, const quake::Problem &problem) {
+void Save(const Arguments &arguments, const quake::ExtendedProblem &problem) {
     nlohmann::json body = problem;
 
     std::ofstream output_stream;
@@ -113,6 +113,6 @@ int main(int argc, char *argv[]) {
     const auto problem = generator.CreateExtendedProblem(quake::GroundStation::All,
                                                          arguments.InitialEpoch,
                                                          arguments.ObservationTime);
-//    Save(arguments, problem.Round(2));
+    Save(arguments, problem.Round(2));
     return EXIT_SUCCESS;
 }

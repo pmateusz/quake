@@ -83,13 +83,14 @@ namespace quake {
             return switch_duration_;
         }
 
-        double TransferKeyRate(const GroundStation &station, const boost::posix_time::ptime &datetime) const;
-
         double KeyRate(const GroundStation &station, const boost::posix_time::ptime &datetime) const;
+
 
         double ElevationAngle(const GroundStation &station, const boost::posix_time::ptime &datetime) const;
 
     private:
+        double UnsafeKeyRate(const GroundStation &station, const boost::posix_time::ptime &datetime) const;
+
         friend void to_json(nlohmann::json &json, const Problem &problem);
 
         boost::posix_time::time_period observation_period_;

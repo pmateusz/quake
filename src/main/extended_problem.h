@@ -30,6 +30,9 @@
 #include <boost/config.hpp>
 #include <boost/date_time.hpp>
 
+#include <nlohmann/json.hpp>
+
+#include "util/json.h"
 #include "ground_station.h"
 
 // TODO: serialize extended problem to json
@@ -55,16 +58,15 @@ namespace quake {
                                               std::vector<double>{}) {}
 
             CommunicationWindowData(boost::posix_time::time_period period,
-                                    std::vector<double> elevation_angles,
-                                    std::vector<double>
-                                    transfer_rates)
+                                    std::vector<double> elevation_angle,
+                                    std::vector<double> key_rate)
                     : Period{period},
-                      ElevationAngles{std::move(elevation_angles)},
-                      TransferRates{std::move(transfer_rates)} {}
+                      ElevationAngle{std::move(elevation_angle)},
+                      KeyRate{std::move(key_rate)} {}
 
             boost::posix_time::time_period Period;
-            std::vector<double> ElevationAngles;
-            std::vector<double> TransferRates;
+            std::vector<double> ElevationAngle;
+            std::vector<double> KeyRate;
         };
 
         struct StationData {
@@ -89,9 +91,45 @@ namespace quake {
             std::vector<CommunicationWindowData> CommunicationWindows;
         };
 
-
         ExtendedProblem(MetaData metadata, std::vector<StationData> station_data);
+
+        ExtendedProblem Round(unsigned int decimal_places) const;
+
+        inline const std::vector<GroundStation> &GroundStations() const { return ground_stations_; }
+
+        std::vector<boost::posix_time::time_period> TransferWindows(const GroundStation &ground_station) const;
+
+        inline double TransferShare(const GroundStation &ground_station) { return GetStationData(ground_station).TransferShare; }
+
+        inline int InitialBuffer(const GroundStation &ground_station) const { return GetStationData(ground_station).InitialBuffer; }
+
+        inline int KeyConsumption(const GroundStation &ground_station) const { return GetStationData(ground_station).KeyConsumption; }
+
+        inline boost::posix_time::ptime StartTime() const { return metadata_.Period.begin(); }
+
+        inline boost::posix_time::time_duration SwitchDuration() const { return metadata_.SwitchDuration; }
+
+        double KeyRate(const GroundStation &station, const boost::posix_time::ptime &datetime) const;
+
+        double ElevationAngle(const GroundStation &station, const boost::posix_time::ptime &datetime) const;
+
+    private:
+        const StationData &GetStationData(const quake::GroundStation &station) const;
+
+        friend void to_json(nlohmann::json &json, const ExtendedProblem &problem);
+
+        MetaData metadata_;
+        std::vector<StationData> station_data_;
+        std::vector<GroundStation> ground_stations_;
     };
+
+    void to_json(nlohmann::json &json, const ExtendedProblem &problem);
+
+    void to_json(nlohmann::json &json, const ExtendedProblem::MetaData &metadata);
+
+    void to_json(nlohmann::json &json, const ExtendedProblem::StationData &station_data);
+
+    void to_json(nlohmann::json &json, const ExtendedProblem::CommunicationWindowData &communication_window_data);
 }
 
 

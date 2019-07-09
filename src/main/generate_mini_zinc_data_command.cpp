@@ -143,9 +143,9 @@ void quake::GenerateMiniZincDataCommand::Run() {
             for (int current_time_delta = *time_it, slot_end = *time_it + time_step_seconds;
                  current_time_delta < slot_end;
                  ++current_time_delta) {
-                transfer_rate(problem.TransferKeyRate(ground_station,
-                                                      start_time +
-                                                      boost::posix_time::seconds(current_time_delta)));
+                transfer_rate(problem.KeyRate(ground_station,
+                                              start_time +
+                                              boost::posix_time::seconds(current_time_delta)));
             }
             local_key_rates[slot_index] = boost::accumulators::mean(transfer_rate) * time_step_seconds;
         }

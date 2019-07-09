@@ -25,6 +25,7 @@
 
 #include "util/constants.h"
 #include "util/json.h"
+#include "util/math.h"
 
 #include "problem.h"
 
@@ -55,6 +56,10 @@ quake::Problem::Problem(boost::posix_time::time_period observation_period,
           key_consumption_{std::move(key_consumption)},
           reference_transfer_rates_{std::move(reference_transfer_rates)},
           transfer_rates_{} {
+
+    std::sort(std::begin(ground_stations_), std::end(ground_stations_), [](const GroundStation &left, const GroundStation &right) -> bool {
+        return left.name() < right.name();
+    });
 
     for (const auto &ground_station : ground_stations_) {
         const auto &ground_station_elevation = elevation_angles_.at(ground_station);
@@ -98,8 +103,8 @@ quake::Problem::Problem(boost::posix_time::time_period observation_period,
     }
 }
 
-double quake::Problem::KeyRate(const quake::GroundStation &station,
-                               const boost::posix_time::ptime &datetime) const {
+double quake::Problem::UnsafeKeyRate(const quake::GroundStation &station,
+                                     const boost::posix_time::ptime &datetime) const {
     const auto offset = (datetime - this->observation_period_.begin()).total_seconds();
     return this->transfer_rates_.find(station)->second.at(offset);
 }
@@ -111,8 +116,8 @@ quake::Problem::ElevationAngle(const quake::GroundStation &station,
     return this->elevation_angles_.find(station)->second.at(offset);
 }
 
-double quake::Problem::TransferKeyRate(const quake::GroundStation &station,
-                                       const boost::posix_time::ptime &datetime) const {
+double quake::Problem::KeyRate(const quake::GroundStation &station,
+                               const boost::posix_time::ptime &datetime) const {
     const auto transfer_windows_it = transfer_windows_.find(station);
     if (transfer_windows_it == std::cend(transfer_windows_)) {
         return 0;
@@ -120,7 +125,7 @@ double quake::Problem::TransferKeyRate(const quake::GroundStation &station,
 
     for (const auto &transfer_window : transfer_windows_it->second) {
         if (transfer_window.contains(datetime) || transfer_window.end() == datetime) {
-            return KeyRate(station, datetime);
+            return UnsafeKeyRate(station, datetime);
         }
 
         if (datetime < transfer_window.begin()) {
@@ -150,17 +155,12 @@ void quake::to_json(nlohmann::json &json, const quake::Problem &problem) {
 
 
 quake::Problem quake::Problem::Round(std::size_t precision) const {
-    const auto &round_number = [&precision](double value) -> double {
-        static const auto factor = pow(10.0, precision);
-        return round(value * factor) / factor;
-    };
-
     std::unordered_map<quake::GroundStation, std::vector<double> > elevation_angles_rounded;
     for (const auto &station_angles : elevation_angles_) {
         std::vector<double> rounded_vector;
         rounded_vector.reserve(station_angles.second.size());
         for (const auto number : station_angles.second) {
-            rounded_vector.emplace_back(round_number(number));
+            rounded_vector.emplace_back(util::round(number, precision));
         }
 
         elevation_angles_rounded.emplace(station_angles.first, std::move(rounded_vector));
@@ -168,16 +168,16 @@ quake::Problem quake::Problem::Round(std::size_t precision) const {
 
     std::unordered_map<quake::GroundStation, double> transfer_share_rounded;
     for (const auto &station_transfer : this->transfer_share_) {
-        transfer_share_rounded.emplace(station_transfer.first, round_number(station_transfer.second));
+        transfer_share_rounded.emplace(station_transfer.first, util::round(station_transfer.second, precision));
     }
 
     std::vector<std::tuple<double, double, double> > reference_transfer_rates_rounded;
     reference_transfer_rates_rounded.reserve(this->reference_transfer_rates_.size());
     for (const auto &reference_transfer_rate : reference_transfer_rates_) {
         reference_transfer_rates_rounded.emplace_back(
-                round_number(std::get<0>(reference_transfer_rate)),
-                round_number(std::get<1>(reference_transfer_rate)),
-                round_number(std::get<2>(reference_transfer_rate)));
+                util::round(std::get<0>(reference_transfer_rate), precision),
+                util::round(std::get<1>(reference_transfer_rate), precision),
+                util::round(std::get<2>(reference_transfer_rate), precision));
     }
 
     return quake::Problem(observation_period_,
