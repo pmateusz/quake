@@ -107,7 +107,7 @@ namespace quake {
 
         std::vector<boost::posix_time::time_period> TransferWindows(const GroundStation &ground_station) const;
 
-        inline double TransferShare(const GroundStation &ground_station) { return GetStationData(ground_station).TransferShare; }
+        inline double TransferShare(const GroundStation &ground_station) const { return GetStationData(ground_station).TransferShare; }
 
         inline int InitialBuffer(const GroundStation &ground_station) const { return GetStationData(ground_station).InitialBuffer; }
 
@@ -118,6 +118,8 @@ namespace quake {
         inline boost::posix_time::time_duration SwitchDuration() const { return metadata_.SwitchDuration; }
 
         double KeyRate(const GroundStation &station, const boost::posix_time::ptime &datetime) const;
+
+        double KeyRate(const GroundStation &station, const boost::posix_time::time_period &period) const;
 
         double ElevationAngle(const GroundStation &station, const boost::posix_time::ptime &datetime) const;
 

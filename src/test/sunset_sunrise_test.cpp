@@ -91,7 +91,7 @@ TEST(ProblemGeneratorTest, CanGenerateEquivalentProblems) {
     // when
     // then
     EXPECT_EQ(problem.GroundStations(), extended_problem.GroundStations());
-    EXPECT_EQ(problem.StartTime(), extended_problem.StartTime());
+    EXPECT_EQ(problem.StartTime(), extended_problem.ObservationPeriod().begin());
     EXPECT_EQ(problem.SwitchDuration(), extended_problem.SwitchDuration());
     for (const auto &ground_station : ground_stations) {
         EXPECT_EQ(problem.InitialBuffer(ground_station), extended_problem.InitialBuffer(ground_station));

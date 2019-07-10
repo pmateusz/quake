@@ -112,6 +112,31 @@ double quake::ExtendedProblem::KeyRate(const quake::GroundStation &station, cons
     return 0;
 }
 
+double quake::ExtendedProblem::KeyRate(const quake::GroundStation &station, const boost::posix_time::time_period &period) const {
+    const auto &station_data = GetStationData(station);
+    double total_key_rate = 0;
+    for (const auto &window : station_data.CommunicationWindows) {
+        if (window.Period.is_after(period.end())) {
+            break;
+        }
+
+        if (window.Period.intersects(period)) {
+            const auto intersection = window.Period.intersection(period);
+            const auto begin_index = (intersection.begin() - window.Period.begin()).total_seconds();
+            const auto end_index = (intersection.end() - window.Period.begin()).total_seconds();
+
+            CHECK_LE(begin_index, window.KeyRate.size());
+            CHECK_LE(end_index, window.KeyRate.size());
+            CHECK_EQ(intersection.length().total_seconds(), end_index - begin_index);
+
+            for (auto index = begin_index; index < end_index; ++index) {
+                total_key_rate += window.KeyRate.at(index);
+            }
+        }
+    }
+    return total_key_rate;
+}
+
 double quake::ExtendedProblem::ElevationAngle(const quake::GroundStation &station, const boost::posix_time::ptime &datetime) const {
     const auto &station_data = GetStationData(station);
     for (const auto &window : station_data.CommunicationWindows) {

@@ -42,7 +42,11 @@ namespace quake {
 
             inline boost::posix_time::time_period &Period() { return period_; }
 
+            inline const boost::posix_time::time_period &Period() const { return period_; }
+
             inline GRBVar &Var() { return var_; }
+
+            inline const GRBVar &Var() const { return var_; }
 
         private:
             std::size_t station_index_;

@@ -44,6 +44,8 @@ namespace quake {
     private:
         inline std::size_t Index(const GroundStation &station) const { return station_indices_.at(station); }
 
+        inline GroundStation Station(std::size_t station_index) const { return stations_.at(station_index); }
+
         robust::IntervalVar CreateInterval(std::size_t station_index, boost::posix_time::time_period period);
 
         ExtendedProblem const *problem_;
