@@ -19,16 +19,21 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "forecast.h"
-
 #include <fstream>
 #include <iostream>
+#include <unordered_map>
 
 #include <boost/config.hpp>
 #include <boost/tokenizer.hpp>
 #include <boost/algorithm/string.hpp>
 
 #include <glog/logging.h>
+
+#include "forecast.h"
+#include "util/json.h"
+
+quake::Forecast::Forecast()
+        : Forecast(std::unordered_map<GroundStation, Series>{}) {}
 
 quake::Forecast::Forecast(std::unordered_map<GroundStation, Series> index)
         : index_{std::move(index)} {}
@@ -105,8 +110,8 @@ quake::Forecast quake::Forecast::load_csv(const boost::filesystem::path &input_f
 
         for (auto position = 1; position < time_difference.size(); ++position) {
             LOG_IF(WARNING, time_difference[position] != time_difference[position - 1])
-            << "Frequency of updates is not constant for station " << raw_entry.first
-            << ", example  " << time_difference[position - 1] << " vs " << time_difference[position];
+                            << "Frequency of updates is not constant for station " << raw_entry.first
+                            << ", example  " << time_difference[position - 1] << " vs " << time_difference[position];
         }
 
         CHECK(!time_difference.empty());
@@ -125,5 +130,63 @@ quake::Forecast quake::Forecast::load_csv(const boost::filesystem::path &input_f
         index.emplace(raw_entry.first, std::move(Series{update_frequency, series_period, values}));
     }
 
-    return Forecast{std::move(std::move(index))};
+    return Forecast{std::move(index)};
+}
+
+void quake::from_json(const nlohmann::json &json, Forecast &forecast) {
+    auto index = json.at("index").get<std::vector<boost::posix_time::ptime>>();
+
+    // check index is ascending with a constant step
+    CHECK(!index.empty());
+    boost::posix_time::time_period period{index.front(), index.back()};
+    boost::posix_time::time_duration step;
+    if (index.size() >= 2) {
+        auto prev_value = index.front();
+
+        step = index[1] - index[0];
+        for (auto index_pos = 1; index_pos < index.size(); ++index_pos) {
+            auto current_value = index[index_pos];
+            CHECK_LT(prev_value, current_value);
+
+            auto current_length = current_value - prev_value;
+            CHECK_EQ(current_length, step);
+            prev_value = current_value;
+        }
+    }
+
+    std::unordered_map<GroundStation, Forecast::Series> series;
+    for (const auto &json_element : json.at("stations")) {
+        auto station = json_element.at("station").get<GroundStation>();
+        auto cloud_cover = json_element.at("cloud_cover").get<std::vector<int64>>();
+
+        CHECK_EQ(index.size(), cloud_cover.size());
+        series.emplace(station, Forecast::Series(step, period, cloud_cover));
+    }
+
+    Forecast forecast_object{std::move(series)};
+    forecast = forecast_object;
+}
+
+void quake::to_json(nlohmann::json &json, const quake::Forecast &forecast) {
+    nlohmann::json json_object;
+    std::vector<boost::posix_time::ptime> index;
+    std::unordered_map<std::string, nlohmann::json> stations;
+
+    if (!forecast.index_.empty()) {
+        const auto &series = std::begin(forecast.index_)->second;
+        for (auto index_value = series.Period().begin(); index_value <= series.Period().end(); index_value += series.UpdateFrequency()) {
+            index.emplace_back(index_value);
+        }
+
+        for (const auto &element : forecast.index_) {
+            nlohmann::json element_object;
+            element_object["station"] = element.first;
+            element_object["cloud_cover"] = element.second.Values();
+            stations.emplace(element.first.name(), element_object);
+        }
+    }
+    
+    json_object["index"] = index;
+    json_object["stations"] = stations;
+    json = json_object;
 }

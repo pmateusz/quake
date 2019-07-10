@@ -47,3 +47,10 @@ void boost::posix_time::to_json(nlohmann::json &json, const boost::posix_time::t
 void boost::posix_time::from_json(const nlohmann::json &json, boost::posix_time::time_period &value) {
     value = {json.at("begin").get<boost::posix_time::ptime>(), json.at("end").get<boost::posix_time::ptime>()};
 }
+
+template<>
+boost::posix_time::time_period quake::util::from_json<boost::posix_time::time_period>(const nlohmann::json &json) {
+    auto time_period = util::DefaultPeriod();
+    boost::posix_time::from_json(json, time_period);
+    return time_period;
+}

@@ -34,6 +34,7 @@
 
 #include "util/json.h"
 #include "ground_station.h"
+#include "forecast.h"
 
 // TODO: serialize extended problem to json
 
@@ -42,6 +43,9 @@ namespace quake {
     class ExtendedProblem {
     public:
         struct MetaData {
+            MetaData()
+                    : MetaData({boost::posix_time::ptime(), boost::posix_time::seconds(0)}, boost::posix_time::time_duration()) {}
+
             MetaData(boost::posix_time::time_period period, boost::posix_time::time_duration switch_duration)
                     : Period(period),
                       SwitchDuration(std::move(switch_duration)) {}
@@ -91,7 +95,11 @@ namespace quake {
             std::vector<CommunicationWindowData> CommunicationWindows;
         };
 
+        ExtendedProblem();
+
         ExtendedProblem(MetaData metadata, std::vector<StationData> station_data);
+
+        ExtendedProblem(MetaData metadata, std::vector<StationData> station_data, std::unordered_map<std::string, Forecast> forecasts);
 
         ExtendedProblem Round(unsigned int decimal_places) const;
 
@@ -120,8 +128,19 @@ namespace quake {
 
         MetaData metadata_;
         std::vector<StationData> station_data_;
+        std::unordered_map<std::string, Forecast> forecasts_;
+
         std::vector<GroundStation> ground_stations_;
     };
+
+
+    void from_json(const nlohmann::json &json, ExtendedProblem &problem);
+
+    void from_json(const nlohmann::json &json, ExtendedProblem::MetaData &metadata);
+
+    void from_json(const nlohmann::json &json, ExtendedProblem::StationData &station_data);
+
+    void from_json(const nlohmann::json &json, ExtendedProblem::CommunicationWindowData &communication_window_data);
 
     void to_json(nlohmann::json &json, const ExtendedProblem &problem);
 

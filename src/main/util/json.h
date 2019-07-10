@@ -26,6 +26,8 @@
 
 #include <boost/date_time.hpp>
 
+#include "util/datetime.h"
+
 namespace boost {
 
     namespace posix_time {
@@ -42,6 +44,16 @@ namespace boost {
 
         void from_json(const nlohmann::json &json, time_period &value);
 
+    }
+}
+
+
+namespace quake {
+
+    namespace util {
+
+        template<typename ValueType>
+        ValueType from_json(const nlohmann::json &json);
     }
 }
 

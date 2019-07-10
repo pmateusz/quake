@@ -19,12 +19,19 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "ground_station.h"
-
-#include <boost/algorithm/string.hpp>
-
 #include <memory>
 #include <unordered_map>
+
+#include <boost/config.hpp>
+#include <boost/algorithm/string.hpp>
+
+#include "ground_station.h"
+
+quake::GroundStation::GroundStation()
+        : GroundStation(GroundStation::None) {}
+
+quake::GroundStation::GroundStation(const GroundStation &other)
+        : GroundStation(other.coordinates(), other.name()) {}
 
 quake::GroundStation::GroundStation(CoordGeodetic coordinates, std::string name)
         : coordinates_(coordinates),
@@ -93,4 +100,9 @@ std::ostream &operator<<(std::ostream &out, const quake::GroundStation &station)
 
 void quake::to_json(nlohmann::json &json, const quake::GroundStation &station) {
     json = station.name();
+}
+
+void quake::from_json(const nlohmann::json &json, quake::GroundStation &station) {
+    const auto station_name = json.get<std::string>();
+    station = quake::GroundStation::FromNameOrNone(station_name);
 }

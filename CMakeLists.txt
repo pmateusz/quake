@@ -104,7 +104,7 @@ file(GLOB SOURCES "${CMAKE_SOURCE_DIR}/src/main/*.cpp"
         "${CMAKE_SOURCE_DIR}/src/main/legacy/*.cpp"
         "${CMAKE_SOURCE_DIR}/src/main/util/*.cpp")
 
-add_library(quake STATIC ${SOURCES})
+add_library(quake STATIC ${SOURCES} src/main/util/datetime.h)
 target_include_directories(quake PUBLIC ${HEADERS} ${HEADER_DEP})
 add_executable(quake-cp ${CMAKE_SOURCE_DIR}/src/main/executables/quake_cp.cpp)
 add_executable(quake-saa ${CMAKE_SOURCE_DIR}/src/main/executables/quake_saa.cpp)
@@ -113,6 +113,7 @@ add_executable(quake-weights ${CMAKE_SOURCE_DIR}/src/main/executables/quake_edge
 add_executable(quake-cross-moment ${CMAKE_SOURCE_DIR}/src/main/executables/quake_cross_moment.cpp)
 add_executable(quake-cvar ${CMAKE_SOURCE_DIR}/src/main/executables/quake_cvar.cpp)
 add_executable(quake-generate ${CMAKE_SOURCE_DIR}/src/main/executables/quake_generate.cpp)
+add_executable(quake-robust ${CMAKE_SOURCE_DIR}/src/main/executables/quake_robust.cpp)
 target_link_libraries(quake-cp quake ${LIBRARY_DEP})
 target_link_libraries(quake-saa quake ${LIBRARY_DEP})
 target_link_libraries(quake-mip quake ${LIBRARY_DEP})
@@ -120,6 +121,7 @@ target_link_libraries(quake-weights quake ${LIBRARY_DEP})
 target_link_libraries(quake-cross-moment quake ${LIBRARY_DEP})
 target_link_libraries(quake-cvar quake ${LIBRARY_DEP})
 target_link_libraries(quake-generate quake ${LIBRARY_DEP})
+target_link_libraries(quake-robust quake ${LIBRARY_DEP})
 
 get_property(external_project_dependencies GLOBAL PROPERTY EXTERNAL_PROJECT_DEPENDENCIES)
 #separate_arguments(external_project_dependencies)

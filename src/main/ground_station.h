@@ -49,6 +49,10 @@ namespace quake {
 
         static const std::vector<GroundStation> All;
 
+        GroundStation();
+
+        GroundStation(const GroundStation &other);
+
         GroundStation(CoordGeodetic coordinates, std::string name);
 
         static const GroundStation &FromNameOrNone(const std::string &name);
@@ -88,6 +92,8 @@ namespace quake {
     };
 
     void to_json(nlohmann::json &json, const GroundStation &station);
+
+    void from_json(const nlohmann::json &json, GroundStation &station);
 }
 
 namespace std {

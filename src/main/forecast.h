@@ -30,9 +30,11 @@
 #include <boost/date_time.hpp>
 #include <boost/filesystem.hpp>
 
+#include <nlohmann/json.hpp>
+
 #include <ortools/base/basictypes.h>
 
-#include <ground_station.h>
+#include "ground_station.h"
 
 namespace quake {
 
@@ -99,6 +101,8 @@ namespace quake {
 
         static Forecast load_csv(const boost::filesystem::path &input_file);
 
+        Forecast();
+
         explicit Forecast(std::unordered_map<quake::GroundStation, Series> index);
 
         int GetCloudCover(const quake::GroundStation &station, const boost::posix_time::ptime &time) const;
@@ -106,9 +110,13 @@ namespace quake {
         inline const std::unordered_map<quake::GroundStation, Series> &Index() const { return index_; }
 
     private:
+        friend void to_json(nlohmann::json &json, const Forecast &forecast);
+
         std::unordered_map<quake::GroundStation, Series> index_;
     };
+
+    void from_json(const nlohmann::json &json, Forecast &forecast);
+
+    void to_json(nlohmann::json &json, const Forecast &forecast);
 }
-
-
 #endif //QUAKE_FORECAST_H

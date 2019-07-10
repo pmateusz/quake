@@ -39,9 +39,6 @@
 #include "problem.h"
 #include "key_consumption_engine.h"
 
-// TODO: avoid copy paste programming
-// TODO: test extended problem and problem are equivalent
-
 static bool inline can_transfer(double elevation_angle) {
     return elevation_angle >= quake::util::MIN_ELEVATION;
 }

@@ -26,11 +26,22 @@
 #include "extended_problem.h"
 
 #include "util/math.h"
+#include "util/json.h"
+#include "forecast.h"
 
-quake::ExtendedProblem::ExtendedProblem(quake::ExtendedProblem::MetaData metadata,
-                                        std::vector<quake::ExtendedProblem::StationData> station_data)
+quake::ExtendedProblem::ExtendedProblem()
+        : ExtendedProblem(MetaData{}, std::vector<StationData>{}) {}
+
+quake::ExtendedProblem::ExtendedProblem(ExtendedProblem::MetaData metadata,
+                                        std::vector<ExtendedProblem::StationData> station_data)
+        : ExtendedProblem(metadata, station_data, std::unordered_map<std::string, Forecast>{}) {}
+
+quake::ExtendedProblem::ExtendedProblem(ExtendedProblem::MetaData metadata,
+                                        std::vector<ExtendedProblem::StationData> station_data,
+                                        std::unordered_map<std::string, Forecast> forecasts)
         : metadata_{std::move(metadata)},
-          station_data_{std::move(station_data)} {
+          station_data_{std::move(station_data)},
+          forecasts_{std::move(forecasts)} {
 
     std::unordered_set<GroundStation> ground_stations;
     for (const auto &local_station_data : station_data_) {
@@ -132,6 +143,10 @@ void quake::to_json(nlohmann::json &json, const quake::ExtendedProblem &problem)
     object["metadata"] = problem.metadata_;
     object["stations"] = problem.station_data_;
 
+    if (!problem.forecasts_.empty()) {
+        object["forecasts"] = problem.forecasts_;
+    }
+
     json = object;
 }
 
@@ -165,3 +180,46 @@ void quake::to_json(nlohmann::json &json, const quake::ExtendedProblem::Communic
 
     json = object;
 }
+
+void quake::from_json(const nlohmann::json &json, ExtendedProblem::MetaData &metadata) {
+    const auto switch_duration = json.at("switch_duration").get<boost::posix_time::time_duration>();
+    const auto observation_period = util::from_json<boost::posix_time::time_period>(json.at("observation_period"));
+
+    ExtendedProblem::MetaData metadata_object{observation_period, switch_duration};
+    metadata = metadata_object;
+}
+
+void quake::from_json(const nlohmann::json &json, ExtendedProblem::StationData &station_data) {
+    const auto station = json.at("station").get<quake::GroundStation>();
+    const auto transfer_share = json.at("transfer_share").get<double>();
+    const auto initial_buffer = json.at("initial_buffer").get<int>();
+    const auto key_consumption = json.at("key_consumption").get<int>();
+    const auto communication_windows = json.at("communication_windows").get<std::vector<ExtendedProblem::CommunicationWindowData>>();
+
+    ExtendedProblem::StationData station_data_object{station, transfer_share, initial_buffer, key_consumption, communication_windows};
+    station_data = station_data_object;
+}
+
+void quake::from_json(const nlohmann::json &json, ExtendedProblem::CommunicationWindowData &communication_window_data) {
+    auto elevation = json.at("elevation").get<std::vector<double>>();
+    auto key_rate = json.at("key_rate").get<std::vector<double>>();
+    auto time_period = util::from_json<boost::posix_time::time_period>(json.at("period"));
+
+    ExtendedProblem::CommunicationWindowData communication_window_data_object{time_period, std::move(elevation), std::move(key_rate)};
+    communication_window_data = communication_window_data_object;
+}
+
+void quake::from_json(const nlohmann::json &json, quake::ExtendedProblem &problem) {
+    const auto metadata = json.at("metadata").get<ExtendedProblem::MetaData>();
+    const auto stations = json.at("stations").get<std::vector<ExtendedProblem::StationData>>();
+
+    std::unordered_map<std::string, Forecast> forecasts;
+    const auto find_it = json.find("forecasts");
+    if (find_it != std::end(json)) {
+        forecasts = find_it->get<std::unordered_map<std::string, Forecast>>();
+    }
+
+    ExtendedProblem problem_object{metadata, stations};
+    problem = problem_object;
+}
+
