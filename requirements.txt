@@ -1,8 +1,11 @@
 matplotlib
 numpy
-pandas
 odfpy
+pandas
 pytz
 requests
-tabulate
 statsmodels
+tables
+tabulate
+tqdm
+

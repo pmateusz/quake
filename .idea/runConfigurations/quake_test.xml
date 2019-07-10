@@ -1,7 +1,0 @@
-<component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="quake test" type="CMakeRunConfiguration" factoryName="Application" PROGRAM_PARAMS="--command=test" PASS_PARENT_ENVS_2="true" PROJECT_NAME="quake" TARGET_NAME="quake" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="quake" RUN_TARGET_NAME="quake-main">
-    <method v="2">
-      <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
-    </method>
-  </configuration>
-</component>

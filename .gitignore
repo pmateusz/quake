@@ -4,7 +4,13 @@ build/
 cmake-build-debug/
 venv/
 .data/
+network_share
+data1
+data (copy 1)
 python/quake/__pycache__/
+python/*.csv
+python/*.hdf
+python/*.txt
 plots/
 
 *.out
