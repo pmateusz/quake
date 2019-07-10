@@ -101,6 +101,7 @@ get_filename_component(HEADERS "${CMAKE_SOURCE_DIR}/src/main" REALPATH)
 
 file(GLOB SOURCES "${CMAKE_SOURCE_DIR}/src/main/*.cpp"
         "${CMAKE_SOURCE_DIR}/src/main/index/*.cpp"
+        "${CMAKE_SOURCE_DIR}/src/main/robust/*.cpp"
         "${CMAKE_SOURCE_DIR}/src/main/legacy/*.cpp"
         "${CMAKE_SOURCE_DIR}/src/main/util/*.cpp")
 

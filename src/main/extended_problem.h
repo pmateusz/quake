@@ -113,7 +113,7 @@ namespace quake {
 
         inline int KeyConsumption(const GroundStation &ground_station) const { return GetStationData(ground_station).KeyConsumption; }
 
-        inline boost::posix_time::ptime StartTime() const { return metadata_.Period.begin(); }
+        inline boost::posix_time::time_period ObservationPeriod() const { return metadata_.Period; }
 
         inline boost::posix_time::time_duration SwitchDuration() const { return metadata_.SwitchDuration; }
 

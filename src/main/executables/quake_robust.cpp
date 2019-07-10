@@ -35,13 +35,17 @@
 #include "util/logging.h"
 
 #include "extended_problem.h"
+#include "index/robust_mip_model.h"
 
 DEFINE_string(problem_file, "", "The problem file.");
+DEFINE_string(time_step, "00:00:15", "Time step for the discretisation scheme.");
 
 DEFINE_validator(problem_file, quake::util::validate_input_file);
+DEFINE_validator(time_step, quake::util::validate_duration);
 
 struct Arguments {
     boost::filesystem::path ProblemPath;
+    boost::posix_time::time_duration TimeStep;
 };
 
 Arguments SetupLogsAndParseArgs(int argc, char *argv[]) {
@@ -58,9 +62,11 @@ Arguments SetupLogsAndParseArgs(int argc, char *argv[]) {
     gflags::ParseCommandLineFlags(&argc, &argv, true);
 
     CHECK(!FLAGS_problem_file.empty()) << "Problem file is required";
+    CHECK(!FLAGS_time_step.empty()) << "Time step is required";
 
     Arguments args;
     args.ProblemPath = FLAGS_problem_file;
+    args.TimeStep = boost::posix_time::duration_from_string(FLAGS_time_step);
 
     return args;
 }
@@ -79,6 +85,9 @@ int main(int argc, char *argv[]) {
 
     const auto problem = json_object.get<quake::ExtendedProblem>();
     const auto rounded_problem = problem.Round(2);
+
+    quake::RobustMipModel robust_mip_model{&rounded_problem, arguments.TimeStep};
+    robust_mip_model.Solve(boost::none, boost::none);
 
     return EXIT_SUCCESS;
 }
