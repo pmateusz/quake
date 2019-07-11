@@ -260,7 +260,7 @@ def format_timedelta(x, pos=None):
 
 FORMAT = 'png'
 FIGURE_FONT_SIZE = 12
-FIGURE_WIDTH_SIZE = 6.69
+FIGURE_WIDTH_SIZE = 7
 FIGURE_WIDTH_SQUARE_SIZE = 5
 FIGURE_HEIGHT_SQUARE_SIZE = 5
 FIGURE_HEIGHT_SIZE = 6.69
@@ -281,7 +281,7 @@ def save_figure(filename_no_ext, rotate=None):
 
     print('Saving file', os.path.abspath(filename))
     # TODO: increase dpi for publication
-    matplotlib.pyplot.savefig(filename, bbox_inches='tight', format=FORMAT, transparent=True, dpi=None)
+    matplotlib.pyplot.savefig(filename, bbox_inches='tight', format=FORMAT, transparent=True, dpi=300)
 
     if rotate:
         image = PIL.Image.open(filename)
@@ -449,7 +449,7 @@ def plot_long_term_performance(args):
     axis.set_xlabel('Date')
     axis.set_ylabel('Keys Received')
     fig.tight_layout()
-    fig.subplots_adjust(bottom=0.28)
+    fig.subplots_adjust(bottom=0.30)
     fig.legend(loc='lower center', ncol=3, bbox_to_anchor=(0.5, 0.0))
     save_figure('long_term_performance_v2_' + os.path.basename(solution_dir))
 
@@ -672,11 +672,17 @@ def plot_aggregate(args):
             axis.text(row, column, round(cloud_cover_correlation_frame.at[city_row.name, city_column.name], 2),
                       ha="center", va="center", color="w")
     axis.set_xticks(numpy.arange(len(cities)))
-    axis.set_xticklabels(city.name for city in cities)
     axis.set_yticks(numpy.arange(len(cities)))
-    axis.set_yticklabels(city.name for city in cities)
-
+    axis.set_xticklabels(cities)
+    axis.set_yticklabels(cities)
+    axis.tick_params(top=False, bottom=True, labeltop=False, labelbottom=True)
     matplotlib.pyplot.setp(axis.get_xticklabels(), rotation=90, ha="right", rotation_mode="anchor")
+
+    axis.set_xticks(numpy.arange(len(cities) + 1) - 0.5, minor=True)
+    axis.set_yticks(numpy.arange(len(cities) + 1) - 0.5, minor=True)
+    axis.tick_params(which='minor', bottom=False, left=False)
+    fig.tight_layout()
+
     save_figure('cloud_cover_correlation')
 
     # plot max keys transferred
@@ -701,18 +707,24 @@ def plot_aggregate(args):
 
     max_key_correlation_frame = agg_weather_corrected_transfer_frame.corr()
     fig, axis = matplotlib.pyplot.subplots()
-    axis.imshow(max_key_correlation_frame, cmap='cividis')
+    axis.imshow(max_key_correlation_frame, cmap='cividis', aspect='equal')
 
     for row, city_row in enumerate(cities):
         for column, city_column in enumerate(cities):
             axis.text(row, column, round(max_key_correlation_frame.at[city_row.name, city_column.name], 2),
                       ha="center", va="center", color="w")
     axis.set_xticks(numpy.arange(len(cities)))
-    axis.set_xticklabels(city.name for city in cities)
     axis.set_yticks(numpy.arange(len(cities)))
-    axis.set_yticklabels(city.name for city in cities)
-
+    axis.set_xticklabels(cities)
+    axis.set_yticklabels(cities)
+    axis.tick_params(top=False, bottom=True, labeltop=False, labelbottom=True)
     matplotlib.pyplot.setp(axis.get_xticklabels(), rotation=90, ha="right", rotation_mode="anchor")
+
+    axis.set_xticks(numpy.arange(len(cities) + 1) - 0.5, minor=True)
+    axis.set_yticks(numpy.arange(len(cities) + 1) - 0.5, minor=True)
+    axis.tick_params(which='minor', bottom=False, left=False)
+    fig.tight_layout()
+
     save_figure('maximum_keys_correlation')
 
     # Transform to total seconds
@@ -1246,9 +1258,9 @@ def plot_week_performance_v2(args):
 
     label_y_index = (len(cities) // 2) * len(split_frames)
     ax = matplotlib.pyplot.subplot(grid_spec[label_y_index])
-    ax.set_ylabel('Key Rate')
+    ax.set_ylabel('Key Rate [1/s]')
 
-    grid_spec.update(left=0.05, right=0.98, bottom=0.25, top=0.98, wspace=0.16, hspace=0.08)
+    grid_spec.update(left=0.05, right=0.98, bottom=0.25, top=0.98, wspace=0.30, hspace=0.08)
     save_figure('solution_week_v2_' + raw_date, rotate=270)
 
 
@@ -1899,7 +1911,7 @@ if __name__ == '__main__':
     matplotlib.rcParams['pdf.fonttype'] = 42
     matplotlib.rcParams['font.size'] = 12
     matplotlib.rcParams['font.family'] = 'sans-serif'
-    matplotlib.rcParams['font.sans-serif'] = ['Roboto']
+    # matplotlib.rcParams['font.sans-serif'] = ['Roboto']
 
     command = getattr(args_, 'command')
     if command == 'switch-time-performance':

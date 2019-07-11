@@ -53,13 +53,13 @@ extension=png
 
 mkdir -p export
 mv average_cloud_cover.$extension export/
-mv bundle_2s_1sec_30switch.$extension export/
-mv bundle_4s_30switch.$extension export/
+#mv bundle_2s_1sec_30switch.$extension export/
+#mv bundle_4s_30switch.$extension export/
 mv cloud_cover_correlation.$extension export/
 mv cumulative_observation_time_London.$extension export/
-mv long_term_lambda_run_1.$extension export/
-mv long_term_performance_v2_run_1.$extension export/
-mv long_term_performance_run_1.$extension export/
+#mv long_term_lambda_run_1.$extension export/
+mv long_term_performance_v2_run_1.$extension export/long_term_performance.$extension
+#mv long_term_performance_run_1.$extension export/
 mv maximum_keys_correlation.$extension export/
 mv maximum_keys_received.$extension export/
 mv network_traffic.$extension export/
@@ -67,11 +67,11 @@ mv noisy_weight_boxplot_10_London.$extension export/
 mv observation_time.$extension export/
 mv observation_time_London.$extension export/
 mv observation_time_magnified_London.$extension export/
-mv optics_performance_4s.$extension export/
-mv service_level_global_run1.$extension export/
-mv service_level_global_run_perturbed10.$extension export/
-mv service_level_London_run1.$extension export/
-mv solution_week_2018-01-01.$extension export/
-mv solution_week_v2_2018-01-01.$extension export/
+#mv optics_performance_4s.$extension export/
+#mv service_level_global_run1.$extension export/
+#mv service_level_global_run_perturbed10.$extension export/
+mv service_level_London_run1.$extension export/service_level_London.$extension
+#mv solution_week_2018-01-01.$extension export/
+mv solution_week_v2_2018-01-01.$extension export/solution_week_2018-01-01.$extension
 mv key_rate.$extension export/
 popd
