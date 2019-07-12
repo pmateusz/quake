@@ -39,6 +39,7 @@
 
 DEFINE_string(problem_file, "", "The problem file.");
 DEFINE_string(time_step, "00:00:15", "Time step for the discretisation scheme.");
+DEFINE_string(gap, "", "Gap between the bound and the objective");
 
 DEFINE_validator(problem_file, quake::util::validate_input_file);
 DEFINE_validator(time_step, quake::util::validate_duration);
@@ -46,6 +47,7 @@ DEFINE_validator(time_step, quake::util::validate_duration);
 struct Arguments {
     boost::filesystem::path ProblemPath;
     boost::posix_time::time_duration TimeStep;
+    boost::optional<double> Gap;
 };
 
 Arguments SetupLogsAndParseArgs(int argc, char *argv[]) {
@@ -68,6 +70,10 @@ Arguments SetupLogsAndParseArgs(int argc, char *argv[]) {
     args.ProblemPath = FLAGS_problem_file;
     args.TimeStep = boost::posix_time::duration_from_string(FLAGS_time_step);
 
+    if (!FLAGS_gap.empty()) {
+        args.Gap = std::stod(FLAGS_gap);
+    }
+
     return args;
 }
 
@@ -87,7 +93,7 @@ int main(int argc, char *argv[]) {
     const auto rounded_problem = problem.Round(2);
 
     quake::RobustMipModel robust_mip_model{&rounded_problem, arguments.TimeStep};
-    robust_mip_model.Solve(boost::none, boost::none);
+    robust_mip_model.Solve(boost::none, arguments.Gap);
 
     return EXIT_SUCCESS;
 }

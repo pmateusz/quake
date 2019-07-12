@@ -104,7 +104,7 @@ TEST(ProblemGeneratorTest, CanGenerateEquivalentProblems) {
                           extended_problem.ElevationAngle(ground_station, time));
 
                 EXPECT_EQ(problem.KeyRate(ground_station, time),
-                          extended_problem.KeyRate(ground_station, time));
+                          extended_problem.KeyRate(ground_station, time, quake::ExtendedProblem::WeatherSample::None));
             }
         }
     }

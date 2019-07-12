@@ -1,5 +1,5 @@
 //
-// Copyright 2018 Mateusz Polnik
+// Copyright 2019 Mateusz Polnik
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -19,5 +19,29 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "base_mip_model.h"
+#ifndef QUAKE_VALIDATOR_H
+#define QUAKE_VALIDATOR_H
 
+#include "extended_problem.h"
+
+namespace quake {
+
+    class Solution;
+
+    namespace robust {
+        
+        class Validator {
+        public:
+            explicit Validator(const ExtendedProblem &problem)
+                    : problem_{problem} {}
+
+            void Validate(const Solution &solution) const;
+
+        private:
+            const ExtendedProblem &problem_;
+        };
+    }
+}
+
+
+#endif //QUAKE_VALIDATOR_H

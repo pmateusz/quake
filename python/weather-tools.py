@@ -350,7 +350,7 @@ def extend_problem_definition(args):
         return filtered_frame
 
     _observation_frame = extract_observation(_problem.observation_period, _weather_cache)
-    _problem.add_forecast('observation', _observation_frame)
+    _problem.add_forecast('real', _observation_frame)
 
     with open(_output_file, 'w') as _output_file:
         json.dump(_problem.json_object, _output_file)

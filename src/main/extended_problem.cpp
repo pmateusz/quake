@@ -84,7 +84,7 @@ quake::ExtendedProblem quake::ExtendedProblem::Round(unsigned int decimal_places
                                           std::move(communication_window_data));
     }
 
-    return {metadata_, std::move(rounded_station_data)};
+    return {metadata_, std::move(rounded_station_data), forecasts_};
 }
 
 std::vector<boost::posix_time::time_period> quake::ExtendedProblem::TransferWindows(const GroundStation &station) const {
@@ -97,24 +97,46 @@ std::vector<boost::posix_time::time_period> quake::ExtendedProblem::TransferWind
     return communication_periods;
 }
 
-double quake::ExtendedProblem::KeyRate(const quake::GroundStation &station, const boost::posix_time::ptime &datetime) const {
-    const auto &station_data = GetStationData(station);
-    for (const auto &window : station_data.CommunicationWindows) {
-        if (window.Period.is_after(datetime)) {
-            return 0;
-        }
+double zero(boost::posix_time::ptime) { return 0.0; }
 
-        if (window.Period.contains(datetime)) {
-            const auto index = (datetime - window.Period.begin()).total_seconds();
-            return window.KeyRate.at(index);
-        }
-    }
-    return 0;
+double quake::ExtendedProblem::KeyRate(const quake::GroundStation &station,
+                                       const boost::posix_time::ptime &datetime,
+                                       ExtendedProblem::WeatherSample sample) const {
+    return KeyRate(station, boost::posix_time::time_period{datetime, boost::posix_time::seconds(1)}, sample);
 }
 
-double quake::ExtendedProblem::KeyRate(const quake::GroundStation &station, const boost::posix_time::time_period &period) const {
+double quake::ExtendedProblem::KeyRate(const quake::GroundStation &station,
+                                       const boost::posix_time::time_period &period,
+                                       ExtendedProblem::WeatherSample sample) const {
+    switch (sample) {
+        case ExtendedProblem::WeatherSample::None:
+            return KeyRate(station, period, zero);
+        case ExtendedProblem::WeatherSample::Forecast:
+            return KeyRate(station, period, forecasts_.at("forecast"));
+        case ExtendedProblem::WeatherSample::Real:
+            return KeyRate(station, period, forecasts_.at("real"));
+        default:
+            LOG(FATAL) << "Weather sample " << static_cast<int>(sample) << " is not supported";
+    }
+}
+
+double quake::ExtendedProblem::KeyRate(const quake::GroundStation &station,
+                                       const boost::posix_time::time_period &period,
+                                       const quake::Forecast &forecast) const {
+    const auto callback = [&station, &forecast](boost::posix_time::ptime time_point) -> double {
+        const auto cloud_cover = forecast.GetCloudCover(station, time_point);
+        const auto normalized_cloud_cover = static_cast<double>(cloud_cover) / 100.0;
+        return normalized_cloud_cover;
+    };
+
+    return KeyRate(station, period, callback);
+}
+
+double quake::ExtendedProblem::KeyRate(const quake::GroundStation &station,
+                                       const boost::posix_time::time_period &period,
+                                       const std::function<double(boost::posix_time::ptime)> &weather_callback) const {
+    double total_key_rate = 0.0;
     const auto &station_data = GetStationData(station);
-    double total_key_rate = 0;
     for (const auto &window : station_data.CommunicationWindows) {
         if (window.Period.is_after(period.end())) {
             break;
@@ -122,15 +144,16 @@ double quake::ExtendedProblem::KeyRate(const quake::GroundStation &station, cons
 
         if (window.Period.intersects(period)) {
             const auto intersection = window.Period.intersection(period);
-            const auto begin_index = (intersection.begin() - window.Period.begin()).total_seconds();
-            const auto end_index = (intersection.end() - window.Period.begin()).total_seconds();
+            for (auto time_point = intersection.begin(); time_point < intersection.end(); time_point += boost::posix_time::seconds(1)) {
+                const auto cloud_cover = weather_callback(time_point);
+                CHECK_GE(cloud_cover, 0.0);
+                CHECK_LE(cloud_cover, 1.0);
 
-            CHECK_LE(begin_index, window.KeyRate.size());
-            CHECK_LE(end_index, window.KeyRate.size());
-            CHECK_EQ(intersection.length().total_seconds(), end_index - begin_index);
+                const auto index = (time_point - window.Period.begin()).total_seconds();
+                const auto key_rate = (1.0 - cloud_cover) * window.KeyRate.at(index);
+                CHECK_GE(key_rate, 0.0);
 
-            for (auto index = begin_index; index < end_index; ++index) {
-                total_key_rate += window.KeyRate.at(index);
+                total_key_rate += key_rate;
             }
         }
     }
@@ -244,7 +267,7 @@ void quake::from_json(const nlohmann::json &json, quake::ExtendedProblem &proble
         forecasts = find_it->get<std::unordered_map<std::string, Forecast>>();
     }
 
-    ExtendedProblem problem_object{metadata, stations};
+    ExtendedProblem problem_object{metadata, stations, std::move(forecasts)};
     problem = problem_object;
 }
 

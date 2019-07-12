@@ -1,5 +1,5 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="robust" type="CMakeRunConfiguration" factoryName="Application" PROGRAM_PARAMS="--problem-file=$PROJECT_DIR$/cmake-build-debug/problem-extended.json" PASS_PARENT_ENVS_2="true" PROJECT_NAME="quake" TARGET_NAME="quake-robust" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="quake" RUN_TARGET_NAME="quake-robust">
+  <configuration default="false" name="robust" type="CMakeRunConfiguration" factoryName="Application" PROGRAM_PARAMS="--problem-file=$PROJECT_DIR$/cmake-build-debug/problem-extended.json --gap=0.3" PASS_PARENT_ENVS_2="true" PROJECT_NAME="quake" TARGET_NAME="quake-robust" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="quake" RUN_TARGET_NAME="quake-robust">
     <method v="2">
       <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
     </method>

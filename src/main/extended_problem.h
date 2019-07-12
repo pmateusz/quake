@@ -1,5 +1,3 @@
-#include <utility>
-
 //
 // Copyright 2018 Mateusz Polnik
 //
@@ -24,6 +22,7 @@
 #ifndef QUAKE_EXTENDED_PROBLEM_H
 #define QUAKE_EXTENDED_PROBLEM_H
 
+#include <utility>
 #include <vector>
 #include <unordered_map>
 
@@ -36,12 +35,16 @@
 #include "ground_station.h"
 #include "forecast.h"
 
-// TODO: serialize extended problem to json
-
 namespace quake {
 
     class ExtendedProblem {
     public:
+        enum class WeatherSample {
+            None,
+            Forecast,
+            Real
+        };
+
         struct MetaData {
             MetaData()
                     : MetaData({boost::posix_time::ptime(), boost::posix_time::seconds(0)}, boost::posix_time::time_duration()) {}
@@ -82,7 +85,7 @@ namespace quake {
                         int initial_buffer,
                         int key_consumption,
                         std::vector<CommunicationWindowData> communication_windows)
-                    : Station{std::move(station)},
+                    : Station{station},
                       TransferShare{transfer_share},
                       InitialBuffer{initial_buffer},
                       KeyConsumption{key_consumption},
@@ -117,13 +120,19 @@ namespace quake {
 
         inline boost::posix_time::time_duration SwitchDuration() const { return metadata_.SwitchDuration; }
 
-        double KeyRate(const GroundStation &station, const boost::posix_time::ptime &datetime) const;
+        double KeyRate(const GroundStation &station, const boost::posix_time::ptime &datetime, ExtendedProblem::WeatherSample sample) const;
 
-        double KeyRate(const GroundStation &station, const boost::posix_time::time_period &period) const;
+        double KeyRate(const GroundStation &station, const boost::posix_time::time_period &period, ExtendedProblem::WeatherSample sample) const;
 
         double ElevationAngle(const GroundStation &station, const boost::posix_time::ptime &datetime) const;
 
     private:
+        double KeyRate(const GroundStation &station, const boost::posix_time::time_period &period, const Forecast &forecast) const;
+
+        double KeyRate(const GroundStation &station,
+                       const boost::posix_time::time_period &period,
+                       const std::function<double(boost::posix_time::ptime)> &weather_callback) const;
+
         const StationData &GetStationData(const quake::GroundStation &station) const;
 
         friend void to_json(nlohmann::json &json, const ExtendedProblem &problem);
