@@ -24,10 +24,10 @@
 #include "worst_case_mip_model.h"
 #include "fixed_discretisation_scheme.h"
 
-quake::WorstCaseMipModel::WorstCaseMipModel(quake::InferredModel const *model,
-                                            boost::posix_time::time_duration time_step,
-                                            std::vector<quake::Forecast> forecasts)
-        : BaseIntervalMipModel(model, std::move(time_step), std::move(forecasts)) {}
+quake::WorstCaseMipModel::WorstCaseMipModel(ExtendedProblem const *problem,
+                                            boost::posix_time::time_duration interval_step,
+                                            std::vector<Forecast> forecasts)
+        : BaseIntervalMipModel(problem, std::move(interval_step), std::move(forecasts)) {}
 
 void quake::WorstCaseMipModel::Build(const boost::optional<Solution> &solution) {
     BaseIntervalMipModel::Build(solution);
@@ -37,16 +37,15 @@ void quake::WorstCaseMipModel::Build(const boost::optional<Solution> &solution) 
     auto traffic_index = mip_model_.addVar(0.0, traffic_index_ub, 0.0, GRB_CONTINUOUS, "traffic_index");
 
     // constraint: for each station and each scenario traffic index is satisfied
-    const auto num_scenarios = scenario_pool_.size();
-    for (auto station_index = 1; station_index < num_stations_; ++station_index) {
-        const auto num_intervals = intervals_.at(station_index).size();
+    const auto num_scenarios = NumScenarios();
+    for (const auto &station :Stations()) {
+        const auto &station_intervals = StationIntervals(station);
         for (auto scenario_index = 0; scenario_index < num_scenarios; ++scenario_index) {
             GRBLinExpr keys_transferred = 0;
-            for (auto interval_index = 0; interval_index < num_intervals; ++interval_index) {
-                auto &interval = intervals_.at(station_index).at(interval_index);
-                keys_transferred += scenario_pool_.KeysTransferred(scenario_index, interval) * interval.Var;
+            for (const auto &interval : station_intervals) {
+                keys_transferred += KeyRate(scenario_index, station, interval.Period()) * interval.Var();
             }
-            mip_model_.addConstr(model_->TransferShare(station_index) * traffic_index <= keys_transferred);
+            mip_model_.addConstr(problem_->TransferShare(station) * traffic_index <= keys_transferred);
         }
     }
 
@@ -59,17 +58,16 @@ void quake::WorstCaseMipModel::Build(const boost::optional<Solution> &solution) 
 double quake::WorstCaseMipModel::GetTrafficIndex(const quake::Solution &solution) const {
     double global_traffic_index = std::numeric_limits<double>::max();
 
-    for(const auto &forecast : forecasts_) {
-        for (auto station_index = first_regular_station_; station_index < num_stations_; ++station_index) {
-            int64 keys_transferred = 0;
-            const auto station = model_->Station(station_index);
+    for (const auto &forecast : Forecasts()) {
+        for (const auto &station : Stations()) {
+            if (station == GroundStation::None) { continue; }
+
+            double keys_transferred = 0;
             for (const auto &observation_window : solution.ObservationWindows(station)) {
-                keys_transferred += model_->WeatherAdjustedTransferredKeys(station,
-                                                                           observation_window.begin(),
-                                                                           observation_window.end(),
-                                                                           forecast);
+                keys_transferred += problem_->KeyRate(station, observation_window, forecast);
             }
-            double local_traffic_index = keys_transferred / model_->TransferShare(station_index);
+
+            double local_traffic_index = keys_transferred / TransferShare(station);
             global_traffic_index = std::min(global_traffic_index, local_traffic_index);
         }
     }

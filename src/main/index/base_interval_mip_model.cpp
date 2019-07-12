@@ -1,3 +1,5 @@
+#include <utility>
+
 //
 // Copyright 2018 Mateusz Polnik
 //
@@ -24,229 +26,218 @@
 #include <glog/logging.h>
 
 #include "base_interval_mip_model.h"
-#include "fixed_discretisation_scheme.h"
+#include "robust/fixed_discretisation_scheme.h"
 
-quake::BaseIntervalMipModel::BaseIntervalMipModel(const quake::InferredModel *model,
-                                                  boost::posix_time::time_duration time_step,
+quake::BaseIntervalMipModel::BaseIntervalMipModel(const ExtendedProblem *problem,
+                                                  boost::posix_time::time_duration interval_step,
                                                   std::vector<quake::Forecast> forecasts)
-        : BaseMipModel(model, std::move(time_step)),
+        : BaseMipModel{problem},
+          interval_step_{std::move(interval_step)},
           forecasts_{std::move(forecasts)} {}
+
 
 void quake::BaseIntervalMipModel::Build(const boost::optional<Solution> &solution) {
     CHECK(intervals_.empty());
 
     // variables: create intervals
-    FixedDiscretisationScheme scheme{*model_, time_step_};
+    robust::FixedDiscretisationScheme scheme{*problem_, interval_step_};
     const auto intervals = scheme.Build();
 
-    intervals_.resize(num_stations_);
-    for (const auto &prototype : intervals.SwitchIntervals) {
-        intervals_.at(dummy_station_).emplace_back(VarInterval::Create(mip_model_, prototype));
-    }
-
-    for (std::size_t station_index = 0; station_index < num_stations_; ++station_index) {
-        if (station_index == dummy_station_) { continue; }
-
-        for (const auto &prototype : intervals.TransferIntervals) {
-            intervals_.at(station_index).emplace_back(
-                    VarInterval::Create(mip_model_,
-                                        {station_index,
-                                         prototype.Begin,
-                                         prototype.End}));
+    // create intervals for regular stations
+    const auto num_stations = Stations().size();
+    intervals_.resize(num_stations);
+    for (const auto &observation_element : intervals.ObservationIntervals) {
+        const auto station_index = Index(observation_element.first);
+        for (const auto &period : observation_element.second) {
+            intervals_.at(station_index).emplace_back(CreateInterval(station_index, period));
         }
     }
+    CHECK(intervals_.front().empty());
 
-    scenario_pool_ = ScenarioPool(intervals_, forecasts_, model_);
+    // create intervals for dummy station
+    for (const auto &period : intervals.SwitchIntervals) {
+        intervals_.at(dummy_station_index_).emplace_back(CreateInterval(dummy_station_index_, period));
+    }
 
-    // constraint: at most one interval is active
-    std::vector<GRBLinExpr> active_intervals(num_time_);
-    for (auto station_index = 0; station_index < num_stations_; ++station_index) {
+    scenario_pool_ = ScenarioPool(intervals.ObservationIntervals, forecasts_, problem_);
+
+    // constraint: at most one ground station is observed at a time
+
+    // get all unique starting points
+    std::unordered_set<boost::posix_time::ptime> point_time_set;
+    for (auto station_index = 0; station_index < num_stations; ++station_index) {
         for (const auto &interval : intervals_.at(station_index)) {
-            const std::size_t end_to_use = std::min(num_time_, interval.End);
-            for (auto time_index = interval.Begin; time_index < end_to_use; ++time_index) {
-                active_intervals.at(time_index) += interval.Var;
-            }
+            point_time_set.emplace(interval.Period().begin());
         }
     }
+    std::vector<boost::posix_time::ptime> time_points;
+    std::copy(std::begin(point_time_set), std::end(point_time_set), std::back_inserter(time_points));
+    std::sort(std::begin(time_points), std::end(time_points));
 
-    for (auto time_index = 0; time_index < num_time_; ++time_index) {
-        mip_model_.addConstr(active_intervals.at(time_index) <= 1.0);
+    for (const auto &time_point : time_points) {
+        GRBLinExpr point_cover = 0;
+
+        for (auto station_index = 0; station_index < num_stations; ++station_index) {
+            for (const auto &interval : intervals_.at(station_index)) {
+                if (interval.Period().is_after(time_point)) {
+                    break;
+                }
+
+                if (interval.Period().contains(time_point)) {
+                    point_cover += interval.Var();
+                }
+            }
+        }
+
+        mip_model_.addConstr(point_cover <= 1);
     }
 
-    // constraint: ensure a dummy interval is placed between intervals of different stations
-    for (auto station_index = first_regular_station_; station_index < num_stations_; ++station_index) {
-        const auto num_intervals = intervals_.at(station_index).size();
-        for (auto next_interval_index = 1; next_interval_index < num_intervals; ++next_interval_index) {
-            const auto &prev_interval = intervals_.at(station_index).at(next_interval_index - 1);
-            const auto &next_interval = intervals_.at(station_index).at(next_interval_index);
-            const auto &switch_interval = intervals_.at(dummy_station_).at(next_interval_index);
+    // constraint: dummy station precedes observation of another ground station
 
-            if (switch_interval.Begin < switch_interval.End) {
-                CHECK_EQ(prev_interval.End, next_interval.Begin);
-                mip_model_.addConstr(next_interval.Var <= prev_interval.Var + switch_interval.Var);
+    // build index of switch time intervals
+    std::unordered_map<boost::posix_time::ptime, robust::IntervalVar> end_switch_interval;
+    for (const auto &interval : intervals_.at(dummy_station_index_)) {
+        end_switch_interval.emplace(interval.Period().end(), interval);
+    }
+
+    for (auto station_index = 0; station_index < num_stations; ++station_index) {
+        if (station_index == dummy_station_index_) {
+            continue;
+        }
+
+        const auto &station_intervals = intervals_.at(station_index);
+        const auto interval_it_end = std::end(station_intervals);
+        auto prev_interval_it = std::begin(station_intervals);
+        if (prev_interval_it == interval_it_end) {
+            continue;
+        }
+
+        for (auto interval_it = std::next(prev_interval_it); interval_it != interval_it_end; ++interval_it) {
+            if (prev_interval_it->Period().end() == interval_it->Period().begin()) {
+                mip_model_.addConstr(interval_it->Var() <= prev_interval_it->Var() + end_switch_interval.at(interval_it->Period().begin()).Var());
             }
+
+            prev_interval_it = interval_it;
         }
     }
 
     // set initial guess
     if (solution) {
-        for (auto station_index = first_regular_station_; station_index < num_stations_; ++station_index) {
-            const auto station = model_->Station(station_index);
-            auto &station_intervals = intervals_.at(station_index);
-            const auto interval_end_it = std::end(station_intervals);
-
-            std::unordered_set<BaseInterval> intervals_to_set;
-            for (const auto &observation : solution->ObservationWindows(station)) {
-                const auto start_time_index = model_->GetStartIndex(observation.begin());
-                const auto end_time_index = model_->GetEndIndex(observation.end());
-
-                for (auto interval_it = std::begin(station_intervals); interval_it != interval_end_it; ++interval_it) {
-                    CHECK_EQ(interval_it->StationIndex, station_index);
-                    if (interval_it->End <= start_time_index) { continue; }
-                    if (interval_it->Begin >= end_time_index) { break; }
-
-                    if (interval_it->End <= end_time_index) {
-                        intervals_to_set.insert(*interval_it);
-                    } else {
-                        LOG(WARNING) << "Cannot initialize the interval " << *interval_it
-                                     << " because it does not fully cover the time span ["
-                                     << start_time_index << ", "
-                                     << end_time_index << "]";
-                    }
-                }
-            }
-
-            for (auto interval_it = std::begin(station_intervals); interval_it != interval_end_it; ++interval_it) {
-                const double is_set = intervals_to_set.find(*interval_it) != std::cend(intervals_to_set);
-                interval_it->Var.set(GRB_DoubleAttr_Start, is_set);
-            }
-        }
+        LOG(FATAL) << "Warm start not implemented";
+//        for (auto station_index = first_regular_station_; station_index < num_stations_; ++station_index) {
+//            const auto station = model_->Station(station_index);
+//            auto &station_intervals = intervals_.at(station_index);
+//            const auto interval_end_it = std::end(station_intervals);
+//
+//            std::unordered_set<BaseInterval> intervals_to_set;
+//            for (const auto &observation : solution->ObservationWindows(station)) {
+//                const auto start_time_index = model_->GetStartIndex(observation.begin());
+//                const auto end_time_index = model_->GetEndIndex(observation.end());
+//
+//                for (auto interval_it = std::begin(station_intervals); interval_it != interval_end_it; ++interval_it) {
+//                    CHECK_EQ(interval_it->StationIndex, station_index);
+//                    if (interval_it->End <= start_time_index) { continue; }
+//                    if (interval_it->Begin >= end_time_index) { break; }
+//
+//                    if (interval_it->End <= end_time_index) {
+//                        intervals_to_set.insert(*interval_it);
+//                    } else {
+//                        LOG(WARNING) << "Cannot initialize the interval " << *interval_it
+//                                     << " because it does not fully cover the time span ["
+//                                     << start_time_index << ", "
+//                                     << end_time_index << "]";
+//                    }
+//                }
+//            }
+//
+//            for (auto interval_it = std::begin(station_intervals); interval_it != interval_end_it; ++interval_it) {
+//                const double is_set = intervals_to_set.find(*interval_it) != std::cend(intervals_to_set);
+//                interval_it->Var.set(GRB_DoubleAttr_Start, is_set);
+//            }
+//        }
     }
-}
-
-double quake::BaseIntervalMipModel::GetTrafficIndexUpperBound() const {
-    double all_scenario_traffic_index = std::numeric_limits<double>::min();
-
-    const auto num_scenarios = scenario_pool_.size();
-    const auto start_time = model_->StartTime();
-    const auto end_time = model_->EndTime();
-
-    for (auto scenario_index = 0; scenario_index < num_scenarios; ++scenario_index) {
-        double scenario_traffic_index = std::numeric_limits<double>::max();
-        for (auto station_index = first_regular_station_; station_index < num_stations_; ++station_index) {
-            const auto station = model_->Station(station_index);
-            int64 keys_transferred = model_->WeatherAdjustedTransferredKeys(station,
-                                                                            start_time,
-                                                                            end_time,
-                                                                            forecasts_.at(scenario_index));
-            double station_traffic_index = keys_transferred / model_->TransferShare(station_index);
-            scenario_traffic_index = std::min(scenario_traffic_index, station_traffic_index);
-        }
-
-        all_scenario_traffic_index = std::max(all_scenario_traffic_index, scenario_traffic_index);
-    }
-
-    return all_scenario_traffic_index;
 }
 
 std::unordered_map<quake::GroundStation,
         std::vector<boost::posix_time::time_period> > quake::BaseIntervalMipModel::GetObservations() const {
-    std::vector<VarInterval> active_intervals;
-    for (auto station_index = 0; station_index < num_stations_; ++station_index) {
-        if (station_index == dummy_station_) { continue; }
+    std::unordered_map<quake::GroundStation, std::vector<boost::posix_time::time_period> > assignment;
+    for (const auto &station : Stations()) {
+        if (station == GroundStation::None) {
+            continue;
+        }
 
-        for (const auto &interval : intervals_.at(station_index)) {
-            if (util::IsActive(interval.Var)) {
-                active_intervals.push_back(interval);
+        std::vector<boost::posix_time::time_period> observations;
+
+        const auto &station_intervals = StationIntervals(station);
+        const auto num_intervals = station_intervals.size();
+        for (auto interval_index = 0; interval_index < num_intervals;) {
+            // find first active interval
+            while (interval_index < num_intervals && !util::IsActive(station_intervals.at(interval_index).Var())) {
+                ++interval_index;
             }
-        }
-    }
 
-    std::sort(std::begin(active_intervals), std::end(active_intervals),
-              [](const VarInterval &left, const VarInterval &right) -> bool {
-                  return left.Begin <= right.Begin;
-              });
-
-    std::unordered_map<quake::GroundStation, std::vector<boost::posix_time::time_period>> observations;
-    for (auto sequence_begin = 0; sequence_begin < active_intervals.size();) {
-        auto sequence_end = sequence_begin + 1;
-        for (; sequence_end < active_intervals.size()
-               &&
-               active_intervals.at(sequence_begin).StationIndex ==
-               active_intervals.at(sequence_end).StationIndex;
-               ++sequence_end);
-        CHECK_LE(sequence_end, active_intervals.size());
-
-        const auto &first_interval = active_intervals.at(sequence_begin);
-        const auto station_index = first_interval.StationIndex;
-
-        const auto interval_index
-                = std::find(std::cbegin(intervals_.at(station_index)), std::cend(intervals_.at(station_index)),
-                            first_interval) - std::cbegin(intervals_.at(station_index));
-
-        const auto &switch_interval = intervals_.at(dummy_station_).at(interval_index);
-        if (switch_interval.Begin < switch_interval.End) { CHECK(util::IsActive(switch_interval.Var)); }
-
-        auto begin_index = switch_interval.Begin;
-        const auto station = model_->Station(station_index);
-
-        const auto is_first_interval = begin_index == 0;
-        if ((is_first_interval && !active_intervals.empty() && active_intervals.front().Begin != 0)) {
-            LOG(WARNING) << "Solution does not start with an active interval";
-        }
-
-        if (!is_first_interval && observations.empty()) {
-            begin_index = 0;
-        }
-
-        auto prev_end_time = switch_interval.End;
-        for (auto sequence_index = sequence_begin; sequence_index < sequence_end; ++sequence_index) {
-            const auto &active_interval = active_intervals[sequence_index];
-
-            CHECK_LE(prev_end_time, active_interval.Begin);
-            if (prev_end_time < active_interval.Begin) {
-                LOG(WARNING) << "Lack of continuity between " << model_->Time(prev_end_time)
-                             << " and " << model_->Time(active_interval.Begin);
+            // check if active interval was found
+            if (interval_index >= num_intervals) {
+                break;
             }
-            prev_end_time = active_interval.End;
+
+            auto observation = station_intervals.at(interval_index).Period();
+
+            // extend interval if possible
+            auto next_interval_index = interval_index + 1;
+            while (next_interval_index < num_intervals) {
+                const auto &next_interval = station_intervals.at(next_interval_index);
+                if (next_interval.Period().is_adjacent(observation)) {
+                    observation.merge(next_interval.Period());
+                    ++next_interval_index;
+                } else {
+                    break;
+                }
+            }
+
+            observations.emplace_back(observation);
+            interval_index = next_interval_index;
         }
 
-        auto end_index = active_intervals.at(sequence_end - 1).End;
-        const auto is_last_interval = active_intervals.size() == sequence_end;
-        if (is_last_interval && end_index != model_->TimeRange()) {
-            LOG(WARNING) << "Solution does not end with an active interval";
-            end_index = model_->TimeRange();
-        }
-
-        auto start_transfer_time = model_->Time(model_->GetStartTransferTimeIndex(station_index, begin_index));
-        auto end_time = model_->Time(end_index);
-        auto find_it = observations.find(station);
-        boost::posix_time::time_period observation(start_transfer_time, end_time);
-        if (find_it != std::end(observations)) {
-            find_it->second.emplace_back(observation);
-        } else {
-            observations.emplace(station, std::vector<boost::posix_time::time_period>{observation});
-        }
-        sequence_begin = sequence_end;
+        assignment.emplace(station, std::move(observations));
     }
-
-    return observations;
+    return assignment;
 }
 
-double quake::BaseIntervalMipModel::GetTrafficIndex(const quake::Solution &solution,
-                                                    const quake::Forecast &forecast) const {
+double quake::BaseIntervalMipModel::GetTrafficIndex(const Solution &solution, const Forecast &forecast) const {
     auto traffic_index = std::numeric_limits<double>::max();
 
-    for (auto station_index = first_regular_station_; station_index < num_stations_; ++station_index) {
-        const auto station = model_->Station(station_index);
+    for (const auto &station : solution.Stations()) {
         double keys_transferred = 0;
         for (const auto &window : solution.ObservationWindows(station)) {
-            keys_transferred += model_->WeatherAdjustedTransferredKeys(station, window.begin(), window.end(), forecast);
+            keys_transferred += problem_->KeyRate(station, window, forecast);
         }
-
-        const auto station_traffic_index = keys_transferred / model_->TransferShare(station_index);
+        const auto station_traffic_index = keys_transferred / problem_->TransferShare(station);
         traffic_index = std::min(traffic_index, station_traffic_index);
     }
 
     return traffic_index;
+}
+
+double quake::BaseIntervalMipModel::GetTrafficIndexUpperBound() const {
+    double max_traffic_index = std::numeric_limits<double>::min();
+    const auto max_observation_period = problem_->ObservationPeriod();
+
+    for (const auto &forecast : forecasts_) {
+        double forecast_traffic_index = std::numeric_limits<double>::max();
+        for (const auto &station : Stations()) {
+            const auto total_keys_transferred = problem_->KeyRate(station, max_observation_period, forecast);
+            const auto station_traffic_index = total_keys_transferred / problem_->TransferShare(station);
+            forecast_traffic_index = std::min(station_traffic_index, forecast_traffic_index);
+        }
+        max_traffic_index = std::max(max_traffic_index, forecast_traffic_index);
+    }
+
+    return max_traffic_index;
+}
+
+quake::robust::IntervalVar quake::BaseIntervalMipModel::CreateInterval(std::size_t station_index, const boost::posix_time::time_period &period) {
+    std::stringstream label;
+    label << "s" << station_index << "_" << period;
+    return {station_index, period, mip_model_.addVar(0, 1, 0, GRB_BINARY, label.str())};
 }

@@ -198,6 +198,18 @@ void quake::to_json(nlohmann::json &json, const quake::ExtendedProblem &problem)
     json = object;
 }
 
+quake::ExtendedProblem quake::ExtendedProblem::load_json(const boost::filesystem::path &file_path) {
+    std::ifstream input_stream;
+    input_stream.open(file_path.string(), std::ifstream::in);
+
+    nlohmann::json json_object;
+    input_stream >> json_object;
+    input_stream.close();
+
+    ExtendedProblem problem = json_object;
+    return problem;
+}
+
 void quake::to_json(nlohmann::json &json, const quake::ExtendedProblem::MetaData &metadata) {
     nlohmann::json object;
 

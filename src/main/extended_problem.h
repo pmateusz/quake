@@ -106,6 +106,8 @@ namespace quake {
 
         ExtendedProblem(MetaData metadata, std::vector<StationData> station_data, std::unordered_map<std::string, Forecast> forecasts);
 
+        ExtendedProblem static load_json(const boost::filesystem::path &path);
+
         ExtendedProblem Round(unsigned int decimal_places) const;
 
         inline const std::vector<GroundStation> &Stations() const { return ground_stations_; }
@@ -126,10 +128,11 @@ namespace quake {
 
         double KeyRate(const GroundStation &station, const boost::posix_time::time_period &period, ExtendedProblem::WeatherSample sample) const;
 
+        double KeyRate(const GroundStation &station, const boost::posix_time::time_period &period, const Forecast &forecast) const;
+
         double ElevationAngle(const GroundStation &station, const boost::posix_time::ptime &datetime) const;
 
     private:
-        double KeyRate(const GroundStation &station, const boost::posix_time::time_period &period, const Forecast &forecast) const;
 
         double KeyRate(const GroundStation &station,
                        const boost::posix_time::time_period &period,

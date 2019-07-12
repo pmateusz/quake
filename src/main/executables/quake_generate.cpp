@@ -32,7 +32,7 @@
 #include "util/validation.h"
 #include "util/logging.h"
 #include "problem_generator.h"
-#include "problem.h"
+#include "extended_problem.h"
 
 DEFINE_string(from, "2019-03-01", "The start date for which the elevation angle should be computed.");
 DEFINE_string(to, "2019-03-02", "The end date for which the elevation angle should be computed.");

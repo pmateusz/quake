@@ -42,16 +42,16 @@
 
 #include "legacy/solver_arguments.h"
 
-#include "elevation_command.h"
-#include "generate_mini_zinc_data_command.h"
-#include "minizinc_reader.h"
-#include "problem.h"
+#include "legacy/elevation_command.h"
+#include "legacy/generate_mini_zinc_data_command.h"
+#include "legacy/minizinc_reader.h"
+#include "legacy/problem.h"
+#include "legacy/solver_cp_command.h"
+#include "legacy/solver_inventory_cp_command.h"
+#include "legacy/test_command.h"
+#include "legacy/inferred_model.h"
 #include "problem_generator.h"
 #include "solution.h"
-#include "solver_cp_command.h"
-#include "solver_inventory_cp_command.h"
-#include "test_command.h"
-#include "inferred_model.h"
 #include "forecast.h"
 
 static const std::string ELEVATION_COMMAND{"elevation"};

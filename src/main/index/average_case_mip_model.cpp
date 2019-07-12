@@ -21,10 +21,10 @@
 
 #include "average_case_mip_model.h"
 
-quake::AverageCaseMipModel::AverageCaseMipModel(quake::InferredModel const *model,
-                                                boost::posix_time::time_duration time_step,
-                                                std::vector<quake::Forecast> forecasts)
-        : BaseIntervalMipModel(model, std::move(time_step), std::move(forecasts)) {}
+quake::AverageCaseMipModel::AverageCaseMipModel(ExtendedProblem const *problem,
+                                                boost::posix_time::time_duration interval_step,
+                                                std::vector<Forecast> forecasts)
+        : BaseIntervalMipModel(problem, std::move(interval_step), std::move(forecasts)) {}
 
 
 void quake::AverageCaseMipModel::Build(const boost::optional<Solution> &solution) {
@@ -35,12 +35,14 @@ void quake::AverageCaseMipModel::Build(const boost::optional<Solution> &solution
     auto traffic_index = mip_model_.addVar(0.0, traffic_index_upper_bound, 0.0, GRB_CONTINUOUS, "traffic_index");
 
     // constraints: for each station restrict the traffic index
-    for (auto station_index = first_regular_station_; station_index < num_stations_; ++station_index) {
+    for (const auto &station :Stations()) {
+        if (station == GroundStation::None) { continue; }
+
         GRBLinExpr keys_transferred;
-        for (const auto &interval : intervals_.at(station_index)) {
-            keys_transferred += scenario_pool_.MeanKeysTransferred(interval) * interval.Var;
+        for (const auto &interval : StationIntervals(station)) {
+            keys_transferred += KeyRate(station, interval.Period()) * interval.Var();
         }
-        mip_model_.addConstr(model_->TransferShare(station_index) * traffic_index <= keys_transferred);
+        mip_model_.addConstr(TransferShare(station) * traffic_index <= keys_transferred);
     }
 
     // objective:
@@ -52,21 +54,15 @@ void quake::AverageCaseMipModel::Build(const boost::optional<Solution> &solution
 double quake::AverageCaseMipModel::GetTrafficIndex(const quake::Solution &solution) const {
     auto traffic_index = std::numeric_limits<double>::max();
 
-    const auto num_forecasts = forecasts_.size();
-    for (auto station_index = first_regular_station_; station_index < num_stations_; ++station_index) {
-        const auto station = model_->Station(station_index);
+    for (const auto &station :Stations()) {
+        if (station == GroundStation::None) { continue; }
+
         double average_keys_transferred = 0;
         for (const auto &window : solution.ObservationWindows(station)) {
-            for (auto forecast_index = 0; forecast_index < num_forecasts; ++forecast_index) {
-                average_keys_transferred += model_->WeatherAdjustedTransferredKeys(station,
-                                                                                   window.begin(),
-                                                                                   window.end(),
-                                                                                   forecasts_.at(forecast_index));
-            }
+            average_keys_transferred += KeyRate(station, window);
         }
-        average_keys_transferred /= num_forecasts;
 
-        const auto station_traffic_index = average_keys_transferred / model_->TransferShare(station_index);
+        const auto station_traffic_index = average_keys_transferred / TransferShare(station);
         traffic_index = std::min(traffic_index, station_traffic_index);
     }
 

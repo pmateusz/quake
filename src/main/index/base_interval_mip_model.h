@@ -30,40 +30,51 @@
 #include "forecast.h"
 #include "scenario_pool.h"
 #include "base_mip_model.h"
+#include "extended_problem.h"
+
+#include "robust/interval_var.h"
 
 namespace quake {
 
     class BaseIntervalMipModel : public BaseMipModel {
     public:
-        BaseIntervalMipModel(InferredModel const *model,
-                             boost::posix_time::time_duration time_step,
+        BaseIntervalMipModel(ExtendedProblem const *problem,
+                             boost::posix_time::time_duration interval_step,
                              std::vector<Forecast> forecasts);
 
         virtual double GetTrafficIndex(const Solution &solution) const = 0;
 
         inline std::size_t NumScenarios() const { return scenario_pool_.size(); }
 
-        inline std::vector<VarInterval> &StationIntervals(std::size_t station_index) {
-            return intervals_.at(station_index);
+        inline double KeyRate(const GroundStation &station, const boost::posix_time::time_period &period) const {
+            return scenario_pool_.KeyRate(station, period);
         }
 
-        inline std::size_t KeysTransferred(std::size_t scenario_index, const BaseInterval &interval) const {
-            return scenario_pool_.KeysTransferred(scenario_index, interval);
+        inline double KeyRate(std::size_t scenario_index, const GroundStation &station, const boost::posix_time::time_period &period) const {
+            return scenario_pool_.KeyRate(scenario_index, station, period);
         }
+
+        inline const std::vector<robust::IntervalVar> &StationIntervals(const GroundStation &station) const { return intervals_.at(Index(station)); }
 
     protected:
         void Build(const boost::optional<Solution> &solution) override;
+
+        robust::IntervalVar CreateInterval(std::size_t station_index, const boost::posix_time::time_period &period);
 
         double GetTrafficIndex(const Solution &solution, const Forecast &forecast) const;
 
         virtual double GetTrafficIndexUpperBound() const;
 
-        std::unordered_map<GroundStation,
-                std::vector<boost::posix_time::time_period>> GetObservations() const override;
+        std::unordered_map<GroundStation, std::vector<boost::posix_time::time_period>> GetObservations() const override;
 
-        ScenarioPool scenario_pool_;
+        inline const std::vector<Forecast> &Forecasts() const { return forecasts_; }
+
+    private:
+        boost::posix_time::time_duration interval_step_;
+
         std::vector<Forecast> forecasts_;
-        std::vector<std::vector<VarInterval>> intervals_;
+        ScenarioPool scenario_pool_;
+        std::vector<std::vector<robust::IntervalVar> > intervals_;
     };
 }
 

@@ -19,81 +19,74 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include <numeric>
+
 #include "forecast.h"
 #include "scenario_pool.h"
 
 quake::ScenarioPool::ScenarioPool()
-        : model_{nullptr},
-          num_scenarios_{0} {}
+        : problem_{nullptr} {}
 
-quake::ScenarioPool::ScenarioPool(const quake::ScenarioPool &other)
-        : model_{other.model_},
-          transferred_keys_index_{other.transferred_keys_index_},
-          num_scenarios_{other.num_scenarios_} {}
+quake::ScenarioPool::ScenarioPool(const ScenarioPool &other)
+        : problem_{other.problem_},
+          key_rate_index_{other.key_rate_index_} {}
 
-quake::ScenarioPool::ScenarioPool(quake::ScenarioPool &&other) noexcept
-        : model_{other.model_},
-          transferred_keys_index_{std::move(other.transferred_keys_index_)},
-          num_scenarios_{other.num_scenarios_} {}
+quake::ScenarioPool::ScenarioPool(ScenarioPool &&other) noexcept
+        : problem_{other.problem_},
+          key_rate_index_{std::move(other.key_rate_index_)} {}
 
-quake::ScenarioPool &quake::ScenarioPool::operator=(const quake::ScenarioPool &other) {
-    model_ = other.model_;
-    transferred_keys_index_ = other.transferred_keys_index_;
-    num_scenarios_ = other.num_scenarios_;
+quake::ScenarioPool &quake::ScenarioPool::operator=(const ScenarioPool &other) {
+    problem_ = other.problem_;
+    key_rate_index_ = other.key_rate_index_;
     return *this;
 }
 
-quake::ScenarioPool &quake::ScenarioPool::operator=(quake::ScenarioPool &&other) noexcept {
-    model_ = other.model_;
-    transferred_keys_index_ = std::move(other.transferred_keys_index_);
-    num_scenarios_ = other.num_scenarios_;
+quake::ScenarioPool &quake::ScenarioPool::operator=(ScenarioPool &&other) noexcept {
+    problem_ = other.problem_;
+    key_rate_index_ = std::move(other.key_rate_index_);
     return *this;
 }
 
-quake::ScenarioPool::ScenarioPool(const std::vector<std::vector<quake::VarInterval> > &intervals,
-                                  const std::vector<quake::Forecast> &forecasts,
-                                  quake::InferredModel const *model)
-        : model_{model},
-          transferred_keys_index_{},
-          num_scenarios_{forecasts.size()} {
-    const auto num_scenarios = forecasts.size();
-    for (const auto &leaf_intervals : intervals) {
-        for (const auto &interval : leaf_intervals) {
-            if (interval.StationIndex == model_->DummyStationIndex()) { continue; }
+quake::ScenarioPool::ScenarioPool(const std::unordered_map<GroundStation, std::vector<boost::posix_time::time_period>> &intervals,
+                                  const std::vector<Forecast> &forecasts,
+                                  quake::ExtendedProblem const *problem)
+        : problem_{problem},
+          key_rate_index_{} {
 
-            const auto station = model->Station(interval.StationIndex);
-            const auto begin_time = model->Time(interval.Begin);
-            const auto end_time = model->Time(interval.End);
-            std::vector<int64> transferred_keys(forecasts.size(), 0);
-            for (auto scenario_index = 0; scenario_index < num_scenarios; ++scenario_index) {
-                transferred_keys[scenario_index] = model_->WeatherAdjustedTransferredKeys(station,
-                                                                                          begin_time,
-                                                                                          end_time,
-                                                                                          forecasts.at(scenario_index));
+    const auto num_forecasts = forecasts.size();
+    std::unordered_map<GroundStation, std::unordered_map<boost::posix_time::time_period, std::vector<double>>> key_rate_index{};
+    for (const auto &station_element : intervals) {
+        const auto &station = station_element.first;
+        if (station == GroundStation::None) {
+            continue;
+        }
+
+        std::unordered_map<boost::posix_time::time_period, std::vector<double>> station_index{};
+        for (const auto &period : station_element.second) {
+            std::vector<double> key_rate;
+            key_rate.reserve(num_forecasts);
+            for (const auto &forecast : forecasts) {
+                key_rate.emplace_back(problem_->KeyRate(station, period, forecast));
             }
 
-            BaseInterval base_interval{interval.StationIndex, interval.Begin, interval.End};
-            const auto insert_pair = transferred_keys_index_.emplace(std::make_pair(base_interval, transferred_keys));
+            const auto insert_pair = station_index.emplace(period, std::move(key_rate));
             CHECK(insert_pair.second);
         }
+        const auto insert_pair = key_rate_index.emplace(station_element.first, std::move(station_index));
+        CHECK(insert_pair.second);
     }
+
+    key_rate_index_ = std::move(key_rate_index);
 }
 
-int64 quake::ScenarioPool::KeysTransferred(std::size_t scenario, const quake::BaseInterval &interval) const {
-    const auto find_it = transferred_keys_index_.find(interval);
-    if (find_it == std::cend(transferred_keys_index_)) {
-        LOG(FATAL) << "Interval not found";
-    }
-    return find_it->second.at(scenario);
+double quake::ScenarioPool::KeyRate(std::size_t scenario, const GroundStation &station, const boost::posix_time::time_period &interval) const {
+    return key_rate_index_.at(station).at(interval).at(scenario);
 }
 
-int64 quake::ScenarioPool::MeanKeysTransferred(const quake::BaseInterval &interval) const {
-    const auto find_it = transferred_keys_index_.find(interval);
-    if (find_it == std::cend(transferred_keys_index_)) {
-        LOG(FATAL) << "Interval not found";
-    }
-    CHECK(!find_it->second.empty());
-    const auto total_keys_transferred
-            = std::accumulate(std::cbegin(find_it->second), std::cend(find_it->second), static_cast<int64>(0));
-    return total_keys_transferred / find_it->second.size();
+double quake::ScenarioPool::KeyRate(const quake::GroundStation &station, const boost::posix_time::time_period &interval) const {
+    const auto &key_rate_period = key_rate_index_.at(station).at(interval);
+    CHECK(!key_rate_period.empty());
+
+    double total_key_rate = std::accumulate(std::cbegin(key_rate_period), std::cend(key_rate_period), 0.0);
+    return total_key_rate / key_rate_period.size();
 }

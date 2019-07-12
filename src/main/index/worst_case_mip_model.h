@@ -32,8 +32,8 @@ namespace quake {
 
     class WorstCaseMipModel : public BaseIntervalMipModel {
     public:
-        WorstCaseMipModel(quake::InferredModel const *model,
-                          boost::posix_time::time_duration time_step,
+        WorstCaseMipModel(ExtendedProblem const *problem,
+                          boost::posix_time::time_duration interval_step,
                           std::vector<Forecast> forecasts);
 
         double GetTrafficIndex(const Solution &solution) const override;

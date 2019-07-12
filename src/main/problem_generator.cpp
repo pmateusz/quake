@@ -31,12 +31,12 @@
 #include "util/hash.h"
 #include "util/constants.h"
 
+#include "legacy/problem.h"
+
 #include "transfer_rate_reader.h"
 #include "kepler_elements.h"
 #include "elevation.h"
 #include "sunset_sunrise_reader.h"
-#include "problem.h"
-#include "problem.h"
 #include "key_consumption_engine.h"
 
 static bool inline can_transfer(double elevation_angle) {

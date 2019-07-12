@@ -29,10 +29,10 @@
 #include "sample_average_mip_model.h"
 #include "fixed_discretisation_scheme.h"
 
-quake::SampleAverageMipModel::SampleAverageMipModel(quake::InferredModel const *model,
-                                                    boost::posix_time::time_duration time_step,
-                                                    std::vector<quake::Forecast> forecasts, double target_index)
-        : BaseIntervalMipModel(model, std::move(time_step), std::move(forecasts)),
+quake::SampleAverageMipModel::SampleAverageMipModel(ExtendedProblem const *problem,
+                                                    boost::posix_time::time_duration interval_step,
+                                                    std::vector<Forecast> forecasts, double target_index)
+        : BaseIntervalMipModel(problem, std::move(interval_step), std::move(forecasts)),
           target_index_{target_index},
           callback_{} {}
 
@@ -57,7 +57,7 @@ void quake::SampleAverageMipModel::Build(const boost::optional<Solution> &soluti
 }
 
 double quake::SampleAverageMipModel::GetTrafficIndex(const quake::Solution &solution) const {
-    return BaseIntervalMipModel::GetTrafficIndex(solution, forecasts_.front());
+    return BaseIntervalMipModel::GetTrafficIndex(solution, Forecasts().front());
 }
 
 quake::SampleAverageMipModel::SampleAverageCallback::SampleAverageCallback(quake::SampleAverageMipModel &model,
@@ -86,12 +86,14 @@ void quake::SampleAverageMipModel::SampleAverageCallback::callback() {
 
     try {
         const auto num_scenarios = model_.NumScenarios();
-        for (auto station_index = model_.FirstRegularStation(); station_index < model_.NumStations(); ++station_index) {
+        for (const auto &station : model_.Stations()) {
+            if (station == GroundStation::None) { continue; }
+
             // consider a sub-problem for each station
             // evaluate distance to the target index
             scenario_distance_.clear();
             for (auto scenario_index = 0; scenario_index < num_scenarios; ++scenario_index) {
-                scenario_distance_.emplace_back(DistanceToTarget(scenario_index, station_index));
+                scenario_distance_.emplace_back(DistanceToTarget(scenario_index, station));
             }
             const auto distance_sum
                     = std::accumulate(std::cbegin(scenario_distance_), std::cend(scenario_distance_), 0.0);
@@ -101,18 +103,17 @@ void quake::SampleAverageMipModel::SampleAverageCallback::callback() {
                 // number of keys to deliver
 
                 GRBLinExpr keys_transferred_expr = 0.0;
-                for (const auto &transfer_interval : model_.StationIntervals(station_index)) {
+                for (const auto &transfer_interval : model_.StationIntervals(station)) {
                     double interval_coefficient = 0.0;
                     for (auto scenario_index = 0; scenario_index < num_scenarios; ++scenario_index) {
                         interval_coefficient
-                                += model_.KeysTransferred(scenario_index, transfer_interval);
+                                += model_.KeyRate(scenario_index, station, transfer_interval.Period());
                     }
-                    keys_transferred_expr += interval_coefficient * transfer_interval.Var;
+                    keys_transferred_expr += interval_coefficient * transfer_interval.Var();
                 }
 
                 GRBLinExpr cumulative_target_distance
-                        = num_scenarios * target_traffic_index_
-                          - (1.0 / model_.TransferShare(station_index)) * keys_transferred_expr;
+                        = num_scenarios * target_traffic_index_ - (1.0 / model_.TransferShare(station)) * keys_transferred_expr;
                 addLazy(cumulative_target_distance <= 0.0);
             } else {
                 scenario_by_distance_.clear();
@@ -160,7 +161,7 @@ void quake::SampleAverageMipModel::SampleAverageCallback::callback() {
                 }
 
                 // check if constraint is satisfied
-                const auto &station_intervals = model_.StationIntervals(station_index);
+                const auto &station_intervals = model_.StationIntervals(station);
                 const auto num_station_intervals = station_intervals.size();
 
                 const auto num_other_scenarios = num_scenarios - num_dual_scenarios;
@@ -177,14 +178,13 @@ void quake::SampleAverageMipModel::SampleAverageCallback::callback() {
                     const auto &interval = station_intervals.at(interval_index);
                     double interval_keys_delivered = 0.0;
                     for (const auto scenario_index : dual_scenarios_) {
-                        interval_keys_delivered += model_.KeysTransferred(scenario_index, interval);
+                        interval_keys_delivered += model_.KeyRate(scenario_index, station, interval.Period());
                     }
-                    keys_delivered_cumulative += interval_keys_delivered * util::IsActive(getSolution(interval.Var));
+                    keys_delivered_cumulative += interval_keys_delivered * util::IsActive(getSolution(interval.Var()));
                 }
 
                 const auto primal_value = (num_dual_scenarios * target_traffic_index_
-                                           - keys_delivered_cumulative / model_.TransferShare(station_index))
-                                          / num_other_scenarios;
+                                           - keys_delivered_cumulative / model_.TransferShare(station)) / num_other_scenarios;
                 util::check_near(primal_value, final_dual_value);
                 if (util::is_surely_gt(primal_value, getSolution(target_distance_var_))) {
                     VLOG(1) << "Adding optimality cut: " << primal_value
@@ -194,15 +194,14 @@ void quake::SampleAverageMipModel::SampleAverageCallback::callback() {
                         const auto &interval = station_intervals.at(interval_index);
                         double interval_keys_delivered = 0.0;
                         for (const auto scenario_index : dual_scenarios_) {
-                            interval_keys_delivered += model_.KeysTransferred(scenario_index, interval);
+                            interval_keys_delivered += model_.KeyRate(scenario_index, station, interval.Period());
                         }
-                        keys_delivered_cumulative_expr += interval_keys_delivered * interval.Var;
+                        keys_delivered_cumulative_expr += interval_keys_delivered * interval.Var();
                     }
 
                     GRBLinExpr primal_expr
                             = (num_dual_scenarios * target_traffic_index_
-                               - keys_delivered_cumulative_expr / model_.TransferShare(station_index))
-                              / num_other_scenarios;
+                               - keys_delivered_cumulative_expr / model_.TransferShare(station)) / num_other_scenarios;
 
                     addLazy(primal_expr <= target_distance_var_);
                 }

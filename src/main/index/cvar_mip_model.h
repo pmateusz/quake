@@ -31,7 +31,7 @@ namespace quake {
 
     class CVarMipModel : public BaseIntervalMipModel {
     public:
-        CVarMipModel(quake::InferredModel const *model,
+        CVarMipModel(ExtendedProblem const *problem,
                      boost::posix_time::time_duration time_step,
                      std::vector<Forecast> forecasts,
                      double target_index,

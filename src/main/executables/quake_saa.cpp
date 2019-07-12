@@ -104,7 +104,7 @@ Arguments SetupLogsAndParseArgs(int argc, char *argv[]) {
 int main(int argc, char *argv[]) {
     const auto arguments = SetupLogsAndParseArgs(argc, argv);
 
-    auto model = quake::InferredModel::Load(arguments.ModelPath);
+    auto model = quake::ExtendedProblem::load_json(arguments.ModelPath);
     const auto primary_forecast = quake::Forecast::load_csv(arguments.CloudCoverPath);
 
     const auto NUM_SCENARIOS = 128;

@@ -21,49 +21,49 @@
 
 #include "block_intervals_mip_model.h"
 
-quake::BlockIntervalsMipModel::BlockIntervalsMipModel(quake::InferredModel const *model,
+quake::BlockIntervalsMipModel::BlockIntervalsMipModel(ExtendedProblem const *problem,
                                                       Forecast forecast,
-                                                      boost::posix_time::time_duration time_step)
-        : BaseIntervalMipModel(model, std::move(time_step), std::vector<Forecast>{std::move(forecast)}) {}
+                                                      boost::posix_time::time_duration interval_step)
+        : BaseIntervalMipModel(problem, std::move(interval_step), std::vector<Forecast>{std::move(forecast)}) {}
 
 double quake::BlockIntervalsMipModel::GetTrafficIndex(const quake::Solution &solution) const {
-    return BaseIntervalMipModel::GetTrafficIndex(solution, forecasts_.front());
+    return BaseIntervalMipModel::GetTrafficIndex(solution, Forecasts().front());
 }
 
 void quake::BlockIntervalsMipModel::Build(const boost::optional<Solution> &solution) {
     BaseIntervalMipModel::Build(solution);
 
+    const auto &forecast = Forecasts().front();
+
     // obtain maximum lambdas
-    const auto last_time_slot = model_->TimeRange();
+    const auto max_observation_period = problem_->ObservationPeriod();
     std::vector<double> max_station_keys{0};
     std::vector<double> max_station_lambda{0.0};
-    for (auto station_index = first_regular_station_; station_index < num_stations_; ++station_index) {
-        const auto station_callback = model_->GetWeatherAdjustedCumulativeKeyRate(station_index);
-        const auto max_keys = station_callback(last_time_slot);
+    for (const auto &station :Stations()) {
+        if (station == GroundStation::None) { continue; }
+
+        const double max_keys = problem_->KeyRate(station, max_observation_period, forecast);
         max_station_keys.push_back(max_keys);
 
-        const auto best_station_lambda = ceil(
-                static_cast<double>(max_keys) / model_->TransferShare(station_index));
+        const auto best_station_lambda = ceil(max_keys / problem_->TransferShare(station));
         max_station_lambda.push_back(best_station_lambda);
     }
 
     // constraint: lambda is bounded from above
     const double max_lambda = *std::max_element(std::cbegin(max_station_lambda), std::cend(max_station_lambda));
-    const double max_keys_sum
-            = std::accumulate(std::cbegin(max_station_keys), std::cend(max_station_keys), 0.0);
     lambda_ = mip_model_.addVar(0.0, max_lambda, 0.0, GRB_CONTINUOUS, "lambda");
-    std::vector<GRBLinExpr> keys_delivered(num_stations_);
-    for (auto station_index = first_regular_station_; station_index < num_stations_; ++station_index) {
-        for (const auto &interval : intervals_[station_index]) {
-            CHECK_EQ(interval.StationIndex, interval.StationIndex);
-            keys_delivered.at(interval.StationIndex) += scenario_pool_.KeysTransferred(0, interval) * interval.Var;
-        }
-    }
 
-    for (auto station_index = first_regular_station_; station_index < num_stations_; ++station_index) {
-        mip_model_.addConstr(
-                model_->TransferShare(station_index) * lambda_
-                <= model_->InitialBuffer(station_index) + keys_delivered.at(station_index));
+    for (const auto &station : Stations()) {
+        if (station == GroundStation::None) { continue; }
+
+        GRBLinExpr keys_delivered = 0;
+        const auto station_index = Index(station);
+        for (const auto &interval : StationIntervals(station)) {
+            CHECK_EQ(interval.StationIndex(), station_index);
+            keys_delivered += problem_->KeyRate(station, interval.Period(), forecast) * interval.Var();
+        }
+
+        mip_model_.addConstr(TransferShare(station) * lambda_ <= InitialBuffer(station) + keys_delivered);
     }
 
     // objective function
@@ -73,12 +73,14 @@ void quake::BlockIntervalsMipModel::Build(const boost::optional<Solution> &solut
     mip_model_.setObjectiveN(first_objective, 0, 10);
 
     GRBLinExpr total_keys = 0.0;
-    for (auto station_index = first_regular_station_; station_index < num_stations_; ++station_index) {
-        for (const auto &interval : intervals_[station_index]) {
-            total_keys += scenario_pool_.KeysTransferred(0, interval) * interval.Var;
+    for (const auto &station : Stations()) {
+        if (station == GroundStation::None) { continue; }
+        for (const auto &interval : StationIntervals(station)) {
+            total_keys += problem_->KeyRate(station, interval.Period(), forecast) * interval.Var();
         }
     }
 
+    const double max_keys_sum = std::accumulate(std::cbegin(max_station_keys), std::cend(max_station_keys), 0.0);
     total_keys_ = mip_model_.addVar(0, max_keys_sum, 0.0, GRB_CONTINUOUS, "total_keys");
     mip_model_.addConstr(total_keys_ == total_keys);
     GRBLinExpr second_objective = total_keys_;

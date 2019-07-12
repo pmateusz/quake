@@ -22,32 +22,34 @@
 #ifndef QUAKE_CROSS_MOMENT_MIP_MODEL_H
 #define QUAKE_CROSS_MOMENT_MIP_MODEL_H
 
-#include "base_interval_mip_model.h"
 
 #include <boost/config.hpp>
 #include <boost/numeric/ublas/vector.hpp>
 #include <boost/numeric/ublas/matrix.hpp>
 
+#include "robust/interval_var.h"
+#include "base_interval_mip_model.h"
+
 namespace quake {
 
     class CrossMomentMipModel : public BaseIntervalMipModel {
     public:
-        CrossMomentMipModel(quake::InferredModel const *model,
-                            boost::posix_time::time_duration time_step,
+        CrossMomentMipModel(ExtendedProblem const *problem,
+                            boost::posix_time::time_duration interval_step,
                             std::vector<Forecast> forecasts,
                             double target_index);
 
         double GetTrafficIndex(const Solution &solution) const override;
 
     protected:
-        boost::numeric::ublas::matrix<double> ExtractScenarioMatrix(std::size_t station_index) const;
+        boost::numeric::ublas::matrix<double> ExtractScenarioMatrix(const GroundStation &station) const;
 
         void Build(const boost::optional<Solution> &solution) override;
 
     private:
-        double ExpectedKeysDelivered(std::size_t station_index) const;
+        double ExpectedKeysDelivered(const GroundStation &station) const;
 
-        bool IsSetInSolution(const BaseInterval &interval, const Solution &solution) const;
+        bool IsSetInSolution(const robust::IntervalVar &interval, const Solution &solution) const;
 
         double target_index_;
     };

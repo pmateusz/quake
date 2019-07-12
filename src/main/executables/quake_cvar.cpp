@@ -36,7 +36,6 @@
 #include "index/cross_moment_mip_model.h"
 #include "index/cvar_mip_model.h"
 #include "forecast.h"
-#include "inferred_model.h"
 
 DEFINE_string(output, "", "The output solution file.");
 DEFINE_string(input, "", "The input problem file.");
@@ -102,7 +101,7 @@ Arguments SetupLogsAndParseArgs(int argc, char *argv[]) {
 int main(int argc, char *argv[]) {
     const auto arguments = SetupLogsAndParseArgs(argc, argv);
 
-    auto model = quake::InferredModel::Load(arguments.ModelPath);
+    auto model = quake::ExtendedProblem::load_json(arguments.ModelPath);
     const auto primary_forecast = quake::Forecast::load_csv(arguments.CloudCoverPath);
 
     quake::GaussianForecastGenerator gaussian_forecast_generator{1.0};

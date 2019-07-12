@@ -25,10 +25,13 @@
 #include <vector>
 #include <unordered_map>
 
+#include <boost/config.hpp>
+#include <boost/date_time.hpp>
+
 #include <ortools/base/basictypes.h>
 
-#include "base_interval.h"
-#include "legacy/inferred_model.h"
+#include "extended_problem.h"
+#include "util/hash.h"
 
 namespace quake {
 
@@ -46,20 +49,19 @@ namespace quake {
 
         ScenarioPool &operator=(ScenarioPool &&other) noexcept;
 
-        ScenarioPool(const std::vector<std::vector<quake::VarInterval> > &intervals,
+        ScenarioPool(const std::unordered_map<GroundStation, std::vector<boost::posix_time::time_period>> &intervals,
                      const std::vector<Forecast> &forecasts,
-                     quake::InferredModel const *model);
+                     ExtendedProblem const *model);
 
-        inline std::size_t size() const { return num_scenarios_; }
+        inline std::size_t size() const { return key_rate_index_.size(); }
 
-        int64 KeysTransferred(std::size_t scenario, const BaseInterval &interval) const;
+        double KeyRate(std::size_t scenario, const GroundStation &station, const boost::posix_time::time_period &interval) const;
 
-        int64 MeanKeysTransferred(const BaseInterval &interval) const;
+        double KeyRate(const GroundStation &station, const boost::posix_time::time_period &interval) const;
 
     private:
-        quake::InferredModel const *model_;
-        std::unordered_map<BaseInterval, std::vector<int64> > transferred_keys_index_;
-        std::size_t num_scenarios_;
+        ExtendedProblem const *problem_;
+        std::unordered_map<GroundStation, std::unordered_map<boost::posix_time::time_period, std::vector<double>>> key_rate_index_;
     };
 }
 

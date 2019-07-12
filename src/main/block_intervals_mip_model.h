@@ -22,15 +22,16 @@
 #ifndef QUAKE_BLOCKINTERVALSMIPMODEL_H
 #define QUAKE_BLOCKINTERVALSMIPMODEL_H
 
-#include "index/base_interval_mip_model.h"
 
 #include <glog/logging.h>
+
+#include "index/base_interval_mip_model.h"
 
 namespace quake {
 
     class BlockIntervalsMipModel : public BaseIntervalMipModel {
     public:
-        BlockIntervalsMipModel(quake::InferredModel const *model,
+        BlockIntervalsMipModel(ExtendedProblem const *problem,
                                Forecast forecast,
                                boost::posix_time::time_duration time_step);
 

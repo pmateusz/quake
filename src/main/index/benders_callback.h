@@ -35,16 +35,16 @@ namespace quake {
                   target_traffic_index_{target_traffic_index} {}
 
     protected:
-        double DistanceToTarget(std::size_t scenario_index, std::size_t station_index) {
-            std::size_t keys_received = 0;
-            for (auto &interval : model_.StationIntervals(station_index)) {
-                const auto interval_status = getSolution(interval.Var);
+        double DistanceToTarget(std::size_t scenario_index, const GroundStation &station) {
+            double keys_received = 0;
+            for (auto &interval : model_.StationIntervals(station)) {
+                const auto interval_status = getSolution(interval.Var());
                 if (util::IsActive(interval_status)) {
-                    keys_received += model_.KeysTransferred(scenario_index, interval);
+                    keys_received += model_.KeyRate(scenario_index, station, interval.Period());
                 }
             }
 
-            const auto local_index = keys_received / model_.TransferShare(station_index);
+            const auto local_index = keys_received / model_.TransferShare(station);
             return target_traffic_index_ - local_index;
         }
 

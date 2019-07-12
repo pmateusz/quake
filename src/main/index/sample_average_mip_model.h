@@ -29,8 +29,8 @@ namespace quake {
 
     class SampleAverageMipModel : public BaseIntervalMipModel {
     public:
-        SampleAverageMipModel(quake::InferredModel const *model,
-                              boost::posix_time::time_duration time_step,
+        SampleAverageMipModel(ExtendedProblem const *problem,
+                              boost::posix_time::time_duration interval_step,
                               std::vector<Forecast> forecasts,
                               double target_index);
 

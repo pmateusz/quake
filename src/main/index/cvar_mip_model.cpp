@@ -27,12 +27,12 @@
 #include "util/math.h"
 #include "cvar_mip_model.h"
 
-quake::CVarMipModel::CVarMipModel(quake::InferredModel const *model,
-                                  boost::posix_time::time_duration time_step,
-                                  std::vector<quake::Forecast> forecasts,
+quake::CVarMipModel::CVarMipModel(ExtendedProblem const *problem,
+                                  boost::posix_time::time_duration interval_step,
+                                  std::vector<Forecast> forecasts,
                                   double target_index,
                                   double epsilon)
-        : BaseIntervalMipModel(model, std::move(time_step), std::move(forecasts)),
+        : BaseIntervalMipModel(problem, std::move(interval_step), std::move(forecasts)),
           target_index_{target_index},
           epsilon_{epsilon} {}
 
@@ -42,20 +42,22 @@ void quake::CVarMipModel::Build(const boost::optional<quake::Solution> &solution
 
     BaseIntervalMipModel::Build(solution);
 
+    const auto &forecast = Forecasts().front();
+
     // variable: traffic index
     const auto traffic_index_ub = BaseIntervalMipModel::GetTrafficIndexUpperBound();
     auto traffic_index = mip_model_.addVar(0, traffic_index_ub, 0, GRB_CONTINUOUS, "traffic_index");
 
     // constraint: bound the traffic index from above
-    for (auto station_index = first_regular_station_; station_index < num_stations_; ++station_index) {
-        const auto &station_intervals = intervals_.at(station_index);
+    for (const auto &station : Stations()) {
+        if (station == GroundStation::None) { continue; }
 
         GRBLinExpr keys_transferred = 0;
-        for (const auto &interval : station_intervals) {
-            keys_transferred += scenario_pool_.KeysTransferred(0, interval) * interval.Var;
+        for (const auto &interval : StationIntervals(station)) {
+            keys_transferred += problem_->KeyRate(station, interval.Period(), forecast) * interval.Var();
         }
 
-        mip_model_.addConstr(model_->TransferShare(station_index) * traffic_index <= keys_transferred);
+        mip_model_.addConstr(TransferShare(station) * traffic_index <= keys_transferred);
     }
 
     // objective
@@ -69,15 +71,14 @@ void quake::CVarMipModel::Build(const boost::optional<quake::Solution> &solution
 }
 
 double quake::CVarMipModel::GetTrafficIndex(const quake::Solution &solution) const {
-    return BaseIntervalMipModel::GetTrafficIndex(solution, forecasts_.front());
+    return BaseIntervalMipModel::GetTrafficIndex(solution, Forecasts().front());
 }
 
 quake::CVarMipModel::CVarCallback::CVarCallback(quake::CVarMipModel &model, double target_index, double epsilon)
         : BendersCallback{model, target_index},
           epsilon_{epsilon} {}
 
-static bool
-descending_comparator(const std::pair<std::size_t, double> &left, const std::pair<std::size_t, double> &right) {
+static bool descending_comparator(const std::pair<std::size_t, double> &left, const std::pair<std::size_t, double> &right) {
     return left.second > right.second;
 }
 
@@ -86,10 +87,12 @@ void quake::CVarMipModel::CVarCallback::callback() {
 
     try {
         const auto num_scenarios = model_.NumScenarios();
-        for (auto station_index = model_.FirstRegularStation(); station_index < model_.NumStations(); ++station_index) {
+        for (const auto &station : model_.Stations()) {
+            if (station == GroundStation::None) { continue; }
+
             std::vector<double> scenario_distance(num_scenarios, 0.0);
             for (auto scenario_index = 0; scenario_index < num_scenarios; ++scenario_index) {
-                scenario_distance.at(scenario_index) = DistanceToTarget(scenario_index, station_index);
+                scenario_distance.at(scenario_index) = DistanceToTarget(scenario_index, station);
             }
             const auto distance_sum
                     = std::accumulate(std::cbegin(scenario_distance), std::cend(scenario_distance), 0.0);
@@ -98,26 +101,25 @@ void quake::CVarMipModel::CVarCallback::callback() {
                 // number of keys to deliver
                 double keys_transferred = 0.0;
                 GRBLinExpr keys_transferred_expr = 0.0;
-                for (const auto &transfer_interval : model_.StationIntervals(station_index)) {
+                for (const auto &transfer_interval : model_.StationIntervals(station)) {
                     double interval_coefficient = 0.0;
                     for (auto scenario_index = 0; scenario_index < num_scenarios; ++scenario_index) {
                         interval_coefficient
-                                += model_.KeysTransferred(scenario_index, transfer_interval);
+                                += model_.KeyRate(scenario_index, station, transfer_interval.Period());
                     }
-                    keys_transferred_expr += interval_coefficient * transfer_interval.Var;
-                    keys_transferred += interval_coefficient * util::IsActive(getSolution(transfer_interval.Var));
+                    keys_transferred_expr += interval_coefficient * transfer_interval.Var();
+                    keys_transferred += interval_coefficient * util::IsActive(getSolution(transfer_interval.Var()));
                 }
 
                 GRBLinExpr cumulative_target_distance_expr = num_scenarios * target_traffic_index_
-                                                             - keys_transferred_expr /
-                                                               model_.TransferShare(station_index);
+                                                             - keys_transferred_expr / model_.TransferShare(station);
 
                 double final_cumulative_target_distance = num_scenarios * target_traffic_index_
-                                                          - keys_transferred / model_.TransferShare(station_index);
+                                                          - keys_transferred / model_.TransferShare(station);
 
                 util::check_near(distance_sum, final_cumulative_target_distance);
                 VLOG(1) << "Adding feasibility cut: " << distance_sum
-                        << " (cumulative target distance) <= 0 (at station: " << station_index << ")";
+                        << " (cumulative target distance) <= 0 (at station: " << station << ")";
                 addLazy(cumulative_target_distance_expr <= 0.0);
             } else {
                 // sort scenarios descending by distance
@@ -145,28 +147,26 @@ void quake::CVarMipModel::CVarCallback::callback() {
                                               + (1.0 - static_cast<double>(scenarios_to_sum) / denominator) *
                                                 delay_last_scenario;
                 if (final_dual_value > 0.0) {
-                    const auto &station_intervals = model_.StationIntervals(station_index);
-
                     GRBLinExpr cumulative_keys_scenarios_expr = 0;
                     double cumulative_keys_scenarios = 0;
-                    for (const auto &interval : station_intervals) {
+                    for (const auto &interval : model_.StationIntervals(station)) {
                         double interval_cumulative_key_transferred = 0;
                         for (auto scenario_pos = 0; scenario_pos < scenarios_to_sum; ++scenario_pos) {
                             const auto scenario_index = scenario_by_distance.at(scenario_pos).first;
-                            interval_cumulative_key_transferred += model_.KeysTransferred(scenario_index, interval);
+                            interval_cumulative_key_transferred += model_.KeyRate(scenario_index, station, interval.Period());
                         }
 
                         cumulative_keys_scenarios_expr
-                                += interval_cumulative_key_transferred * interval.Var;
+                                += interval_cumulative_key_transferred * interval.Var();
                         cumulative_keys_scenarios
-                                += interval_cumulative_key_transferred * util::IsActive(getSolution(interval.Var));
+                                += interval_cumulative_key_transferred * util::IsActive(getSolution(interval.Var()));
                     }
                     GRBLinExpr cumulative_distance_scenarios_expr = scenarios_to_sum * target_traffic_index_
                                                                     - cumulative_keys_scenarios_expr /
-                                                                      model_.TransferShare(station_index);
+                                                                      model_.TransferShare(station);
                     double cumulative_distance_scenarios = scenarios_to_sum * target_traffic_index_ -
                                                            cumulative_keys_scenarios /
-                                                           model_.TransferShare(station_index);
+                                                           model_.TransferShare(station);
 
 
                     double distance_last_scenario = 0;
@@ -176,23 +176,22 @@ void quake::CVarMipModel::CVarCallback::callback() {
                         GRBLinExpr keys_last_scenario_expr = 0;
 
                         const auto scenario_index = scenario_by_distance.at(scenarios_to_sum).first;
-                        for (const auto &interval : station_intervals) {
-                            keys_last_scenario += model_.KeysTransferred(scenario_index, interval)
-                                                  * util::IsActive(getSolution(interval.Var));
-                            keys_last_scenario_expr += model_.KeysTransferred(scenario_index, interval) * interval.Var;
+                        for (const auto &interval : model_.StationIntervals(station)) {
+                            keys_last_scenario += model_.KeyRate(scenario_index, station, interval.Period())
+                                                  * util::IsActive(getSolution(interval.Var()));
+                            keys_last_scenario_expr += model_.KeyRate(scenario_index, station, interval.Period()) * interval.Var();
                         }
 
                         distance_last_scenario =
-                                target_traffic_index_ - keys_last_scenario / model_.TransferShare(station_index);
+                                target_traffic_index_ - keys_last_scenario / model_.TransferShare(station);
                         distance_last_scenario_expr =
-                                target_traffic_index_ - keys_last_scenario_expr / model_.TransferShare(station_index);
+                                target_traffic_index_ - keys_last_scenario_expr / model_.TransferShare(station);
                     }
 
                     const auto primal_value = cumulative_distance_scenarios / denominator
                                               + (1.0 - scenarios_to_sum / denominator) * distance_last_scenario;
                     util::check_near(primal_value, final_dual_value);
-                    VLOG(1) << "Adding optimality cut: " << final_dual_value
-                            << " <= 0 (at station: " << station_index << ")";
+                    VLOG(1) << "Adding optimality cut: " << final_dual_value << " <= 0 (at station: " << station << ")";
                     addLazy(cumulative_distance_scenarios_expr / denominator
                             + (1.0 - scenarios_to_sum / denominator) * distance_last_scenario_expr <= 0);
                 }

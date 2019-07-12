@@ -27,30 +27,23 @@
 #include <boost/config.hpp>
 #include <boost/date_time.hpp>
 
+#include "interval_station.h"
+
 namespace quake {
 
     namespace robust {
 
-        class IntervalVar {
+        class IntervalVar : public IntervalStation {
         public:
             IntervalVar(std::size_t station_index, boost::posix_time::time_period period, GRBVar var)
-                    : station_index_{station_index},
-                      period_{period},
+                    : IntervalStation{station_index, period},
                       var_{var} {}
-
-            inline std::size_t StationIndex() { return station_index_; }
-
-            inline boost::posix_time::time_period &Period() { return period_; }
-
-            inline const boost::posix_time::time_period &Period() const { return period_; }
 
             inline GRBVar &Var() { return var_; }
 
             inline const GRBVar &Var() const { return var_; }
 
         private:
-            std::size_t station_index_;
-            boost::posix_time::time_period period_;
             GRBVar var_;
         };
     }

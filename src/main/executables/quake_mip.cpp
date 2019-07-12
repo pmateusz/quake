@@ -42,10 +42,8 @@
 
 #include "legacy/cp_solution.h"
 #include "legacy/cp_solution_json_writer.h"
-#include "inferred_model.h"
-#include "solution_json_reader.h"
+#include "legacy/inferred_model.h"
 #include "block_intervals_mip_model.h"
-#include "compound_intervals_mip_model.h"
 
 DEFINE_string(output, "", "The output solution file.");
 DEFINE_string(input, "", "The input problem file.");
@@ -150,12 +148,14 @@ int main(int argc, char *argv[]) {
     model.Apply(forecast);
 
     if (arguments.PreviousSolutionPath) {
-        const auto previous_solution = quake::Solution::Load(*arguments.PreviousSolutionPath);
+        const auto previous_solution = quake::Solution::load_json(*arguments.PreviousSolutionPath);
         model.Apply(previous_solution);
     }
 
-    quake::BlockIntervalsMipModel mip_model(&model, forecast, arguments.TimeStep);
-    const auto solution_opt = mip_model.Solve(arguments.TimeLimit, boost::none, boost::none);
+//    quake::BlockIntervalsMipModel mip_model(&model, forecast, arguments.TimeStep);
+//    const auto solution_opt = mip_model.Solve(arguments.TimeLimit, boost::none, boost::none);
+    boost::optional<quake::Solution> solution_opt = boost::none;
+    LOG(FATAL) << "Not ported";
     if (solution_opt) {
         Save(model, *solution_opt, arguments.OutputSolutionPath, forecast);
     }

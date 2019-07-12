@@ -35,8 +35,8 @@ namespace quake {
 
     class AverageCaseMipModel : public BaseIntervalMipModel {
     public:
-        AverageCaseMipModel(quake::InferredModel const *model,
-                            boost::posix_time::time_duration time_step,
+        AverageCaseMipModel(ExtendedProblem const *problem,
+                            boost::posix_time::time_duration interval_step,
                             std::vector<Forecast> forecasts);
 
         double GetTrafficIndex(const Solution &solution) const override;

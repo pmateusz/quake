@@ -30,10 +30,10 @@
 
 #include "util/math.h"
 
-quake::CrossMomentMipModel::CrossMomentMipModel(quake::InferredModel const *model,
-                                                boost::posix_time::time_duration time_step,
+quake::CrossMomentMipModel::CrossMomentMipModel(ExtendedProblem const *problem,
+                                                boost::posix_time::time_duration interval_step,
                                                 std::vector<quake::Forecast> forecasts, double target_index)
-        : BaseIntervalMipModel(model, std::move(time_step), std::move(forecasts)),
+        : BaseIntervalMipModel(problem, std::move(interval_step), std::move(forecasts)),
           target_index_{target_index} {}
 
 void quake::CrossMomentMipModel::Build(const boost::optional<Solution> &solution) {
@@ -42,23 +42,22 @@ void quake::CrossMomentMipModel::Build(const boost::optional<Solution> &solution
     // variable: traffic index
     const auto max_traffic_index = GetTrafficIndexUpperBound();
     std::vector<GRBVar> station_target_distance;
-    for (auto station_index = 0; station_index < num_stations_; ++station_index) {
+    for (const auto &station : Stations()) {
         std::stringstream label;
-        label << "s" << station_index << "_distance_index";
+        label << "s" << Index(station) << "_distance_index";
         station_target_distance.push_back(mip_model_.addVar(0.0, max_traffic_index, 0.0, GRB_CONTINUOUS, label.str()));
     }
 
     // constraints: quadratic constraints
-    for (auto station_index = first_regular_station_; station_index < num_stations_; ++station_index) {
-        const auto scenario_matrix = ExtractScenarioMatrix(station_index);
+    for (const auto &station : Stations()) {
+        if (station == GroundStation::None) { continue; }
+
+        const auto station_index = Index(station);
+        const auto scenario_matrix = ExtractScenarioMatrix(station);
         const auto mean_vector = util::mean(scenario_matrix);
         const auto covariance_matrix = util::covariance(scenario_matrix);
-        const auto num_intervals = intervals_.at(station_index).size();
-        const auto &station_intervals = intervals_.at(station_index);
-
-        LOG(INFO) << station_index;
-        LOG(INFO) << mean_vector;
-        LOG(INFO) << covariance_matrix;
+        const auto &station_intervals = StationIntervals(station);
+        const auto num_intervals = station_intervals.size();
 
         double initial_covariance_multiplication = 0.0;
         double initial_mean_distance = 0.0;
@@ -69,7 +68,7 @@ void quake::CrossMomentMipModel::Build(const boost::optional<Solution> &solution
             const auto &left_interval = station_intervals.at(left_interval_index);
             for (auto right_interval_index = 0; right_interval_index < num_intervals; ++right_interval_index) {
                 const auto &right_interval = station_intervals.at(left_interval_index);
-                covariance_multiplication += left_interval.Var * right_interval.Var *
+                covariance_multiplication += left_interval.Var() * right_interval.Var() *
                                              covariance_matrix(right_interval_index, left_interval_index);
 
                 if (IsSetInSolution(left_interval, *solution) && IsSetInSolution(right_interval, *solution)) {
@@ -77,12 +76,12 @@ void quake::CrossMomentMipModel::Build(const boost::optional<Solution> &solution
                 }
             }
 
-            mean_distance += mean_vector(left_interval_index) * left_interval.Var;
+            mean_distance += mean_vector(left_interval_index) * left_interval.Var();
             if (IsSetInSolution(left_interval, *solution)) {
                 initial_mean_distance += mean_vector(left_interval_index);
             }
         }
-        const auto expected_keys_to_deliver = ExpectedKeysDelivered(station_index);
+        const auto expected_keys_to_deliver = ExpectedKeysDelivered(station);
         GRBQuadExpr right_expr =
                 4 * station_target_distance.at(station_index) * (mean_distance - expected_keys_to_deliver);
         mip_model_.addQConstr(covariance_multiplication <= right_expr, "covariance_bound");
@@ -91,25 +90,24 @@ void quake::CrossMomentMipModel::Build(const boost::optional<Solution> &solution
     }
 
     // constraint: satisfaction on average
-    for (auto station_index = first_regular_station_; station_index < num_stations_; ++station_index) {
-        const auto &station_intervals = intervals_.at(station_index);
-        const auto num_intervals = station_intervals.size();
+    for (const auto &station : Stations()) {
+        if (station == GroundStation::None) { continue; }
+
         GRBLinExpr keys_transferred = 0.0;
-        for (auto interval_index = 0; interval_index < num_intervals; ++interval_index) {
-            const auto &interval = station_intervals.at(interval_index);
-            keys_transferred += interval.Var * scenario_pool_.MeanKeysTransferred(interval);
+        for (const auto &interval : StationIntervals(station)) {
+            keys_transferred += interval.Var() * KeyRate(station, interval.Period());
         }
-        const auto expected_keys_to_deliver = ExpectedKeysDelivered(station_index);
+        const auto expected_keys_to_deliver = ExpectedKeysDelivered(station);
 
         std::stringstream constraint_label;
-        constraint_label << "transfer_more_than_expected_station_" << station_index;
+        constraint_label << "transfer_more_than_expected_station_" << Index(station);
         mip_model_.addConstr(expected_keys_to_deliver <= keys_transferred, constraint_label.str());
     }
 
     // objective:
     GRBLinExpr objective = 0;
-    for (auto station_index = 0; station_index < num_stations_; ++station_index) {
-        objective += station_target_distance.at(station_index);
+    for (auto &local_target_distance : station_target_distance) {
+        objective += local_target_distance;
     }
 
     mip_model_.set(GRB_IntAttr_ModelSense, GRB_MINIMIZE);
@@ -117,38 +115,35 @@ void quake::CrossMomentMipModel::Build(const boost::optional<Solution> &solution
 }
 
 
-double quake::CrossMomentMipModel::GetTrafficIndex(const quake::Solution &solution) const {
-    return BaseIntervalMipModel::GetTrafficIndex(solution, forecasts_.front());
+double quake::CrossMomentMipModel::GetTrafficIndex(const Solution &solution) const {
+    return BaseIntervalMipModel::GetTrafficIndex(solution, Forecasts().front());
 }
 
 boost::numeric::ublas::matrix<double>
-quake::CrossMomentMipModel::ExtractScenarioMatrix(std::size_t station_index) const {
-    const auto num_intervals = intervals_.at(station_index).size();
-    const auto num_scenarios = scenario_pool_.size();
+quake::CrossMomentMipModel::ExtractScenarioMatrix(const GroundStation &station) const {
+    const auto &station_intervals = StationIntervals(station);
+    const auto num_intervals = station_intervals.size();
+    const auto num_scenarios = NumScenarios();
 
     boost::numeric::ublas::matrix<double> scenario_matrix(num_scenarios, num_intervals);
     for (auto interval_index = 0; interval_index < num_intervals; ++interval_index) {
-        const auto &interval = intervals_.at(station_index).at(interval_index);
+        const auto &interval = station_intervals.at(interval_index);
         for (auto scenario_index = 0; scenario_index < num_scenarios; ++scenario_index) {
-            scenario_matrix(scenario_index, interval_index) = scenario_pool_.KeysTransferred(scenario_index, interval);
+            scenario_matrix(scenario_index, interval_index) = KeyRate(scenario_index, station, interval.Period());
         }
     }
     return scenario_matrix;
 }
 
-double quake::CrossMomentMipModel::ExpectedKeysDelivered(std::size_t station_index) const {
-    return target_index_ * model_->TransferShare(station_index);
+double quake::CrossMomentMipModel::ExpectedKeysDelivered(const GroundStation &station) const {
+    return target_index_ * TransferShare(station);
 }
 
-bool quake::CrossMomentMipModel::IsSetInSolution(const quake::BaseInterval &interval,
-                                                 const quake::Solution &solution) const {
-    const auto station = model_->Station(interval.StationIndex);
+bool quake::CrossMomentMipModel::IsSetInSolution(const robust::IntervalVar &interval, const Solution &solution) const {
+    const auto station = Station(interval.StationIndex());
     for (const auto &window : solution.ObservationWindows(station)) {
-        const auto begin_index = model_->GetStartIndex(window.begin());
-        const auto end_index = model_->GetEndIndex(window.end());
-        if (end_index <= interval.Begin) { continue; }
-        if (interval.End < begin_index) { break; }
-        if (begin_index <= interval.Begin && interval.End <= end_index) { return true; }
+        if (window.is_after(interval.Period().end())) { break; }
+        if (window.contains(interval.Period())) { return true; }
     }
     return false;
 }

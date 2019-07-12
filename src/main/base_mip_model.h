@@ -32,26 +32,29 @@
 
 #include "util/gurobi.h"
 
-#include "legacy/inferred_model.h"
 #include "base_interval.h"
+#include "solution.h"
+
+#include "robust/validator.h"
 
 namespace quake {
 
     class BaseMipModel {
     public:
-        BaseMipModel(quake::InferredModel const *model, boost::posix_time::time_duration time_step)
-                : model_{model},
-                  time_step_{std::move(time_step)},
-                  num_time_{static_cast<std::size_t>(model_->TimeRange())},
-                  num_stations_{static_cast<std::size_t>(model_->StationCount())},
-                  dummy_station_{0},
-                  first_regular_station_{1},
+        explicit BaseMipModel(ExtendedProblem const *problem)
+                : problem_{problem},
+                  dummy_station_index_{0},
                   mip_environment_{},
-                  mip_model_{mip_environment_} {}
+                  mip_model_{mip_environment_} {
+            std::copy(std::cbegin(problem_->Stations()), std::cend(problem_->Stations()), std::back_inserter(stations_));
+            for (std::size_t index_pos = 0; index_pos < stations_.size(); ++index_pos) {
+                station_indices_.emplace(stations_.at(index_pos), index_pos);
+            }
+        }
 
-        boost::optional<quake::Solution> Solve(const boost::optional<boost::posix_time::time_duration> &time_limit_opt,
-                                               const boost::optional<double> &gap_opt,
-                                               const boost::optional<Solution> &solution) {
+        boost::optional<Solution> Solve(const boost::optional<boost::posix_time::time_duration> &time_limit_opt,
+                                        const boost::optional<double> &gap_opt,
+                                        const boost::optional<Solution> &initial_guess) {
             if (time_limit_opt) {
                 mip_model_.set(GRB_DoubleParam_TimeLimit, time_limit_opt->total_seconds());
             }
@@ -65,7 +68,7 @@ namespace quake {
             mip_model_.set(GRB_IntParam_Cuts, GRB_CUTS_AUTO);
 
             try {
-                Build(solution);
+                Build(initial_guess);
             } catch (const GRBException &exception) {
                 LOG(FATAL) << "Solver exception " << exception.getMessage()
                            << " error code: " << exception.getErrorCode();
@@ -86,35 +89,72 @@ namespace quake {
             ReportResults(solver_status);
 
             auto observations = GetObservations();
-            return boost::make_optional(model_->Create(std::move(observations)));
+
+            std::unordered_map<quake::GroundStation, int64> final_buffers;
+            for (const auto &element: observations) {
+                const auto station = element.first;
+
+                if (station == GroundStation::None) {
+                    final_buffers.emplace(station, 0);
+                    continue;
+                }
+
+                // number of keys transferred
+                double keys_received = 0.0;
+                for (const auto &observation_window : element.second) {
+                    keys_received += problem_->KeyRate(station, observation_window, ExtendedProblem::WeatherSample::Forecast);
+                }
+
+                // keys consumed
+                const auto total_days = problem_->ObservationPeriod().length().total_seconds() / boost::posix_time::hours(24).total_seconds();
+                const auto total_key_consumption = problem_->KeyConsumption(station) * total_days;
+
+                // initial buffer
+                const auto station_initial_buffer = problem_->InitialBuffer(station);
+
+                CHECK_GE(station_initial_buffer - total_key_consumption, 0);
+
+                final_buffers.emplace(station, station_initial_buffer + keys_received - total_key_consumption);
+            }
+
+            Solution solution{std::move(observations), std::move(final_buffers)};
+
+            robust::Validator validator{*problem_};
+            validator.Validate(solution);
+
+            return boost::make_optional(solution);
         }
-        
-        inline std::size_t FirstRegularStation() const { return first_regular_station_; }
 
-        inline std::size_t NumStations() const { return num_stations_; }
+        inline std::size_t Index(const GroundStation &station) const { return station_indices_.at(station); }
 
-        inline double TransferShare(std::size_t station_index) const { return model_->TransferShare(station_index); }
+        inline const GroundStation &Station(std::size_t station_index) const { return stations_.at(station_index); }
+
+        inline const std::vector<GroundStation> &Stations() const { return stations_; }
+
+        inline double TransferShare(const GroundStation &station) const { return problem_->TransferShare(station); }
+
+        inline double InitialBuffer(const GroundStation &station) const { return problem_->InitialBuffer(station); }
 
     protected:
+
         virtual void Build(const boost::optional<Solution> &initial_solution) = 0;
 
         virtual void ReportResults(util::SolverStatus solver_status) {
             LOG(INFO) << "Solver status: " << solver_status;
         }
 
-        virtual std::unordered_map<GroundStation,
-                std::vector<boost::posix_time::time_period> > GetObservations() const = 0;
+        virtual std::unordered_map<GroundStation, std::vector<boost::posix_time::time_period> > GetObservations() const = 0;
 
-        quake::InferredModel const *model_;
-        boost::posix_time::time_duration time_step_;
+        std::size_t dummy_station_index_;
 
-        std::size_t num_time_;
-        std::size_t num_stations_;
-        std::size_t dummy_station_;
-        std::size_t first_regular_station_;
+        ExtendedProblem const *problem_;
 
         GRBEnv mip_environment_;
         GRBModel mip_model_;
+
+    private:
+        std::vector<GroundStation> stations_;
+        std::unordered_map<GroundStation, std::size_t> station_indices_;
     };
 }
 

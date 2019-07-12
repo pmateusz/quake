@@ -32,7 +32,6 @@
 #include "util/validation.h"
 #include "util/logging.h"
 #include "forecast.h"
-#include "inferred_model.h"
 #include "index/gaussian_forecast_generator.h"
 #include "index/worst_case_mip_model.h"
 #include "index/cross_moment_mip_model.h"
@@ -100,20 +99,20 @@ Arguments SetupLogsAndParseArgs(int argc, char *argv[]) {
 int main(int argc, char *argv[]) {
     const auto arguments = SetupLogsAndParseArgs(argc, argv);
 
-    auto model = quake::InferredModel::Load(arguments.ModelPath);
+    auto problem = quake::ExtendedProblem::load_json(arguments.ModelPath);
     const auto primary_forecast = quake::Forecast::load_csv(arguments.CloudCoverPath);
 
     quake::GaussianForecastGenerator gaussian_forecast_generator{1.0};
     auto forecast_scenarios = gaussian_forecast_generator.Generate(primary_forecast, 16);
     forecast_scenarios.insert(forecast_scenarios.begin(), primary_forecast);
 
-    quake::WorstCaseMipModel worst_case_model(&model, arguments.TimeStep, forecast_scenarios);
+    quake::WorstCaseMipModel worst_case_model(&problem, arguments.TimeStep, forecast_scenarios);
     const auto worst_case_solution_opt = worst_case_model.Solve(arguments.TimeLimit, arguments.Gap, boost::none);
     CHECK(worst_case_solution_opt) << "Failed to find the worst case solution";
 
     const auto target_traffic_index = worst_case_model.GetTrafficIndex(*worst_case_solution_opt);
 //    const auto target_traffic_index = 2.05602e+06;
-    quake::CrossMomentMipModel cross_moment_model(&model, arguments.TimeStep, forecast_scenarios, target_traffic_index);
+    quake::CrossMomentMipModel cross_moment_model(&problem, arguments.TimeStep, forecast_scenarios, target_traffic_index);
     const auto cross_moment_solution_opt = cross_moment_model.Solve(arguments.TimeLimit,
                                                                     arguments.Gap,
                                                                     worst_case_solution_opt);

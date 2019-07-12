@@ -55,17 +55,17 @@
 #include "util/math.h"
 #include "util/logging.h"
 
+#include "legacy/inferred_model.h"
+#include "legacy/problem.h"
+#include "legacy/minizinc_reader.h"
+#include "legacy/minizinc_data_model.h"
 #include "problem_generator.h"
-#include "problem.h"
 #include "sunset_sunrise_reader.h"
 #include "transfer_rate_reader.h"
 #include "elevation.h"
 #include "kepler_elements.h"
-#include "minizinc_reader.h"
-#include "minizinc_data_model.h"
 #include "key_consumption_engine.h"
 #include "sunset_sunrise_database.h"
-#include "inferred_model.h"
 #include "forecast.h"
 
 TEST(ProblemGeneratorTest, CanGenerateEquivalentProblems) {
@@ -90,7 +90,7 @@ TEST(ProblemGeneratorTest, CanGenerateEquivalentProblems) {
 
     // when
     // then
-    EXPECT_EQ(problem.GroundStations(), extended_problem.GroundStations());
+    EXPECT_EQ(problem.GroundStations(), extended_problem.Stations());
     EXPECT_EQ(problem.StartTime(), extended_problem.ObservationPeriod().begin());
     EXPECT_EQ(problem.SwitchDuration(), extended_problem.SwitchDuration());
     for (const auto &ground_station : ground_stations) {
