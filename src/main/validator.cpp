@@ -49,7 +49,7 @@ std::ostream &operator<<(std::ostream &out, const Observation &observation) {
     return out;
 }
 
-void quake::robust::Validator::Validate(const quake::Solution &solution) const {
+void quake::Validator::Validate(const quake::Solution &solution) const {
     // final buffers are not negative
     for (const auto &station : solution.Stations()) {
         CHECK_GE(solution.FinalBuffer(station), 0.0);

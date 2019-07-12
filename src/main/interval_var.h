@@ -1,5 +1,5 @@
 //
-// Copyright 2018 Mateusz Polnik
+// Copyright 2019 Mateusz Polnik
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -19,44 +19,31 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#ifndef QUAKE_FIXED_DISCRETISATION_SCHEME_H
-#define QUAKE_FIXED_DISCRETISATION_SCHEME_H
+#ifndef QUAKE_INTERVAL_VAR_H
+#define QUAKE_INTERVAL_VAR_H
 
+#include <gurobi_c++.h>
+
+#include <boost/config.hpp>
 #include <boost/date_time.hpp>
 
-#include <glog/logging.h>
-#include <ortools/base/logging.h>
-
-#include "base_interval.h"
-#include "legacy/inferred_model.h"
+#include "interval_station.h"
 
 namespace quake {
 
-    struct DiscretisationScheme {
-        DiscretisationScheme(std::vector<BaseInterval> transfer_intervals, std::vector<BaseInterval> switch_intervals);
-
-        std::vector<BaseInterval> TransferIntervals;
-        std::vector<BaseInterval> SwitchIntervals;
-    };
-
-    class FixedDiscretisationScheme {
+    class IntervalVar : public IntervalStation {
     public:
-        FixedDiscretisationScheme(const quake::InferredModel &model, boost::posix_time::time_duration time_step);
+        IntervalVar(std::size_t station_index, boost::posix_time::time_period period, GRBVar var)
+                : IntervalStation{station_index, period},
+                  var_{var} {}
 
-        DiscretisationScheme Build();
+        inline GRBVar &Var() { return var_; }
+
+        inline const GRBVar &Var() const { return var_; }
 
     private:
-        BaseInterval GetTransferInterval(std::size_t begin_index) const;
-
-        BaseInterval GetSwitchInterval(std::size_t transfer_start_index) const;
-
-        const quake::InferredModel &model_;
-        const std::size_t num_time_;
-        const std::size_t dummy_station_;
-
-        boost::posix_time::time_duration time_step_;
+        GRBVar var_;
     };
 }
 
-
-#endif //QUAKE_FIXED_DISCRETISATION_SCHEME_H
+#endif //QUAKE_INTERVAL_VAR_H

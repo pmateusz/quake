@@ -32,10 +32,8 @@
 
 #include "util/gurobi.h"
 
-#include "base_interval.h"
 #include "solution.h"
-
-#include "robust/validator.h"
+#include "validator.h"
 
 namespace quake {
 
@@ -119,7 +117,7 @@ namespace quake {
 
             Solution solution{std::move(observations), std::move(final_buffers)};
 
-            robust::Validator validator{*problem_};
+            Validator validator{*problem_};
             validator.Validate(solution);
 
             return boost::make_optional(solution);

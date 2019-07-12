@@ -19,34 +19,34 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#ifndef QUAKE_INTERVAL_VAR_H
-#define QUAKE_INTERVAL_VAR_H
 
-#include <gurobi_c++.h>
+#ifndef QUAKE_DISCRETISATION_SCHEME_H
+#define QUAKE_DISCRETISATION_SCHEME_H
 
 #include <boost/config.hpp>
 #include <boost/date_time.hpp>
 
-#include "interval_station.h"
+#include "extended_problem.h"
 
 namespace quake {
 
-    namespace robust {
+    struct DiscretisationScheme {
+        DiscretisationScheme(std::unordered_map<GroundStation, std::vector<boost::posix_time::time_period>> observation_intervals,
+                             std::vector<boost::posix_time::time_period> switch_intervals);
 
-        class IntervalVar : public IntervalStation {
-        public:
-            IntervalVar(std::size_t station_index, boost::posix_time::time_period period, GRBVar var)
-                    : IntervalStation{station_index, period},
-                      var_{var} {}
+        std::unordered_map<GroundStation, std::vector<boost::posix_time::time_period>> ObservationIntervals;
+        std::vector<boost::posix_time::time_period> SwitchIntervals;
+    };
 
-            inline GRBVar &Var() { return var_; }
+    class FixedDiscretisationSchemeFactory {
+    public:
+        DiscretisationScheme Create(const ExtendedProblem &problem, boost::posix_time::time_duration time_step) const;
 
-            inline const GRBVar &Var() const { return var_; }
-
-        private:
-            GRBVar var_;
-        };
-    }
+    private:
+        std::vector<boost::posix_time::time_period> generate_observation_intervals(const boost::posix_time::time_period &period,
+                                                                                   const boost::posix_time::time_duration &time_step) const;
+    };
 }
 
-#endif //QUAKE_INTERVAL_VAR_H
+
+#endif //QUAKE_DISCRETISATION_SCHEME_H

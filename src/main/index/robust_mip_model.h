@@ -30,7 +30,7 @@
 
 #include "extended_problem.h"
 #include "solution.h"
-#include "robust/interval_var.h"
+#include "interval_var.h"
 
 namespace quake {
 
@@ -46,7 +46,7 @@ namespace quake {
 
         inline GroundStation Station(std::size_t station_index) const { return stations_.at(station_index); }
 
-        robust::IntervalVar CreateInterval(std::size_t station_index, boost::posix_time::time_period period);
+        IntervalVar CreateInterval(std::size_t station_index, boost::posix_time::time_period period);
 
         ExtendedProblem const *problem_;
         boost::posix_time::time_duration interval_step_;
@@ -54,7 +54,7 @@ namespace quake {
         std::vector<GroundStation> stations_;
         std::unordered_map<GroundStation, std::size_t> station_indices_;
 
-        std::vector<std::vector<robust::IntervalVar> > intervals_;
+        std::vector<std::vector<IntervalVar> > intervals_;
 
         GRBEnv mip_environment_;
         GRBModel mip_model_;

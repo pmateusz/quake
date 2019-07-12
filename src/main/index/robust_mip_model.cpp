@@ -30,8 +30,8 @@
 #include "util/hash.h"
 #include "util/gurobi.h"
 
-#include "robust/fixed_discretisation_scheme.h"
-#include "robust/validator.h"
+#include "discretisation_scheme.h"
+#include "validator.h"
 
 quake::RobustMipModel::RobustMipModel(const quake::ExtendedProblem *problem, boost::posix_time::time_duration interval_step)
         : problem_{problem},
@@ -48,8 +48,8 @@ quake::RobustMipModel::RobustMipModel(const quake::ExtendedProblem *problem, boo
 boost::optional<quake::Solution> quake::RobustMipModel::Solve(const boost::optional<boost::posix_time::time_duration> &time_limit_opt,
                                                               const boost::optional<double> &gap_opt) {
     try {
-        robust::FixedDiscretisationScheme discretisation_scheme{*problem_, interval_step_};
-        const auto scheme = discretisation_scheme.Build();
+        FixedDiscretisationSchemeFactory discretisation_factory;
+        const auto scheme = discretisation_factory.Create(*problem_, interval_step_);
 
         // create intervals for regular stations
         const auto num_stations = stations_.size();
@@ -102,7 +102,7 @@ boost::optional<quake::Solution> quake::RobustMipModel::Solve(const boost::optio
         // constraint: dummy station precedes observation of another ground station
 
         // build index of switch time intervals
-        std::unordered_map<boost::posix_time::ptime, robust::IntervalVar> end_switch_interval;
+        std::unordered_map<boost::posix_time::ptime, IntervalVar> end_switch_interval;
         for (const auto &interval : intervals_.at(0)) {
             end_switch_interval.emplace(interval.Period().end(), interval);
         }
@@ -237,7 +237,7 @@ boost::optional<quake::Solution> quake::RobustMipModel::Solve(const boost::optio
 
         Solution solution{std::move(assignment), std::move(final_buffers)};
 
-        robust::Validator validator{*problem_};
+        Validator validator{*problem_};
         validator.Validate(solution);
 
         return boost::make_optional(solution);
@@ -246,7 +246,7 @@ boost::optional<quake::Solution> quake::RobustMipModel::Solve(const boost::optio
     }
 }
 
-quake::robust::IntervalVar quake::RobustMipModel::CreateInterval(std::size_t station_index, boost::posix_time::time_period period) {
+quake::IntervalVar quake::RobustMipModel::CreateInterval(std::size_t station_index, boost::posix_time::time_period period) {
     std::stringstream label;
     label << "s" << station_index << "_" << period;
     return {station_index, period, mip_model_.addVar(0, 1, 0, GRB_BINARY, label.str())};

@@ -139,7 +139,7 @@ double quake::CrossMomentMipModel::ExpectedKeysDelivered(const GroundStation &st
     return target_index_ * TransferShare(station);
 }
 
-bool quake::CrossMomentMipModel::IsSetInSolution(const robust::IntervalVar &interval, const Solution &solution) const {
+bool quake::CrossMomentMipModel::IsSetInSolution(const IntervalVar &interval, const Solution &solution) const {
     const auto station = Station(interval.StationIndex());
     for (const auto &window : solution.ObservationWindows(station)) {
         if (window.is_after(interval.Period().end())) { break; }

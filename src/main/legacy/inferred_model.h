@@ -36,7 +36,6 @@
 #include "solution.h"
 #include "forecast.h"
 #include "minizinc_data_model.h"
-#include "base_interval.h"
 
 namespace quake {
 

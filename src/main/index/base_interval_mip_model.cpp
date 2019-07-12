@@ -26,7 +26,7 @@
 #include <glog/logging.h>
 
 #include "base_interval_mip_model.h"
-#include "robust/fixed_discretisation_scheme.h"
+#include "discretisation_scheme.h"
 
 quake::BaseIntervalMipModel::BaseIntervalMipModel(const ExtendedProblem *problem,
                                                   boost::posix_time::time_duration interval_step,
@@ -40,8 +40,8 @@ void quake::BaseIntervalMipModel::Build(const boost::optional<Solution> &solutio
     CHECK(intervals_.empty());
 
     // variables: create intervals
-    robust::FixedDiscretisationScheme scheme{*problem_, interval_step_};
-    const auto intervals = scheme.Build();
+    FixedDiscretisationSchemeFactory scheme;
+    const auto intervals = scheme.Create(*problem_, interval_step_);
 
     // create intervals for regular stations
     const auto num_stations = Stations().size();
@@ -95,7 +95,7 @@ void quake::BaseIntervalMipModel::Build(const boost::optional<Solution> &solutio
     // constraint: dummy station precedes observation of another ground station
 
     // build index of switch time intervals
-    std::unordered_map<boost::posix_time::ptime, robust::IntervalVar> end_switch_interval;
+    std::unordered_map<boost::posix_time::ptime, IntervalVar> end_switch_interval;
     for (const auto &interval : intervals_.at(dummy_station_index_)) {
         end_switch_interval.emplace(interval.Period().end(), interval);
     }
@@ -236,7 +236,7 @@ double quake::BaseIntervalMipModel::GetTrafficIndexUpperBound() const {
     return max_traffic_index;
 }
 
-quake::robust::IntervalVar quake::BaseIntervalMipModel::CreateInterval(std::size_t station_index, const boost::posix_time::time_period &period) {
+quake::IntervalVar quake::BaseIntervalMipModel::CreateInterval(std::size_t station_index, const boost::posix_time::time_period &period) {
     std::stringstream label;
     label << "s" << station_index << "_" << period;
     return {station_index, period, mip_model_.addVar(0, 1, 0, GRB_BINARY, label.str())};

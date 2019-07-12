@@ -24,17 +24,13 @@
 
 #include "util/hash.h"
 
-#include "fixed_discretisation_scheme.h"
+#include "discretisation_scheme.h"
 
-quake::robust::FixedDiscretisationScheme::FixedDiscretisationScheme(const quake::ExtendedProblem &problem,
-                                                                    boost::posix_time::time_duration time_step)
-        : problem_{problem},
-          time_step_{std::move(time_step)} {}
-
-quake::robust::DiscretisationScheme quake::robust::FixedDiscretisationScheme::Build() const {
+quake::DiscretisationScheme quake::FixedDiscretisationSchemeFactory::Create(const ExtendedProblem &problem,
+                                                                            boost::posix_time::time_duration time_step) const {
     std::unordered_map<GroundStation, std::vector<boost::posix_time::time_period>> station_intervals;
     std::vector<boost::posix_time::time_period> switch_intervals;
-    const auto stations = problem_.Stations();
+    const auto stations = problem.Stations();
 
     if (stations.empty()) {
         return {std::move(station_intervals), std::move(switch_intervals)};
@@ -43,8 +39,8 @@ quake::robust::DiscretisationScheme quake::robust::FixedDiscretisationScheme::Bu
     // create station intervals
     for (const auto &station :stations) {
         std::vector<boost::posix_time::time_period> local_station_intervals;
-        for (const auto &communication_window : problem_.TransferWindows(station)) {
-            const auto window_intervals = generate_observation_intervals(communication_window, time_step_);
+        for (const auto &communication_window : problem.TransferWindows(station)) {
+            const auto window_intervals = generate_observation_intervals(communication_window, time_step);
             std::copy(std::cbegin(window_intervals), std::cend(window_intervals), std::back_inserter(local_station_intervals));
         }
         station_intervals.emplace(station, std::move(local_station_intervals));
@@ -65,17 +61,17 @@ quake::robust::DiscretisationScheme quake::robust::FixedDiscretisationScheme::Bu
               });
 
     // create switch intervals
-    const auto observation_period_end = problem_.ObservationPeriod().end();
+    const auto observation_period_end = problem.ObservationPeriod().end();
     for (const auto &observation_interval : all_observation_intervals) {
         auto end_interval = observation_interval.begin();
-        auto begin_interval = end_interval - problem_.SwitchDuration();
+        auto begin_interval = end_interval - problem.SwitchDuration();
         switch_intervals.emplace_back(begin_interval, end_interval);
     }
 
     return {std::move(station_intervals), std::move(switch_intervals)};
 }
 
-std::vector<boost::posix_time::time_period> quake::robust::FixedDiscretisationScheme::generate_observation_intervals(
+std::vector<boost::posix_time::time_period> quake::FixedDiscretisationSchemeFactory::generate_observation_intervals(
         const boost::posix_time::time_period &period, const boost::posix_time::time_duration &time_step) const {
     std::vector<boost::posix_time::time_period> result;
     result.reserve(period.length().total_seconds() / time_step.total_seconds() + 2);
@@ -95,7 +91,7 @@ std::vector<boost::posix_time::time_period> quake::robust::FixedDiscretisationSc
 }
 
 
-quake::robust::DiscretisationScheme::DiscretisationScheme(
+quake::DiscretisationScheme::DiscretisationScheme(
         std::unordered_map<quake::GroundStation, std::vector<boost::posix_time::time_period>> observation_intervals,
         std::vector<boost::posix_time::time_period> switch_intervals)
         : ObservationIntervals{std::move(observation_intervals)},

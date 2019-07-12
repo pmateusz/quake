@@ -28,19 +28,16 @@ namespace quake {
 
     class Solution;
 
-    namespace robust {
-        
-        class Validator {
-        public:
-            explicit Validator(const ExtendedProblem &problem)
-                    : problem_{problem} {}
+    class Validator {
+    public:
+        explicit Validator(const ExtendedProblem &problem)
+                : problem_{problem} {}
 
-            void Validate(const Solution &solution) const;
+        void Validate(const Solution &solution) const;
 
-        private:
-            const ExtendedProblem &problem_;
-        };
-    }
+    private:
+        const ExtendedProblem &problem_;
+    };
 }
 
 

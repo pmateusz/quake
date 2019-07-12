@@ -31,8 +31,7 @@
 #include "scenario_pool.h"
 #include "base_mip_model.h"
 #include "extended_problem.h"
-
-#include "robust/interval_var.h"
+#include "interval_var.h"
 
 namespace quake {
 
@@ -54,12 +53,12 @@ namespace quake {
             return scenario_pool_.KeyRate(scenario_index, station, period);
         }
 
-        inline const std::vector<robust::IntervalVar> &StationIntervals(const GroundStation &station) const { return intervals_.at(Index(station)); }
+        inline const std::vector<IntervalVar> &StationIntervals(const GroundStation &station) const { return intervals_.at(Index(station)); }
 
     protected:
         void Build(const boost::optional<Solution> &solution) override;
 
-        robust::IntervalVar CreateInterval(std::size_t station_index, const boost::posix_time::time_period &period);
+        IntervalVar CreateInterval(std::size_t station_index, const boost::posix_time::time_period &period);
 
         double GetTrafficIndex(const Solution &solution, const Forecast &forecast) const;
 
@@ -74,7 +73,7 @@ namespace quake {
 
         std::vector<Forecast> forecasts_;
         ScenarioPool scenario_pool_;
-        std::vector<std::vector<robust::IntervalVar> > intervals_;
+        std::vector<std::vector<IntervalVar> > intervals_;
     };
 }
 

@@ -27,7 +27,7 @@
 #include <boost/numeric/ublas/vector.hpp>
 #include <boost/numeric/ublas/matrix.hpp>
 
-#include "robust/interval_var.h"
+#include "interval_var.h"
 #include "base_interval_mip_model.h"
 
 namespace quake {
@@ -49,7 +49,7 @@ namespace quake {
     private:
         double ExpectedKeysDelivered(const GroundStation &station) const;
 
-        bool IsSetInSolution(const robust::IntervalVar &interval, const Solution &solution) const;
+        bool IsSetInSolution(const IntervalVar &interval, const Solution &solution) const;
 
         double target_index_;
     };

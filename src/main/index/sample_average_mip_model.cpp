@@ -27,7 +27,6 @@
 #include <util/math.h>
 
 #include "sample_average_mip_model.h"
-#include "fixed_discretisation_scheme.h"
 
 quake::SampleAverageMipModel::SampleAverageMipModel(ExtendedProblem const *problem,
                                                     boost::posix_time::time_duration interval_step,

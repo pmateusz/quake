@@ -22,7 +22,6 @@
 #include <limits>
 
 #include "worst_case_mip_model.h"
-#include "fixed_discretisation_scheme.h"
 
 quake::WorstCaseMipModel::WorstCaseMipModel(ExtendedProblem const *problem,
                                             boost::posix_time::time_duration interval_step,
