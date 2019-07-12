@@ -30,18 +30,22 @@
 
 #include <ortools/base/basictypes.h>
 
+#include <nlohmann/json.hpp>
+
 #include "ground_station.h"
 
 namespace quake {
 
     class Solution {
     public:
+        Solution();
+
         explicit Solution(std::unordered_map<GroundStation, int64> final_buffers);
 
         Solution(std::unordered_map<GroundStation, std::vector<boost::posix_time::time_period> > observations,
                  std::unordered_map<GroundStation, int64> final_buffers);
-        
-        static Solution Load(const boost::filesystem::path &path);
+
+        static Solution load_json(const boost::filesystem::path &path);
 
         inline const std::unordered_map<GroundStation, int64> &FinalBuffers() const { return final_buffers_; }
 
@@ -52,11 +56,17 @@ namespace quake {
         const std::vector<boost::posix_time::time_period> &ObservationWindows(const GroundStation &station) const;
 
     private:
+        friend void to_json(nlohmann::json &json, const Solution &solution);
+
         static const std::vector<boost::posix_time::time_period> NO_OBSERVATIONS;
 
         std::unordered_map<GroundStation, std::vector<boost::posix_time::time_period> > observations_;
         std::unordered_map<GroundStation, int64> final_buffers_;
     };
+
+    void to_json(nlohmann::json &json, const Solution &solution);
+
+    void from_json(const nlohmann::json &json, Solution &solution);
 }
 
 

@@ -32,7 +32,7 @@
 
 #include "util/gurobi.h"
 
-#include "inferred_model.h"
+#include "legacy/inferred_model.h"
 #include "base_interval.h"
 
 namespace quake {

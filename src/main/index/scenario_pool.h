@@ -28,7 +28,7 @@
 #include <ortools/base/basictypes.h>
 
 #include "base_interval.h"
-#include "inferred_model.h"
+#include "legacy/inferred_model.h"
 
 namespace quake {
 

@@ -19,31 +19,36 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "solution.h"
-#include "solution_json_reader.h"
+#include "util/json.h"
 
-quake::Solution::Solution(std::unordered_map<quake::GroundStation, int64> final_buffers)
+#include "solution.h"
+
+quake::Solution::Solution()
+        : Solution({}, {}) {}
+
+quake::Solution::Solution(std::unordered_map<GroundStation, int64> final_buffers)
         : Solution({}, std::move(final_buffers)) {}
 
-quake::Solution::Solution(
-        std::unordered_map<quake::GroundStation, std::vector<boost::posix_time::time_period> > observations,
-        std::unordered_map<quake::GroundStation, int64> final_buffers)
+quake::Solution::Solution(std::unordered_map<GroundStation, std::vector<boost::posix_time::time_period> > observations,
+                          std::unordered_map<GroundStation, int64> final_buffers)
         : observations_{std::move(observations)},
           final_buffers_{std::move(final_buffers)} {
     CHECK_EQ(observations_.size(), final_buffers_.size());
 }
 
-quake::Solution quake::Solution::Load(const boost::filesystem::path &path) {
+quake::Solution quake::Solution::load_json(const boost::filesystem::path &path) {
     std::ifstream input_stream;
     input_stream.open(path.string(), std::ifstream::in);
     LOG_IF(FATAL, !input_stream.is_open()) << "Failed to open " << path;
 
-    // TODO: replace by json reader
-    SolutionJsonReader<std::ifstream> solution_reader{std::move(input_stream)};
-    return solution_reader.Read();
+    nlohmann::json object;
+    input_stream >> object;
+    input_stream.close();
+
+    return object.get<Solution>();
 }
 
-const std::vector<boost::posix_time::time_period> &quake::Solution::ObservationWindows(const quake::GroundStation &station) const {
+const std::vector<boost::posix_time::time_period> &quake::Solution::ObservationWindows(const GroundStation &station) const {
     const auto find_it = observations_.find(station);
     if (find_it != std::cend(observations_)) {
         return find_it->second;
@@ -64,6 +69,34 @@ std::vector<quake::GroundStation> quake::Solution::Stations() const {
     return stations;
 }
 
-int64 quake::Solution::FinalBuffer(const quake::GroundStation &station) const {
+int64 quake::Solution::FinalBuffer(const GroundStation &station) const {
     return final_buffers_.at(station);
+}
+
+void quake::to_json(nlohmann::json &json, const Solution &solution) {
+    nlohmann::json object;
+    object["observations"] = solution.observations_;
+    object["final_buffers"] = solution.final_buffers_;
+    json = std::move(object);
+}
+
+void quake::from_json(const nlohmann::json &json, Solution &solution) {
+    auto json_observations = json.at("observations").get<std::unordered_map<GroundStation, std::vector<nlohmann::json> >>();
+
+    std::unordered_map<GroundStation, std::vector<boost::posix_time::time_period> > observations;
+    for (const auto &element : json_observations) {
+        std::vector<boost::posix_time::time_period> periods;
+        periods.reserve(element.second.size());
+
+        for (const auto &json_period : element.second) {
+            periods.emplace_back(util::from_json<boost::posix_time::time_period>(json_period));
+        }
+
+        observations.emplace(element.first, std::move(periods));
+    }
+
+    auto final_buffers = json.at("final_buffers").get<std::unordered_map<GroundStation, int64>>();
+
+    Solution local_solution(std::move(observations), std::move(final_buffers));
+    solution = std::move(local_solution);
 }

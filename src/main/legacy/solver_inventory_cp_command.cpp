@@ -39,7 +39,6 @@
 #include "legacy/cp_solution.h"
 #include "legacy/cp_solution_json_writer.h"
 
-#include "solution_json_reader.h"
 #include "forecast.h"
 #include "inferred_model.h"
 
@@ -57,7 +56,7 @@ void quake::SolverInventoryCpCommand::Run() {
     }
 
     if (args_.PreviousSolutionPath) {
-        const auto solution = Solution::Load(*args_.PreviousSolutionPath);
+        const auto solution = Solution::load_json(*args_.PreviousSolutionPath);
         model.Apply(solution);
     }
 
