@@ -1,3 +1,5 @@
+#include <utility>
+
 //
 // Copyright 2018 Mateusz Polnik
 //
@@ -85,7 +87,7 @@ namespace quake {
                         int initial_buffer,
                         int key_consumption,
                         std::vector<CommunicationWindowData> communication_windows)
-                    : Station{station},
+                    : Station{std::move(station)},
                       TransferShare{transfer_share},
                       InitialBuffer{initial_buffer},
                       KeyConsumption{key_consumption},
@@ -106,7 +108,7 @@ namespace quake {
 
         ExtendedProblem Round(unsigned int decimal_places) const;
 
-        inline const std::vector<GroundStation> &GroundStations() const { return ground_stations_; }
+        inline const std::vector<GroundStation> &Stations() const { return ground_stations_; }
 
         std::vector<boost::posix_time::time_period> TransferWindows(const GroundStation &ground_station) const;
 

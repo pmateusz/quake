@@ -51,9 +51,15 @@ namespace quake {
 
         GroundStation();
 
+        GroundStation(const CoordGeodetic &coordinates, std::string name);
+
         GroundStation(const GroundStation &other);
 
-        GroundStation(CoordGeodetic coordinates, std::string name);
+        GroundStation(GroundStation &&other) noexcept;
+
+        GroundStation &operator=(const GroundStation &other);
+
+        GroundStation &operator=(GroundStation &&other) noexcept;
 
         static const GroundStation &FromNameOrNone(const std::string &name);
 

@@ -33,9 +33,25 @@ quake::GroundStation::GroundStation()
 quake::GroundStation::GroundStation(const GroundStation &other)
         : GroundStation(other.coordinates(), other.name()) {}
 
-quake::GroundStation::GroundStation(CoordGeodetic coordinates, std::string name)
+quake::GroundStation::GroundStation(GroundStation &&other) noexcept
+        : coordinates_{other.coordinates_},
+          name_{std::move(other.name_)} {}
+
+quake::GroundStation::GroundStation(const CoordGeodetic &coordinates, std::string name)
         : coordinates_(coordinates),
           name_(std::move(name)) {}
+
+quake::GroundStation &quake::GroundStation::operator=(const GroundStation &other) {
+    name_ = other.name_;
+    coordinates_ = other.coordinates_;
+    return *this;
+}
+
+quake::GroundStation &quake::GroundStation::operator=(GroundStation &&other) noexcept {
+    name_ = std::move(other.name_);
+    coordinates_ = other.coordinates_;
+    return *this;
+}
 
 // elevation obtained using the Coordinates applet at http://dateandtime.info/citycoordinates.php and https://www.latlong.net/
 const quake::GroundStation quake::GroundStation::London{{51.509865, -0.118092, 0.015}, "London"};
@@ -98,11 +114,11 @@ std::ostream &operator<<(std::ostream &out, const quake::GroundStation &station)
     return out;
 }
 
-void quake::to_json(nlohmann::json &json, const quake::GroundStation &station) {
+void quake::to_json(nlohmann::json &json, const GroundStation &station) {
     json = station.name();
 }
 
-void quake::from_json(const nlohmann::json &json, quake::GroundStation &station) {
+void quake::from_json(const nlohmann::json &json, GroundStation &station) {
     const auto station_name = json.get<std::string>();
-    station = quake::GroundStation::FromNameOrNone(station_name);
+    station = GroundStation::FromNameOrNone(station_name);
 }

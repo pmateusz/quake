@@ -36,14 +36,18 @@ namespace quake {
 
     class Solution {
     public:
-        Solution(std::unordered_map<GroundStation, std::vector<boost::posix_time::time_period> > observations,
-                 std::unordered_map<GroundStation, int64> final_buffers);
-
         explicit Solution(std::unordered_map<GroundStation, int64> final_buffers);
 
+        Solution(std::unordered_map<GroundStation, std::vector<boost::posix_time::time_period> > observations,
+                 std::unordered_map<GroundStation, int64> final_buffers);
+        
         static Solution Load(const boost::filesystem::path &path);
 
         inline const std::unordered_map<GroundStation, int64> &FinalBuffers() const { return final_buffers_; }
+
+        std::vector<GroundStation> Stations() const;
+
+        int64 FinalBuffer(const GroundStation &station) const;
 
         const std::vector<boost::posix_time::time_period> &ObservationWindows(const GroundStation &station) const;
 

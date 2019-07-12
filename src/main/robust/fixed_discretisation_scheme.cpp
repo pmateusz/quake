@@ -34,7 +34,7 @@ quake::robust::FixedDiscretisationScheme::FixedDiscretisationScheme(const quake:
 quake::robust::DiscretisationScheme quake::robust::FixedDiscretisationScheme::Build() const {
     std::unordered_map<GroundStation, std::vector<boost::posix_time::time_period>> station_intervals;
     std::vector<boost::posix_time::time_period> switch_intervals;
-    const auto stations = problem_.GroundStations();
+    const auto stations = problem_.Stations();
 
     if (stations.empty()) {
         return {std::move(station_intervals), std::move(switch_intervals)};

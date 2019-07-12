@@ -1,5 +1,3 @@
-#include <utility>
-
 //
 // Copyright 2019 Mateusz Polnik
 //
@@ -21,6 +19,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include <utility>
 #include <unordered_set>
 
 #include <boost/config.hpp>
@@ -40,7 +39,7 @@ quake::RobustMipModel::RobustMipModel(const quake::ExtendedProblem *problem, boo
           stations_{GroundStation::None},
           mip_environment_{},
           mip_model_{mip_environment_} {
-    std::copy(std::cbegin(problem_->GroundStations()), std::cend(problem_->GroundStations()), std::back_inserter(stations_));
+    std::copy(std::cbegin(problem_->Stations()), std::cend(problem_->Stations()), std::back_inserter(stations_));
     for (std::size_t index_pos = 0; index_pos < stations_.size(); ++index_pos) {
         station_indices_.emplace(stations_.at(index_pos), index_pos);
     }
