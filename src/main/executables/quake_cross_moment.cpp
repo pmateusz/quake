@@ -110,14 +110,14 @@ int main(int argc, char *argv[]) {
     const auto worst_case_solution_opt = worst_case_model.Solve(arguments.TimeLimit, arguments.Gap, boost::none);
     CHECK(worst_case_solution_opt) << "Failed to find the worst case solution";
 
-    const auto target_traffic_index = worst_case_model.GetTrafficIndex(*worst_case_solution_opt);
+//    const auto target_traffic_index = worst_case_model.GetTrafficIndex(*worst_case_solution_opt);
 //    const auto target_traffic_index = 2.05602e+06;
-    quake::CrossMomentMipModel cross_moment_model(&problem, arguments.TimeStep, forecast_scenarios, target_traffic_index);
-    const auto cross_moment_solution_opt = cross_moment_model.Solve(arguments.TimeLimit,
-                                                                    arguments.Gap,
-                                                                    worst_case_solution_opt);
-    CHECK(cross_moment_solution_opt) << "Failed to find the cross moment solution";
-    LOG(INFO) << cross_moment_model.GetTrafficIndex(*cross_moment_solution_opt);
+//    quake::CrossMomentMipModel cross_moment_model(&problem, arguments.TimeStep, forecast_scenarios, target_traffic_index);
+//    const auto cross_moment_solution_opt = cross_moment_model.Solve(arguments.TimeLimit,
+//                                                                    arguments.Gap,
+//                                                                    worst_case_solution_opt);
+//    CHECK(cross_moment_solution_opt) << "Failed to find the cross moment solution";
+//    LOG(INFO) << cross_moment_model.GetTrafficIndex(*cross_moment_solution_opt);
 
     return EXIT_SUCCESS;
 }

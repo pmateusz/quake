@@ -70,10 +70,6 @@ void quake::CVarMipModel::Build(const boost::optional<quake::Solution> &solution
     mip_model_.setCallback(callback_.get());
 }
 
-double quake::CVarMipModel::GetTrafficIndex(const quake::Solution &solution) const {
-    return BaseIntervalMipModel::GetTrafficIndex(solution, Forecasts().front());
-}
-
 quake::CVarMipModel::CVarCallback::CVarCallback(quake::CVarMipModel &model, double target_index, double epsilon)
         : BendersCallback{model, target_index},
           epsilon_{epsilon} {}

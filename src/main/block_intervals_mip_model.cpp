@@ -26,10 +26,6 @@ quake::BlockIntervalsMipModel::BlockIntervalsMipModel(ExtendedProblem const *pro
                                                       boost::posix_time::time_duration interval_step)
         : BaseIntervalMipModel(problem, std::move(interval_step), std::vector<Forecast>{std::move(forecast)}) {}
 
-double quake::BlockIntervalsMipModel::GetTrafficIndex(const quake::Solution &solution) const {
-    return BaseIntervalMipModel::GetTrafficIndex(solution, Forecasts().front());
-}
-
 void quake::BlockIntervalsMipModel::Build(const boost::optional<Solution> &solution) {
     BaseIntervalMipModel::Build(solution);
 

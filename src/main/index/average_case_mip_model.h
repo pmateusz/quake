@@ -39,8 +39,6 @@ namespace quake {
                             boost::posix_time::time_duration interval_step,
                             std::vector<Forecast> forecasts);
 
-        double GetTrafficIndex(const Solution &solution) const override;
-
     protected:
         void Build(const boost::optional<Solution> &solution) override;
     };

@@ -39,8 +39,6 @@ namespace quake {
                             std::vector<Forecast> forecasts,
                             double target_index);
 
-        double GetTrafficIndex(const Solution &solution) const override;
-
     protected:
         boost::numeric::ublas::matrix<double> ExtractScenarioMatrix(const GroundStation &station) const;
 

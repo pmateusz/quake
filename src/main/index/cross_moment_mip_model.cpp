@@ -114,13 +114,7 @@ void quake::CrossMomentMipModel::Build(const boost::optional<Solution> &solution
     mip_model_.setObjective(objective);
 }
 
-
-double quake::CrossMomentMipModel::GetTrafficIndex(const Solution &solution) const {
-    return BaseIntervalMipModel::GetTrafficIndex(solution, Forecasts().front());
-}
-
-boost::numeric::ublas::matrix<double>
-quake::CrossMomentMipModel::ExtractScenarioMatrix(const GroundStation &station) const {
+boost::numeric::ublas::matrix<double> quake::CrossMomentMipModel::ExtractScenarioMatrix(const GroundStation &station) const {
     const auto &station_intervals = StationIntervals(station);
     const auto num_intervals = station_intervals.size();
     const auto num_scenarios = NumScenarios();

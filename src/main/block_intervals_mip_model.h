@@ -35,8 +35,6 @@ namespace quake {
                                Forecast forecast,
                                boost::posix_time::time_duration time_step);
 
-        virtual double GetTrafficIndex(const Solution &solution) const override;
-
     protected:
         void Build(const boost::optional<Solution> &solution) override;
 

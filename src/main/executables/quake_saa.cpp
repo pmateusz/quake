@@ -155,7 +155,7 @@ int main(int argc, char *argv[]) {
     const auto cvar_solution_opt = cvar_mip_model.Solve(arguments.TimeLimit, arguments.Gap, boost::none);
     CHECK(cvar_solution_opt) << "Failed to find the solution using CVar optimization";
 
-    LOG(INFO) << "Conditional Value at Risk case (epsilon: 0.05): "
-              << best_case_model.GetTrafficIndex(*cvar_solution_opt);
+//    LOG(INFO) << "Conditional Value at Risk case (epsilon: 0.05): "
+//              << best_case_model.GetTrafficIndex(*cvar_solution_opt);
     return EXIT_SUCCESS;
 }

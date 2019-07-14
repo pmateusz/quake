@@ -93,18 +93,19 @@ namespace quake {
             auto observations = GetObservations();
 
             std::unordered_map<quake::GroundStation, int64> final_buffers;
-            for (const auto &element: observations) {
-                const auto station = element.first;
-
+            for (const auto &station: Stations()) {
                 if (station == GroundStation::None) {
                     final_buffers.emplace(station, 0);
                     continue;
                 }
 
                 // number of keys transferred
+                const auto find_observations_it = observations.find(station);
                 double keys_received = 0.0;
-                for (const auto &observation_window : element.second) {
-                    keys_received += problem_->KeyRate(station, observation_window, ExtendedProblem::WeatherSample::Forecast);
+                if (find_observations_it != std::end(observations)) {
+                    for (const auto &observation_window : find_observations_it->second) {
+                        keys_received += problem_->KeyRate(station, observation_window, ExtendedProblem::WeatherSample::Forecast);
+                    }
                 }
 
                 // keys consumed

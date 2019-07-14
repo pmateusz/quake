@@ -224,23 +224,7 @@ std::unordered_map<quake::GroundStation, std::vector<boost::posix_time::time_per
     return assignment;
 }
 
-double quake::BaseIntervalMipModel::GetTrafficIndex(const Solution &solution, const Forecast &forecast) const {
-    auto traffic_index = std::numeric_limits<double>::max();
-
-    for (const auto &station : solution.Stations()) {
-        double keys_transferred = 0;
-        for (const auto &window : solution.ObservationWindows(station)) {
-            keys_transferred += problem_->KeyRate(station, window, forecast);
-        }
-        const auto station_traffic_index = keys_transferred / problem_->TransferShare(station);
-        traffic_index = std::min(traffic_index, station_traffic_index);
-    }
-
-    return traffic_index;
-}
-
 double quake::BaseIntervalMipModel::GetTrafficIndexUpperBound() const {
-    // TODO: make sure that problem can contain 5 days
     double traffic_index = std::numeric_limits<double>::max();
 
     const auto max_observation_period = problem_->ObservationPeriod();

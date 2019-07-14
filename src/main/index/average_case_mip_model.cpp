@@ -50,21 +50,3 @@ void quake::AverageCaseMipModel::Build(const boost::optional<Solution> &solution
     mip_model_.set(GRB_IntAttr_ModelSense, GRB_MAXIMIZE);
     mip_model_.setObjective(objective);
 }
-
-double quake::AverageCaseMipModel::GetTrafficIndex(const quake::Solution &solution) const {
-    auto traffic_index = std::numeric_limits<double>::max();
-
-    for (const auto &station :Stations()) {
-        if (station == GroundStation::None) { continue; }
-
-        double average_keys_transferred = 0;
-        for (const auto &window : solution.ObservationWindows(station)) {
-            average_keys_transferred += KeyRate(station, window);
-        }
-
-        const auto station_traffic_index = average_keys_transferred / TransferShare(station);
-        traffic_index = std::min(traffic_index, station_traffic_index);
-    }
-
-    return traffic_index;
-}

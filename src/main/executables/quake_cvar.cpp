@@ -114,12 +114,12 @@ int main(int argc, char *argv[]) {
                                                                 boost::none);
     CHECK(worst_case_solution_opt) << "Failed to find the worst case solution";
 
-    const auto target_traffic_index = worst_case_model.GetTrafficIndex(*worst_case_solution_opt);
-    quake::CVarMipModel cvar_mip_model(&model, arguments.TimeStep, forecast_scenarios, target_traffic_index, 0.05);
-    const auto cvar_solution_opt = cvar_mip_model.Solve(arguments.TimeLimit, arguments.Gap, boost::none);
-    CHECK(cvar_solution_opt) << "Failed to find the solution using CVar optimization";
+//    const auto target_traffic_index = worst_case_model.GetTrafficIndex(*worst_case_solution_opt);
+//    quake::CVarMipModel cvar_mip_model(&model, arguments.TimeStep, forecast_scenarios, target_traffic_index, 0.05);
+//    const auto cvar_solution_opt = cvar_mip_model.Solve(arguments.TimeLimit, arguments.Gap, boost::none);
+//    CHECK(cvar_solution_opt) << "Failed to find the solution using CVar optimization";
 
     // obtain traffic index using best case
-    LOG(INFO) << "CVar case: " << cvar_mip_model.GetTrafficIndex(*cvar_solution_opt);
+//    LOG(INFO) << "CVar case: " << cvar_mip_model.GetTrafficIndex(*cvar_solution_opt);
     return EXIT_SUCCESS;
 }

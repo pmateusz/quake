@@ -76,21 +76,3 @@ void quake::WorstCaseMipModel::Build(const boost::optional<Solution> &solution) 
     mip_model_.set(GRB_IntAttr_ModelSense, GRB_MAXIMIZE);
     mip_model_.setObjective(objective);
 }
-
-double quake::WorstCaseMipModel::GetTrafficIndex(const quake::Solution &solution) const {
-    double global_traffic_index = std::numeric_limits<double>::max();
-
-    for (const auto &forecast : Forecasts()) {
-        for (const auto &station : ObservableStations()) {
-            double keys_transferred = 0;
-            for (const auto &observation_window : solution.ObservationWindows(station)) {
-                keys_transferred += problem_->KeyRate(station, observation_window, forecast);
-            }
-
-            double local_traffic_index = keys_transferred / TransferShare(station);
-            global_traffic_index = std::min(global_traffic_index, local_traffic_index);
-        }
-    }
-
-    return global_traffic_index;
-}

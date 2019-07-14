@@ -41,8 +41,6 @@ namespace quake {
                              boost::posix_time::time_duration interval_step,
                              std::vector<Forecast> forecasts);
 
-        virtual double GetTrafficIndex(const Solution &solution) const = 0;
-
         inline std::size_t NumScenarios() const { return scenario_pool_.size(); }
 
         inline double KeyRate(const GroundStation &station, const boost::posix_time::time_period &period) const {

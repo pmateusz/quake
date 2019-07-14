@@ -35,10 +35,6 @@ namespace quake {
                               double target_index);
 
     protected:
-    public:
-        double GetTrafficIndex(const Solution &solution) const override;
-
-    protected:
 
         void Build(const boost::optional<Solution> &solution) override;
 

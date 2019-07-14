@@ -55,10 +55,6 @@ void quake::SampleAverageMipModel::Build(const boost::optional<Solution> &soluti
     mip_model_.setCallback(callback_.get());
 }
 
-double quake::SampleAverageMipModel::GetTrafficIndex(const quake::Solution &solution) const {
-    return BaseIntervalMipModel::GetTrafficIndex(solution, Forecasts().front());
-}
-
 quake::SampleAverageMipModel::SampleAverageCallback::SampleAverageCallback(quake::SampleAverageMipModel &model,
                                                                            double target_index,
                                                                            GRBVar target_distance_var)
