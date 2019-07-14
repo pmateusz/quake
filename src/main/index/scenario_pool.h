@@ -53,7 +53,7 @@ namespace quake {
                      const std::vector<Forecast> &forecasts,
                      ExtendedProblem const *model);
 
-        inline std::size_t size() const { return key_rate_index_.size(); }
+        inline std::size_t size() const { return num_scenarios_; }
 
         double KeyRate(std::size_t scenario, const GroundStation &station, const boost::posix_time::time_period &interval) const;
 
@@ -61,6 +61,7 @@ namespace quake {
 
     private:
         ExtendedProblem const *problem_;
+        std::size_t num_scenarios_;
         std::unordered_map<GroundStation, std::unordered_map<boost::posix_time::time_period, std::vector<double>>> key_rate_index_;
     };
 }

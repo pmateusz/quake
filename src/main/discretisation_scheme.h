@@ -40,7 +40,9 @@ namespace quake {
 
     class FixedDiscretisationSchemeFactory {
     public:
-        DiscretisationScheme Create(const ExtendedProblem &problem, boost::posix_time::time_duration time_step) const;
+        DiscretisationScheme Create(const ExtendedProblem &problem,
+                                    const boost::posix_time::time_duration &time_step,
+                                    const std::vector<GroundStation> &stations) const;
 
     private:
         std::vector<boost::posix_time::time_period> generate_observation_intervals(const boost::posix_time::time_period &period,

@@ -64,6 +64,8 @@ namespace quake {
 
         virtual double GetTrafficIndexUpperBound() const;
 
+        virtual const std::vector<GroundStation> &ObservableStations() const { return observable_stations_; }
+
         std::unordered_map<GroundStation, std::vector<boost::posix_time::time_period>> GetObservations() const override;
 
         inline const std::vector<Forecast> &Forecasts() const { return forecasts_; }
@@ -71,6 +73,7 @@ namespace quake {
     private:
         boost::posix_time::time_duration interval_step_;
 
+        std::vector<GroundStation> observable_stations_;
         std::vector<Forecast> forecasts_;
         ScenarioPool scenario_pool_;
         std::vector<std::vector<IntervalVar> > intervals_;

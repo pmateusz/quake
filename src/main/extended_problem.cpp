@@ -48,9 +48,9 @@ quake::ExtendedProblem::ExtendedProblem(ExtendedProblem::MetaData metadata,
         ground_stations.emplace(local_station_data.Station);
     }
 
-    ground_stations_.reserve(station_data.size());
-    std::copy(std::cbegin(ground_stations), std::cend(ground_stations), std::back_inserter(ground_stations_));
-    std::sort(std::begin(ground_stations_), std::end(ground_stations_), [](const GroundStation &left, const GroundStation &right) -> bool {
+    stations_.reserve(station_data.size());
+    std::copy(std::cbegin(ground_stations), std::cend(ground_stations), std::back_inserter(stations_));
+    std::sort(std::begin(stations_), std::end(stations_), [](const GroundStation &left, const GroundStation &right) -> bool {
         return left.name() < right.name();
     });
 }
@@ -97,12 +97,16 @@ std::vector<boost::posix_time::time_period> quake::ExtendedProblem::TransferWind
     return communication_periods;
 }
 
-double zero(boost::posix_time::ptime) { return 0.0; }
-
 double quake::ExtendedProblem::KeyRate(const quake::GroundStation &station,
                                        const boost::posix_time::ptime &datetime,
                                        ExtendedProblem::WeatherSample sample) const {
     return KeyRate(station, boost::posix_time::time_period{datetime, boost::posix_time::seconds(1)}, sample);
+}
+
+double zero(boost::posix_time::ptime) { return 0.0; }
+
+double quake::ExtendedProblem::KeyRate(const quake::GroundStation &station, const boost::posix_time::time_period &period) const {
+    return KeyRate(station, period, zero);
 }
 
 double quake::ExtendedProblem::KeyRate(const quake::GroundStation &station,
@@ -137,6 +141,7 @@ double quake::ExtendedProblem::KeyRate(const quake::GroundStation &station,
                                        const std::function<double(boost::posix_time::ptime)> &weather_callback) const {
     double total_key_rate = 0.0;
     const auto &station_data = GetStationData(station);
+
     for (const auto &window : station_data.CommunicationWindows) {
         if (window.Period.is_after(period.end())) {
             break;
@@ -201,6 +206,7 @@ void quake::to_json(nlohmann::json &json, const quake::ExtendedProblem &problem)
 quake::ExtendedProblem quake::ExtendedProblem::load_json(const boost::filesystem::path &file_path) {
     std::ifstream input_stream;
     input_stream.open(file_path.string(), std::ifstream::in);
+    LOG_IF(FATAL, !input_stream.is_open()) << "Failed to open file: " << file_path;
 
     nlohmann::json json_object;
     input_stream >> json_object;

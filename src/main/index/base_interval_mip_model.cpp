@@ -1,5 +1,3 @@
-#include <utility>
-
 //
 // Copyright 2018 Mateusz Polnik
 //
@@ -21,19 +19,27 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include <utility>
 #include <unordered_set>
 
 #include <glog/logging.h>
 
+#include "util/math.h"
 #include "base_interval_mip_model.h"
 #include "discretisation_scheme.h"
 
 quake::BaseIntervalMipModel::BaseIntervalMipModel(const ExtendedProblem *problem,
                                                   boost::posix_time::time_duration interval_step,
-                                                  std::vector<quake::Forecast> forecasts)
+                                                  std::vector<Forecast> forecasts)
         : BaseMipModel{problem},
           interval_step_{std::move(interval_step)},
-          forecasts_{std::move(forecasts)} {}
+          forecasts_{std::move(forecasts)} {
+    for (const auto &station : BaseMipModel::Stations()) {
+        if (station != GroundStation::None) {
+            observable_stations_.emplace_back(station);
+        }
+    }
+}
 
 
 void quake::BaseIntervalMipModel::Build(const boost::optional<Solution> &solution) {
@@ -41,7 +47,7 @@ void quake::BaseIntervalMipModel::Build(const boost::optional<Solution> &solutio
 
     // variables: create intervals
     FixedDiscretisationSchemeFactory scheme;
-    const auto intervals = scheme.Create(*problem_, interval_step_);
+    const auto intervals = scheme.Create(*problem_, interval_step_, ObservableStations());
 
     // create intervals for regular stations
     const auto num_stations = Stations().size();
@@ -112,6 +118,8 @@ void quake::BaseIntervalMipModel::Build(const boost::optional<Solution> &solutio
             continue;
         }
 
+        mip_model_.addConstr(prev_interval_it->Var() <= end_switch_interval.at(prev_interval_it->Period().begin()).Var());
+
         for (auto interval_it = std::next(prev_interval_it); interval_it != interval_it_end; ++interval_it) {
             if (prev_interval_it->Period().end() == interval_it->Period().begin()) {
                 mip_model_.addConstr(interval_it->Var() <= prev_interval_it->Var() + end_switch_interval.at(interval_it->Period().begin()).Var());
@@ -158,17 +166,22 @@ void quake::BaseIntervalMipModel::Build(const boost::optional<Solution> &solutio
     }
 }
 
-std::unordered_map<quake::GroundStation,
-        std::vector<boost::posix_time::time_period> > quake::BaseIntervalMipModel::GetObservations() const {
+std::unordered_map<quake::GroundStation, std::vector<boost::posix_time::time_period> > quake::BaseIntervalMipModel::GetObservations() const {
+
+    const auto &forecast = problem_->GetWeatherSample(ExtendedProblem::WeatherSample::Forecast);
+
     std::unordered_map<quake::GroundStation, std::vector<boost::posix_time::time_period> > assignment;
-    for (const auto &station : Stations()) {
-        if (station == GroundStation::None) {
-            continue;
+    for (const auto &station : ObservableStations()) {
+        const auto &station_intervals = StationIntervals(station);
+
+        double sub_interval_keys_received = 0;
+        for (const auto &interval : station_intervals) {
+            if (util::IsActive(interval.Var())) {
+                sub_interval_keys_received += problem_->KeyRate(station, interval.Period(), forecast);
+            }
         }
 
         std::vector<boost::posix_time::time_period> observations;
-
-        const auto &station_intervals = StationIntervals(station);
         const auto num_intervals = station_intervals.size();
         for (auto interval_index = 0; interval_index < num_intervals;) {
             // find first active interval
@@ -187,20 +200,27 @@ std::unordered_map<quake::GroundStation,
             auto next_interval_index = interval_index + 1;
             while (next_interval_index < num_intervals) {
                 const auto &next_interval = station_intervals.at(next_interval_index);
-                if (next_interval.Period().is_adjacent(observation)) {
-                    observation.merge(next_interval.Period());
-                    ++next_interval_index;
-                } else {
+                if (!util::IsActive(next_interval.Var()) || !observation.is_adjacent(next_interval.Period())) {
                     break;
                 }
+
+                observation = observation.span(next_interval.Period());
+                ++next_interval_index;
             }
 
             observations.emplace_back(observation);
             interval_index = next_interval_index;
         }
 
+        double observations_keys_received = 0;
+        for (const auto &observation: observations) {
+            observations_keys_received += problem_->KeyRate(station, observation, forecast);
+        }
+        util::is_nearly_eq(sub_interval_keys_received, observations_keys_received);
+
         assignment.emplace(station, std::move(observations));
     }
+
     return assignment;
 }
 
@@ -220,20 +240,21 @@ double quake::BaseIntervalMipModel::GetTrafficIndex(const Solution &solution, co
 }
 
 double quake::BaseIntervalMipModel::GetTrafficIndexUpperBound() const {
-    double max_traffic_index = std::numeric_limits<double>::min();
-    const auto max_observation_period = problem_->ObservationPeriod();
+    // TODO: make sure that problem can contain 5 days
+    double traffic_index = std::numeric_limits<double>::max();
 
-    for (const auto &forecast : forecasts_) {
-        double forecast_traffic_index = std::numeric_limits<double>::max();
-        for (const auto &station : Stations()) {
-            const auto total_keys_transferred = problem_->KeyRate(station, max_observation_period, forecast);
-            const auto station_traffic_index = total_keys_transferred / problem_->TransferShare(station);
-            forecast_traffic_index = std::min(station_traffic_index, forecast_traffic_index);
+    const auto max_observation_period = problem_->ObservationPeriod();
+    for (const auto &station : Stations()) {
+        if (station == GroundStation::None) {
+            continue;
         }
-        max_traffic_index = std::max(max_traffic_index, forecast_traffic_index);
+
+        const auto total_keys_transferred = problem_->KeyRate(station, max_observation_period);
+        const auto station_traffic_index = total_keys_transferred / problem_->TransferShare(station);
+        traffic_index = std::min(station_traffic_index, traffic_index);
     }
 
-    return max_traffic_index;
+    return traffic_index;
 }
 
 quake::IntervalVar quake::BaseIntervalMipModel::CreateInterval(std::size_t station_index, const boost::posix_time::time_period &period) {

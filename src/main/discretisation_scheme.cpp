@@ -27,10 +27,10 @@
 #include "discretisation_scheme.h"
 
 quake::DiscretisationScheme quake::FixedDiscretisationSchemeFactory::Create(const ExtendedProblem &problem,
-                                                                            boost::posix_time::time_duration time_step) const {
+                                                                            const boost::posix_time::time_duration &time_step,
+                                                                            const std::vector<GroundStation> &stations) const {
     std::unordered_map<GroundStation, std::vector<boost::posix_time::time_period>> station_intervals;
     std::vector<boost::posix_time::time_period> switch_intervals;
-    const auto stations = problem.Stations();
 
     if (stations.empty()) {
         return {std::move(station_intervals), std::move(switch_intervals)};

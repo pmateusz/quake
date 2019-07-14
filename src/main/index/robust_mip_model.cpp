@@ -49,7 +49,7 @@ boost::optional<quake::Solution> quake::RobustMipModel::Solve(const boost::optio
                                                               const boost::optional<double> &gap_opt) {
     try {
         FixedDiscretisationSchemeFactory discretisation_factory;
-        const auto scheme = discretisation_factory.Create(*problem_, interval_step_);
+        const auto scheme = discretisation_factory.Create(*problem_, interval_step_, stations_);
 
         // create intervals for regular stations
         const auto num_stations = stations_.size();

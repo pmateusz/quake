@@ -1,5 +1,3 @@
-#include <utility>
-
 //
 // Copyright 2018 Mateusz Polnik
 //
@@ -110,7 +108,7 @@ namespace quake {
 
         ExtendedProblem Round(unsigned int decimal_places) const;
 
-        inline const std::vector<GroundStation> &Stations() const { return ground_stations_; }
+        inline const std::vector<GroundStation> &Stations() const { return stations_; }
 
         std::vector<boost::posix_time::time_period> TransferWindows(const GroundStation &ground_station) const;
 
@@ -130,7 +128,21 @@ namespace quake {
 
         double KeyRate(const GroundStation &station, const boost::posix_time::time_period &period, const Forecast &forecast) const;
 
+        double KeyRate(const GroundStation &station, const boost::posix_time::time_period &period) const;
+
         double ElevationAngle(const GroundStation &station, const boost::posix_time::ptime &datetime) const;
+
+        inline const Forecast &GetWeatherSample(ExtendedProblem::WeatherSample sample) const {
+            switch (sample) {
+                case WeatherSample::Forecast:
+                    return forecasts_.at("forecast");
+                case WeatherSample::Real:
+                    return forecasts_.at("real");
+                case WeatherSample::None:
+                default:
+                    LOG(FATAL) << "Weather sample " << static_cast<int>(sample) << " not supported";
+            }
+        }
 
     private:
 
@@ -146,7 +158,7 @@ namespace quake {
         std::vector<StationData> station_data_;
         std::unordered_map<std::string, Forecast> forecasts_;
 
-        std::vector<GroundStation> ground_stations_;
+        std::vector<GroundStation> stations_;
     };
 
 

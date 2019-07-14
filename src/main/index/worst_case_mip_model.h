@@ -39,7 +39,12 @@ namespace quake {
         double GetTrafficIndex(const Solution &solution) const override;
 
     protected:
+        const std::vector<GroundStation> &ObservableStations() const override;
+
         void Build(const boost::optional<Solution> &solution) override;
+
+    private:
+        std::vector<GroundStation> observable_stations_;
     };
 }
 

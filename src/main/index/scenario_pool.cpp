@@ -25,24 +25,29 @@
 #include "scenario_pool.h"
 
 quake::ScenarioPool::ScenarioPool()
-        : problem_{nullptr} {}
+        : problem_{nullptr},
+          num_scenarios_{0} {}
 
 quake::ScenarioPool::ScenarioPool(const ScenarioPool &other)
         : problem_{other.problem_},
+          num_scenarios_{other.num_scenarios_},
           key_rate_index_{other.key_rate_index_} {}
 
 quake::ScenarioPool::ScenarioPool(ScenarioPool &&other) noexcept
         : problem_{other.problem_},
+          num_scenarios_{other.num_scenarios_},
           key_rate_index_{std::move(other.key_rate_index_)} {}
 
 quake::ScenarioPool &quake::ScenarioPool::operator=(const ScenarioPool &other) {
     problem_ = other.problem_;
+    num_scenarios_ = other.num_scenarios_;
     key_rate_index_ = other.key_rate_index_;
     return *this;
 }
 
 quake::ScenarioPool &quake::ScenarioPool::operator=(ScenarioPool &&other) noexcept {
     problem_ = other.problem_;
+    num_scenarios_ = other.num_scenarios_;
     key_rate_index_ = std::move(other.key_rate_index_);
     return *this;
 }
@@ -51,9 +56,9 @@ quake::ScenarioPool::ScenarioPool(const std::unordered_map<GroundStation, std::v
                                   const std::vector<Forecast> &forecasts,
                                   quake::ExtendedProblem const *problem)
         : problem_{problem},
+          num_scenarios_{forecasts.size()},
           key_rate_index_{} {
 
-    const auto num_forecasts = forecasts.size();
     std::unordered_map<GroundStation, std::unordered_map<boost::posix_time::time_period, std::vector<double>>> key_rate_index{};
     for (const auto &station_element : intervals) {
         const auto &station = station_element.first;
@@ -64,7 +69,7 @@ quake::ScenarioPool::ScenarioPool(const std::unordered_map<GroundStation, std::v
         std::unordered_map<boost::posix_time::time_period, std::vector<double>> station_index{};
         for (const auto &period : station_element.second) {
             std::vector<double> key_rate;
-            key_rate.reserve(num_forecasts);
+            key_rate.reserve(num_scenarios_);
             for (const auto &forecast : forecasts) {
                 key_rate.emplace_back(problem_->KeyRate(station, period, forecast));
             }

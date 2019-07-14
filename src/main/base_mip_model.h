@@ -41,10 +41,14 @@ namespace quake {
     public:
         explicit BaseMipModel(ExtendedProblem const *problem)
                 : problem_{problem},
+                  stations_{GroundStation::None},
                   dummy_station_index_{0},
                   mip_environment_{},
                   mip_model_{mip_environment_} {
-            std::copy(std::cbegin(problem_->Stations()), std::cend(problem_->Stations()), std::back_inserter(stations_));
+            const auto &problem_stations = problem_->Stations();
+            CHECK(std::find(std::cbegin(problem_stations), std::cend(problem_stations), GroundStation::None) == std::cend(problem_stations));
+
+            std::copy(std::cbegin(problem_stations), std::cend(problem_stations), std::back_inserter(stations_));
             for (std::size_t index_pos = 0; index_pos < stations_.size(); ++index_pos) {
                 station_indices_.emplace(stations_.at(index_pos), index_pos);
             }

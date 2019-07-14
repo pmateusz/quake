@@ -20,23 +20,22 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import os
-import json
-import datetime
-import concurrent.futures
-import logging
-import warnings
 import argparse
+import concurrent.futures
+import datetime
+import json
+import logging
+import os
+import warnings
 
+import matplotlib.dates
+import matplotlib.pyplot
+import matplotlib.ticker
 import numpy
 import pandas
+import quake.city
 import tabulate
 import tqdm
-import matplotlib.pyplot
-import matplotlib.dates
-import matplotlib.ticker
-
-import quake.city
 
 BUILD_CACHE_COMMAND = 'build-cache'
 PLOT_COMMAND = 'plot-cloud-cover'
@@ -88,7 +87,7 @@ class WeatherCache:
         data_frames = []
         with warnings.catch_warnings():
             warnings.filterwarnings('ignore', '', tqdm.TqdmSynchronisationWarning)
-            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            with concurrent.futures.ThreadPoolExecutor() as executor:
                 future_to_path = {executor.submit(load_data_frame, file_path): file_path for file_path in file_paths}
                 for future in tqdm.tqdm(concurrent.futures.as_completed(future_to_path), total=len(future_to_path)):
                     file_path = future_to_path[future]
