@@ -22,10 +22,12 @@
 
 import argparse
 import concurrent.futures
+import copy
 import datetime
 import json
 import logging
 import os
+import subprocess
 import warnings
 
 import matplotlib.dates
@@ -42,6 +44,7 @@ PLOT_COMMAND = 'plot-cloud-cover'
 COVARIANCE_COMMAND = 'compute-covariance'
 VAR_COMMAND = 'compute-var'
 EXTEND_COMMAND = 'extend'
+GENERATE_COMMAND = 'generate'
 
 
 class WeatherCache:
@@ -129,8 +132,42 @@ class WeatherCache:
         return self.__observation_frame
 
 
-class Problem:
+class TimePeriod:
     DATETIME_FORMAT: str = '%Y-%b-%d %H:%M:%S'
+
+    def __init__(self, begin_time, end_time):
+        self.__begin_time = begin_time
+        self.__end_time = end_time
+
+    def is_before(self, other):
+        return self.end < other.begin
+
+    def is_after(self, other):
+        return self.begin >= other.end
+
+    @property
+    def begin(self):
+        return self.__begin_time
+
+    @property
+    def end(self):
+        return self.__end_time
+
+    @property
+    def length(self):
+        return self.__end_time - self.__begin_time
+
+    @staticmethod
+    def from_json(json_object):
+        begin_datetime = datetime.datetime.strptime(json_object['begin'], TimePeriod.DATETIME_FORMAT)
+        end_datetime = datetime.datetime.strptime(json_object['end'], TimePeriod.DATETIME_FORMAT)
+        return TimePeriod(begin_datetime, end_datetime)
+
+    def to_json(self):
+        return {'begin': self.__begin_time.strftime(self.DATETIME_FORMAT), 'end': self.__end_time.strftime(self.DATETIME_FORMAT)}
+
+
+class Problem:
     FORECASTS_KEY = 'forecasts'
 
     def __init__(self, json_object):
@@ -141,6 +178,27 @@ class Problem:
             self.__json_object[self.FORECASTS_KEY] = {}
         self.__json_object[self.FORECASTS_KEY][name] = self.__frame_to_dict(frame)
 
+    def trim_observation_period(self, new_observation_period: TimePeriod):
+        metadata = self.__json_object['metadata']
+        metadata['observation_period'] = new_observation_period.to_json()
+
+        updated_stations = []
+        for station_dict in self.__json_object['stations']:
+            updated_communication_windows = []
+            for communication_window in station_dict['communication_windows']:
+                window_period = TimePeriod.from_json(communication_window['period'])
+                if window_period.is_after(new_observation_period) or window_period.is_before(new_observation_period):
+                    continue
+                updated_communication_windows.append(copy.deepcopy(communication_window))
+            updated_station_dict = dict()
+            updated_station_dict['communication_windows'] = updated_communication_windows
+            for key in station_dict:
+                if key == 'communication_windows':
+                    continue
+                updated_station_dict[key] = copy.deepcopy(station_dict[key])
+            updated_stations.append(updated_station_dict)
+        self.__json_object['stations'] = updated_stations
+
     @property
     def json_object(self):
         return self.__json_object
@@ -148,13 +206,10 @@ class Problem:
     @property
     def observation_period(self):
         metadata = self.__json_object['metadata']
-        observation_period = metadata['observation_period']
+        return TimePeriod.from_json(metadata['observation_period'])
 
-        begin_datetime = datetime.datetime.strptime(observation_period['begin'], self.DATETIME_FORMAT)
-        end_datetime = datetime.datetime.strptime(observation_period['end'], self.DATETIME_FORMAT)
-        return begin_datetime, end_datetime
-
-    def __frame_to_dict(self, frame):
+    @staticmethod
+    def __frame_to_dict(frame):
         index = frame['DateTime'] + frame['Delay']
         index.drop_duplicates(inplace=True)
         index.sort_values(inplace=True)
@@ -173,7 +228,7 @@ class Problem:
                 cloud_cover_array[index_to_position[row.Index]] = row.CloudCover
             station_data.append({'station': city.name, 'cloud_cover': cloud_cover_array})
 
-        index_values = [value.strftime(self.DATETIME_FORMAT) for value in index]
+        index_values = [value.strftime(TimePeriod.DATETIME_FORMAT) for value in index]
         return {'index': index_values, 'stations': station_data}
 
 
@@ -201,6 +256,11 @@ def parse_args():
     extend_parser = sub_parsers.add_parser(EXTEND_COMMAND)
     extend_parser.add_argument('problem_file')
     extend_parser.add_argument('--output')
+
+    generate_parser = sub_parsers.add_parser(GENERATE_COMMAND)
+    generate_parser.add_argument('--from')
+    generate_parser.add_argument('--to')
+    generate_parser.add_argument('--problem-prefix')
 
     return parser.parse_args()
 
@@ -318,41 +378,109 @@ def extend_problem_definition(args):
     _weather_cache = WeatherCache()
     _weather_cache.load()
 
-    def extract_forecast(observation_period, weather_cache):
+    def extract_forecast(observation_period: TimePeriod, weather_cache: WeatherCache):
         forecast_frame = weather_cache.forecast_frame.copy()
 
-        filtered_frame = forecast_frame[forecast_frame.apply(lambda row: row['DateTime'].date() == observation_period[0].date(), axis=1)]
+        filtered_frame = forecast_frame[forecast_frame.apply(lambda row: row['DateTime'].date() == observation_period.begin.date(), axis=1)]
         available_forecast_start_time = filtered_frame['DateTime'].min()
-        requested_max_delay = observation_period[1] - observation_period[0]
-
+        requested_max_delay = observation_period.length
         forecast_frame_to_use = filtered_frame[
             (filtered_frame['DateTime'] == available_forecast_start_time) & (filtered_frame['Delay'] <= requested_max_delay)].copy()
-        available_forecast_end_time = available_forecast_start_time + forecast_frame_to_use['Delay'].max()
-
-        if available_forecast_end_time < observation_period[1]:
-            logging.fatal('Available weather forecast [%s,%s] does not cover requested observation period [%s, %s]',
-                          available_forecast_start_time,
-                          available_forecast_end_time,
-                          observation_period[0],
-                          observation_period[1])
+        forecast_frame_to_use['EffectiveDateTime'] = forecast_frame_to_use['DateTime'] + forecast_frame_to_use['Delay']
+        # available_forecast_end_time = available_forecast_start_time + forecast_frame_to_use['Delay'].max()
+        # forecast_frame_to_use['EffectiveDateTime'] = forecast_frame_to_use['DateTime'] + forecast_frame_to_use['Delay']
+        # if available_forecast_end_time < observation_period[1]:
+        #     logging.fatal('Available weather forecast [%s,%s] does not cover requested observation period [%s, %s]',
+        #                   available_forecast_start_time,
+        #                   available_forecast_end_time,
+        #                   observation_period[0],
+        #                   observation_period[1])
 
         return forecast_frame_to_use
 
     _forecast_frame = extract_forecast(_problem.observation_period, _weather_cache)
-    _problem.add_forecast('forecast', _forecast_frame)
 
-    def extract_observation(observation_period, weather_cache):
+    def extract_observation(observation_period: TimePeriod, weather_cache: WeatherCache):
         forecast_frame = weather_cache.forecast_frame
         filtered_frame = forecast_frame[forecast_frame['Delay'] == datetime.timedelta()]
-        filtered_frame = filtered_frame[(filtered_frame['DateTime'] >= observation_period[0])
-                                        & (filtered_frame['DateTime'] <= observation_period[1])].copy()
+        filtered_frame = filtered_frame[(filtered_frame['DateTime'] >= observation_period.begin)
+                                        & (filtered_frame['DateTime'] <= observation_period.end)].copy()
+
+        # available_observation_start_time = filtered_frame['DateTime'].min()
+        # available_observation_end_time = filtered_frame['DateTime'].max()
+        # if available_observation_end_time < observation_period[1] or available_observation_start_time > observation_period[0]:
+        #     logging.fatal('Available weather observation [%s,%s] does not cover requested observation period [%s, %s]',
+        #                   available_observation_start_time,
+        #                   available_observation_end_time,
+        #                   observation_period[0],
+        #                   observation_period[1])
+
         return filtered_frame
 
     _observation_frame = extract_observation(_problem.observation_period, _weather_cache)
-    _problem.add_forecast('real', _observation_frame)
+
+    _observation_time_series = list(_observation_frame['DateTime'].unique())
+    _forecast_time_series = list((_forecast_frame['EffectiveDateTime']).unique())
+    _min_time = pandas.to_datetime(max(min(_observation_time_series), min(_forecast_time_series)))
+    _max_time = pandas.to_datetime(min(max(_observation_time_series), max(_forecast_time_series)))
+
+    _filtered_forecast_frame = _forecast_frame[(_forecast_frame['EffectiveDateTime'] >= _min_time)
+                                               & (_forecast_frame['EffectiveDateTime'] <= _max_time)]
+    _filtered_observation_frame = _observation_frame[(_observation_frame['DateTime'] >= _min_time)
+                                                     & (_observation_frame['DateTime'] <= _max_time)]
+
+    _updated_problem = copy.deepcopy(_problem)
+    _actual_time_period = _updated_problem.observation_period
+    if _actual_time_period.begin < _min_time or _actual_time_period.end > _max_time:
+        logging.warning('Observation period is reduced from [%s, %s] to [%s, %s]', _updated_problem.observation_period.begin,
+                        _updated_problem.observation_period.end,
+                        _min_time,
+                        _max_time)
+        _updated_problem.trim_observation_period(TimePeriod(_min_time, _max_time))
+    _updated_problem.add_forecast('forecast', _filtered_forecast_frame)
+    _updated_problem.add_forecast('real', _filtered_observation_frame)
 
     with open(_output_file, 'w') as _output_file:
-        json.dump(_problem.json_object, _output_file)
+        json.dump(_updated_problem.json_object, _output_file)
+
+
+def generate_command(args):
+    DATE_FORMAT = '%Y-%m-%d'
+    GENERATE_PROGRAM_PATH = '/home/pmateusz/dev/quake/cmake-build-debug/quake-generate'
+
+    problem_prefix_arg = getattr(args, 'problem_prefix')
+    from_date_arg = datetime.datetime.strptime(getattr(args, 'from'), DATE_FORMAT)
+    to_date_arg = datetime.datetime.strptime(getattr(args, 'to'), DATE_FORMAT)
+
+    configurations = []
+    current_date = from_date_arg
+    while current_date < to_date_arg:
+        next_date = current_date + datetime.timedelta(days=5)
+        next_date = min(next_date, to_date_arg)
+
+        configurations.append((current_date, next_date, '{0}_{1}.json'.format(problem_prefix_arg, current_date.date())))
+
+        current_date = next_date
+
+    temp_suffix = '_v0'
+    for from_date, to_date, problem in configurations:
+
+        temp_problem = problem + temp_suffix
+        subprocess.run([GENERATE_PROGRAM_PATH,
+                        '--from={0}'.format(from_date.date()),
+                        '--to={0}'.format(to_date.date()),
+                        '--output={0}'.format(temp_problem)], check=True)
+
+        if not os.path.exists(temp_problem):
+            raise Exception('Failed to generate problem {0}'.format(temp_problem))
+
+        args = argparse.Namespace(**{'problem_file': temp_problem, 'output': problem})
+        extend_problem_definition(args)
+
+        if not os.path.exists(problem):
+            raise Exception('Failed to generate problem {0}'.format(problem))
+
+        os.remove(temp_problem)
 
 
 if __name__ == '__main__':
@@ -369,3 +497,5 @@ if __name__ == '__main__':
         compute_vector_auto_regression(args)
     elif command == EXTEND_COMMAND:
         extend_problem_definition(args)
+    elif command == GENERATE_COMMAND:
+        generate_command(args)
