@@ -262,6 +262,8 @@ def parse_args():
     generate_parser.add_argument('--to')
     generate_parser.add_argument('--problem-prefix')
 
+    compute_var = sub_parsers.add_parser(VAR_COMMAND)
+
     return parser.parse_args()
 
 
@@ -364,6 +366,151 @@ def covariance_command(args):
 
 
 def compute_vector_auto_regression(args):
+    weather_cache = WeatherCache()
+    weather_cache.load()
+
+    def pivot_transform(frame):
+        pivot_frame = pandas.pivot_table(frame, columns=['City'], index=['DateTime'], values=['CloudCover'])
+        pivot_frame.columns = pivot_frame.columns.droplevel()
+        pivot_frame.columns = [city.name for city in pivot_frame.columns]
+        pivot_frame.drop_duplicates(inplace=True)
+        pivot_frame.sort_index(inplace=True)
+        return pivot_frame
+
+    def forecast_sample(frame, date_time):
+        local_frame = frame.copy()
+        foreacast_date_time_series = local_frame['DateTime'] - local_frame['Delay']
+        result_frame = pivot_transform(local_frame[foreacast_date_time_series == date_time])
+        return result_frame
+
+    def observation_sample(frame, date_time):
+        max_date_time = date_time + datetime.timedelta(days=4, hours=21)
+        local_frame = frame.copy()
+        result_frame = pivot_transform(local_frame[(local_frame['Delay'] == datetime.timedelta(seconds=0))
+                                                   & (local_frame['DateTime'] >= date_time)
+                                                   & (local_frame['DateTime'] <= max_date_time)])
+        return result_frame
+
+    forecast_frame = weather_cache.forecast_frame.copy()
+
+    result_frame = pivot_transform(forecast_frame[(forecast_frame['Delay'] == datetime.timedelta(seconds=0))
+                                                  & (forecast_frame['DateTime'] >= datetime.datetime(2019, 6, 20))
+                                                  & (forecast_frame['DateTime'] <= datetime.datetime(2019, 7, 12))])
+
+    import statsmodels.tsa.api
+
+    model = statsmodels.tsa.api.VAR(result_frame)
+    result = model.fit()
+    print(result.summary())
+
+    # start_date_time = datetime.datetime(2019, 6, 20)
+    # for days in range(10):
+    #     date_time = start_date_time + datetime.timedelta(days=days)
+    #     local_forecast_sample = forecast_sample(forecast_frame, date_time)
+    #     local_observation_sample = observation_sample(forecast_frame, date_time)
+    #
+    #     errors = local_forecast_sample['London'] - local_observation_sample['London']
+    #     errors.fillna(value=0, inplace=True)
+
+    # fig, ax = matplotlib.pyplot.subplots()
+    # ax.plot(local_forecast_sample['London'], label='forecast')
+    # ax.plot(local_observation_sample['London'], label='observation')
+    # ax.legend()
+    # fig.tight_layout()
+    # matplotlib.pyplot.savefig('London_{0}.png'.format(date_time.strftime('%Y-%m-%d')))
+    # matplotlib.pyplot.close(fig)
+    #
+    # fig, ax = matplotlib.pyplot.subplots()
+    # ax.plot(local_observation_sample['London'] - local_forecast_sample['London'], label='diff')
+    # ax.legend()
+    # fig.tight_layout()
+    # matplotlib.pyplot.savefig('diff_London_{0}.png'.format(date_time.strftime('%Y-%m-%d')))
+    # matplotlib.pyplot.close(fig)
+
+    # long_term_frame = forecast_frame[
+    #     (forecast_frame['Delay'] == datetime.timedelta(days=2)) & (forecast_frame['DateTime'] > datetime.datetime(2019, 6, 20))]
+    #
+    # long_term_frame = pivot_transform(long_term_frame)
+    # observation_frame = pivot_transform(observation_frame)
+    #
+    # long_term_frame['London'].plot()
+    # observation_frame['London'].plot()
+    # (long_term_frame['London'] - observation_frame['London']).plot()
+
+    # three_hour_frame['DateTime'] = three_hour_frame['DateTime'] + three_hour_frame['Delay']
+
+    # observation_frame = pivot_transform(observation_frame)
+    # three_hour_frame = pivot_transform(three_hour_frame)
+    #
+    # observation_frame['Glasgow'].plot()
+    # three_hour_frame['Glasgow'].plot()
+
+    # matplotlib.pyplot.show()
+    #
+    # print('here')
+
+    # blue_print = weather_cache.observation_frame.tail()
+    # local_frame = weather_cache.observation_frame[['city_name', 'date_time', 'clouds_all']].copy()
+    # pivot_frame = pandas.pivot_table(local_frame, columns=['city_name'], index=['date_time'], values=['clouds_all'])
+    # pivot_frame.columns = pivot_frame.columns.droplevel()
+    # pivot_frame.drop_duplicates(inplace=True)
+    # pivot_frame.sort_index(inplace=True)
+    # model = statsmodels.tsa.api.VAR(pivot_frame)
+    # model_result = model.fit()
+    # print(model_result.summary())
+    # forecast_frame = weather_cache.forecast_frame.copy()
+    # forecast_frame = forecast_frame[forecast_frame['DateTime'] > datetime.datetime(2019, 6, 1)]
+
+    # observations are about to pass unit root test
+    # long-term forecasts pass unit root test without question
+    # observation_frame = pivot_transform(.copy())
+    # long_term_forecast_frame = pivot_transform(forecast_frame[forecast_frame['Delay'] == datetime.timedelta(days=4, hours=21)].copy())
+    # local_forecast_frame = pivot_transform(
+    # )
+
+    # five_day_forecast = forecast_frame[forecast_frame['DateTime'] == datetime.datetime(2019, 6, 30, 0, 0)].copy()
+    # five_day_forecast['DateTime'] = five_day_forecast['DateTime'] + five_day_forecast['Delay']
+    #
+    # observation_frame = forecast_frame[(forecast_frame['Delay'] == datetime.timedelta(seconds=0))
+    #                                    & (forecast_frame['DateTime'] <= five_day_forecast['DateTime'].max())
+    #                                    & (forecast_frame['DateTime'] >=five_day_forecast['DateTime'].min())].copy()
+    #
+    # five_day_frame = pivot_transform(five_day_forecast)
+    # observation_frame = pivot_transform(observation_frame)
+    #
+    #
+    # observation_frame.plot()
+    #
+    # matplotlib.pyplot.show()
+
+    pass
+
+    # local_data_frame = pivot_transform(local_data_frame)
+
+    # def test_for_unit_root(frame):
+    #     for column in frame.columns:
+    #         pass
+    #         # print(column, statsmodels.tsa.stattools.adfuller(frame[column]))
+    #         # print(column, statsmodels.tsa.stattools.kpss(frame[column]))
+    #
+    # test_for_unit_root(observation_frame)
+    # test_for_unit_root(long_term_forecast_frame)
+    # test_for_unit_root(local_data_frame)
+    #
+    # model = statsmodels.tsa.api.VAR(observation_frame)
+    # results = model.fit()
+    # residuals = results.resid
+    #
+    # residuals['London'].plot()
+    # matplotlib.pyplot.show()
+    #
+    # print(results.is_stable())
+    # print(results.summary())
+
+    # long_term_forecast_frame['London'].plot()
+    # matplotlib.pyplot.show()
+
+    # TODO: build var forecast for a weather forecast
     pass
 
 
