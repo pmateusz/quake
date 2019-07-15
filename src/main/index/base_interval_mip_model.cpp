@@ -118,11 +118,16 @@ void quake::BaseIntervalMipModel::Build(const boost::optional<Solution> &solutio
             continue;
         }
 
+        // set switch for the first interval
         mip_model_.addConstr(prev_interval_it->Var() <= end_switch_interval.at(prev_interval_it->Period().begin()).Var());
 
+        // set switch for the second interval and others
         for (auto interval_it = std::next(prev_interval_it); interval_it != interval_it_end; ++interval_it) {
+            const auto &switch_interval = end_switch_interval.at(interval_it->Period().begin());
             if (prev_interval_it->Period().end() == interval_it->Period().begin()) {
-                mip_model_.addConstr(interval_it->Var() <= prev_interval_it->Var() + end_switch_interval.at(interval_it->Period().begin()).Var());
+                mip_model_.addConstr(interval_it->Var() <= prev_interval_it->Var() + switch_interval.Var());
+            } else {
+                mip_model_.addConstr(interval_it->Var() <= switch_interval.Var());
             }
 
             prev_interval_it = interval_it;

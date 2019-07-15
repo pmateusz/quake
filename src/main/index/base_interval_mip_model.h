@@ -58,8 +58,6 @@ namespace quake {
 
         IntervalVar CreateInterval(std::size_t station_index, const boost::posix_time::time_period &period);
 
-        double GetTrafficIndex(const Solution &solution, const Forecast &forecast) const;
-
         virtual double GetTrafficIndexUpperBound() const;
 
         virtual const std::vector<GroundStation> &ObservableStations() const { return observable_stations_; }

@@ -75,17 +75,17 @@ namespace quake {
                 const auto time_from_start = value - period_.begin();
                 CHECK(!time_from_start.is_negative());
 
-                const auto left_index
-                        = static_cast<const std::size_t>(time_from_start.total_seconds() /
-                                                         update_frequency_.total_seconds());
-                const auto remaining_seconds =
-                        time_from_start.total_seconds() - left_index * update_frequency_.total_seconds();
-                if (remaining_seconds > update_frequency_.total_seconds() / 2) {
-                    const auto right_index = left_index + 1;
-                    if (right_index < values_.size()) {
-                        return values_.at(right_index);
-                    }
-                }
+                const auto left_index = static_cast<std::size_t>(time_from_start.total_seconds() / update_frequency_.total_seconds());
+
+                // old behaviour
+//                const auto remaining_seconds = time_from_start.total_seconds() - left_index * update_frequency_.total_seconds();
+//                if (remaining_seconds > update_frequency_.total_seconds() / 2) {
+//                    const auto right_index = left_index + 1;
+//                    if (right_index < values_.size()) {
+//                        LOG(INFO) << "Right index: " << right_index;
+//                        return values_.at(right_index);
+//                    }
+//                }
 
                 return values_.at(left_index);
             }

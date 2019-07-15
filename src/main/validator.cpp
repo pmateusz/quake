@@ -80,8 +80,26 @@ void quake::Validator::Validate(const quake::Solution &solution) const {
 
         if (prev_it->Station != current_it->Station) { // if station are different we expect one to be the dummy station
             const auto distance = current_it->Period.begin() - prev_it->Period.end();
-            CHECK_GE(distance, problem_.SwitchDuration()) << "Observations of regular stations are not separated by the switch duration ("
-                                                          << problem_.SwitchDuration() << "):" << *prev_it << " vs " << *current_it;
+            if (distance < problem_.SwitchDuration()) {
+                std::stringstream msg;
+                msg << "Observations of regular stations are not separated by the switch duration ("
+                    << problem_.SwitchDuration() << "):" << *prev_it << " vs " << *current_it
+                    << std::endl;
+
+                msg << "Communication windows: ";
+                msg << prev_it->Station;
+                for (const auto &window : problem_.TransferWindows(prev_it->Station)) {
+                    msg << ' ' << window;
+                }
+                msg << std::endl;
+
+                msg << current_it->Station;
+                for (const auto &window : problem_.TransferWindows(current_it->Station)) {
+                    msg << ' ' << window;
+                }
+
+                LOG(FATAL) << msg.str();
+            }
         } else if (prev_it->Station != GroundStation::None) { // if stations are the same we do not expect observation periods to be adjacent
             CHECK(!prev_it->Period.is_adjacent(current_it->Period));
         }

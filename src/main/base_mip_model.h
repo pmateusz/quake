@@ -71,12 +71,11 @@ namespace quake {
 
             try {
                 Build(initial_guess);
+                mip_model_.optimize();
             } catch (const GRBException &exception) {
                 LOG(FATAL) << "Solver exception " << exception.getMessage()
                            << " error code: " << exception.getErrorCode();
             }
-
-            mip_model_.optimize();
 
             using namespace util;
 
@@ -95,7 +94,6 @@ namespace quake {
             std::unordered_map<quake::GroundStation, int64> final_buffers;
             for (const auto &station: Stations()) {
                 if (station == GroundStation::None) {
-                    final_buffers.emplace(station, 0);
                     continue;
                 }
 

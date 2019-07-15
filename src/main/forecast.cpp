@@ -138,7 +138,6 @@ void quake::from_json(const nlohmann::json &json, Forecast &forecast) {
 
     // check index is ascending with a constant step
     CHECK(!index.empty());
-    boost::posix_time::time_period period{index.front(), index.back()};
     boost::posix_time::time_duration step;
     if (index.size() >= 2) {
         auto prev_value = index.front();
@@ -153,6 +152,9 @@ void quake::from_json(const nlohmann::json &json, Forecast &forecast) {
             prev_value = current_value;
         }
     }
+
+    boost::posix_time::time_period period{index.front(), index.back() + step};
+    CHECK_EQ(period.length().total_seconds(), index.size() * step.total_seconds());
 
     std::unordered_map<GroundStation, Forecast::Series> series;
     for (const auto &json_element : json.at("stations")) {
@@ -185,7 +187,7 @@ void quake::to_json(nlohmann::json &json, const quake::Forecast &forecast) {
             stations.emplace(element.first.name(), element_object);
         }
     }
-    
+
     json_object["index"] = index;
     json_object["stations"] = stations;
     json = json_object;

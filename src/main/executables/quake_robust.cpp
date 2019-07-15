@@ -35,65 +35,40 @@
 #include "util/logging.h"
 
 #include "extended_problem.h"
-#include "index/robust_mip_model.h"
+#include "index/robust_index_mip_model.h"
+#include "index/worst_case_mip_model.h"
+#include "index/index_evaluator.h"
+#include "executables/mip_arguments.h"
 
-DEFINE_string(problem_file, "", "The problem file.");
-DEFINE_string(time_step, "00:00:15", "Time step for the discretisation scheme.");
-DEFINE_string(gap, "", "Gap between the bound and the objective");
-
-DEFINE_validator(problem_file, quake::util::validate_input_file);
-DEFINE_validator(time_step, quake::util::validate_duration);
-
-struct Arguments {
-    boost::filesystem::path ProblemPath;
-    boost::posix_time::time_duration TimeStep;
-    boost::optional<double> Gap;
-};
-
-Arguments SetupLogsAndParseArgs(int argc, char *argv[]) {
-    quake::util::SetupLogging(argv[0]);
-
-    CHECK_GE(argc, 1);
-    std::stringstream output_msg;
-    output_msg << "Program launched with args: " << argv[0];
-    for (auto arg_index = 1; arg_index < argc; ++arg_index) {
-        output_msg << ' ' << argv[arg_index];
-    }
-    LOG(INFO) << output_msg.str();
-
-    gflags::ParseCommandLineFlags(&argc, &argv, true);
-
-    CHECK(!FLAGS_problem_file.empty()) << "Problem file is required";
-    CHECK(!FLAGS_time_step.empty()) << "Time step is required";
-
-    Arguments args;
-    args.ProblemPath = FLAGS_problem_file;
-    args.TimeStep = boost::posix_time::duration_from_string(FLAGS_time_step);
-
-    if (!FLAGS_gap.empty()) {
-        args.Gap = std::stod(FLAGS_gap);
-    }
-
-    return args;
-}
 
 int main(int argc, char *argv[]) {
-    const auto arguments = SetupLogsAndParseArgs(argc, argv);
+    const auto arguments = quake::SetupLogsAndParseArgs<quake::MipArguments>(argc, argv);
+    const auto problem = quake::ExtendedProblem::load_json(arguments.ProblemPath);
+    const auto &weather_forecast = problem.GetWeatherSample(quake::ExtendedProblem::WeatherSample::Forecast);
+    const auto &weather_observed = problem.GetWeatherSample(quake::ExtendedProblem::WeatherSample::Real);
 
-    std::ifstream input_stream;
-    input_stream.open(arguments.ProblemPath.string(), std::ifstream::in);
+    LOG(INFO) << "Computing Worst Case";
+    quake::WorstCaseMipModel worst_case_model(&problem, arguments.IntervalStep, {weather_forecast});
+    const auto worst_case_solution_opt = worst_case_model.Solve(arguments.TimeLimit, arguments.GapLimit, boost::none);
+    CHECK(worst_case_solution_opt) << "Failed to find the worst case solution";
+//
+    quake::IndexEvaluator evaluator{problem};
+    const auto worst_cast_traffic_index = evaluator(*worst_case_solution_opt, weather_forecast);
+    LOG(INFO) << "Worst Case In-Sample Traffic Index: " << evaluator(*worst_case_solution_opt, weather_forecast);
+    LOG(INFO) << "Worst Cast Out-of-Sample Traffic Index: " << evaluator(*worst_case_solution_opt, weather_observed);
 
-    LOG_IF(FATAL, !input_stream.is_open()) << "Failed to open file " << arguments.ProblemPath;
+//    const auto THRESHOLD = 1.10;
+//    const auto target_traffic_index = worst_cast_traffic_index * THRESHOLD;
+//    LOG(INFO) << "Computing Distributionally Robust Essential Riskiness Index with the target index of " << target_traffic_index
+//              << " at threshold of " << THRESHOLD;
 
-    nlohmann::json json_object;
-    input_stream >> json_object;
-    input_stream.close();
-
-    const auto problem = json_object.get<quake::ExtendedProblem>();
-    const auto rounded_problem = problem.Round(2);
-
-    quake::RobustMipModel robust_mip_model{&rounded_problem, arguments.TimeStep};
-    robust_mip_model.Solve(boost::none, arguments.Gap);
+//    const auto worst_case_traffic_index = 8519;
+    const auto worst_case_traffic_index = 4000;
+    quake::RobustIndexMipModel robust_mip_model{&problem, arguments.IntervalStep, worst_case_traffic_index};
+    const auto solution_opt = robust_mip_model.Solve(arguments.TimeLimit, arguments.GapLimit, boost::none);
+    CHECK(solution_opt);
+    LOG(INFO) << "Distributionally Robust In-Sample Traffic Index: " << evaluator(*solution_opt, weather_forecast);
+    LOG(INFO) << "Distributionally Robust Out-of-Sample Traffic Index: " << evaluator(*solution_opt, weather_observed);
 
     return EXIT_SUCCESS;
 }

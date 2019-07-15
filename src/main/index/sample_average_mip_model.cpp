@@ -71,8 +71,7 @@ quake::SampleAverageMipModel::SampleAverageCallback::SampleAverageCallback(quake
     dual_scenarios_.reserve(num_scenarios);
 }
 
-static bool
-descending_comparator(const std::pair<std::size_t, double> &left, const std::pair<std::size_t, double> &right) {
+static bool descending_comparator(const std::pair<std::size_t, double> &left, const std::pair<std::size_t, double> &right) {
     return left.second > right.second;
 }
 
