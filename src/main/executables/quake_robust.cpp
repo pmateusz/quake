@@ -30,6 +30,7 @@
 #include <boost/optional.hpp>
 
 #include <nlohmann/json.hpp>
+#include <index/robust_average_mip_model.h>
 
 #include "util/validation.h"
 #include "util/logging.h"
@@ -65,6 +66,7 @@ int main(int argc, char *argv[]) {
 //    const auto worst_case_traffic_index = 8519;
     const auto worst_case_traffic_index = 4000;
     quake::RobustIndexMipModel robust_mip_model{&problem, arguments.IntervalStep, worst_case_traffic_index};
+//    quake::RobustAverageMipModel robust_mip_model{&problem, arguments.IntervalStep};
     const auto solution_opt = robust_mip_model.Solve(arguments.TimeLimit, arguments.GapLimit, boost::none);
     CHECK(solution_opt);
     LOG(INFO) << "Distributionally Robust In-Sample Traffic Index: " << evaluator(*solution_opt, weather_forecast);

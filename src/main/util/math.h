@@ -61,7 +61,7 @@ namespace quake {
         }
 
         inline bool is_surely_lt(double left, double right) {
-            return left - right > -BINARY_PRECISION;
+            return left - right < -BINARY_PRECISION;
         }
     }
 }

@@ -70,14 +70,13 @@ void quake::RobustIndexMipModel::Build(const boost::optional<Solution> &solution
             for (const auto &period : cloud_cover_index_) {
                 std::stringstream dual_cloud_cover_label;
                 dual_cloud_cover_label << "dual_s" << station_index << "t" << period.begin();
-                station_dual_cloud_cover.emplace_back(mip_model_.addVar(std::numeric_limits<double>::min(), std::numeric_limits<double>::max(),
-                                                                        0.0, GRB_CONTINUOUS, dual_cloud_cover_label.str()));
+                station_dual_cloud_cover.emplace_back(
+                        mip_model_.addVar(-GRB_INFINITY, GRB_INFINITY, 0.0, GRB_CONTINUOUS, dual_cloud_cover_label.str()));
             }
 
             std::stringstream dual_station_label;
             dual_station_label << "dual_s" << station_index;
-            dual_station_.at(station_index) = mip_model_.addVar(std::numeric_limits<double>::min(), std::numeric_limits<double>::max(),
-                                                                0.0, GRB_CONTINUOUS, dual_station_label.str());
+            dual_station_.at(station_index) = mip_model_.addVar(-GRB_INFINITY, GRB_INFINITY, 0.0, GRB_CONTINUOUS, dual_station_label.str());
         }
     }
 

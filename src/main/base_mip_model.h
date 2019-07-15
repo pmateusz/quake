@@ -73,8 +73,7 @@ namespace quake {
                 Build(initial_guess);
                 mip_model_.optimize();
             } catch (const GRBException &exception) {
-                LOG(FATAL) << "Solver exception " << exception.getMessage()
-                           << " error code: " << exception.getErrorCode();
+                LOG(FATAL) << "Solver exception " << exception.getMessage() << " error code: " << exception.getErrorCode();
             }
 
             using namespace util;
@@ -84,8 +83,8 @@ namespace quake {
             CHECK_NE(solver_status, SolverStatus::Loaded);
             CHECK_NE(solver_status, SolverStatus::InProgress);
             CHECK_NE(solver_status, SolverStatus::Numeric);
-            CHECK_NE(solver_status, SolverStatus::Unbounded);
-            CHECK_NE(solver_status, SolverStatus::InfiniteOrUnbounded);
+//            CHECK_NE(solver_status, SolverStatus::Unbounded);
+//            CHECK_NE(solver_status, SolverStatus::InfiniteOrUnbounded);
             CHECK_NE(solver_status, SolverStatus::Infeasible);
             ReportResults(solver_status);
 
