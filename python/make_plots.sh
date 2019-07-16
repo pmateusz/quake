@@ -49,7 +49,7 @@ pushd ../plots
 /home/pmateusz/dev/quake/python/plot-quake.py all-service-level
 /home/pmateusz/dev/quake/python/plot-quake.py key-rate
 
-extension=png
+extension=pdf
 
 mkdir -p export
 mv average_cloud_cover.$extension export/

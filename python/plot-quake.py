@@ -258,7 +258,7 @@ def format_timedelta(x, pos=None):
 #     plot_frame(elevation_frame, 'Elevation Angle', 'elevation_plot.png')
 
 
-FORMAT = 'png'
+FORMAT = 'pdf'
 FIGURE_FONT_SIZE = 12
 FIGURE_WIDTH_SIZE = 7
 FIGURE_WIDTH_SQUARE_SIZE = 5

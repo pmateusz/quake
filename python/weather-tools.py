@@ -372,7 +372,6 @@ def compute_vector_auto_regression(args):
     def pivot_transform(frame):
         pivot_frame = pandas.pivot_table(frame, columns=['City'], index=['DateTime'], values=['CloudCover'])
         pivot_frame.columns = pivot_frame.columns.droplevel()
-        pivot_frame.columns = [city.name for city in pivot_frame.columns]
         pivot_frame.drop_duplicates(inplace=True)
         pivot_frame.sort_index(inplace=True)
         return pivot_frame
@@ -380,18 +379,31 @@ def compute_vector_auto_regression(args):
     def forecast_sample(frame, date_time):
         local_frame = frame.copy()
         foreacast_date_time_series = local_frame['DateTime'] - local_frame['Delay']
-        result_frame = pivot_transform(local_frame[foreacast_date_time_series == date_time])
-        return result_frame
+        return pivot_transform(local_frame[foreacast_date_time_series == date_time])
 
     def observation_sample(frame, date_time):
         max_date_time = date_time + datetime.timedelta(days=4, hours=21)
         local_frame = frame.copy()
-        result_frame = pivot_transform(local_frame[(local_frame['Delay'] == datetime.timedelta(seconds=0))
-                                                   & (local_frame['DateTime'] >= date_time)
-                                                   & (local_frame['DateTime'] <= max_date_time)])
-        return result_frame
+        return pivot_transform(local_frame[(local_frame['Delay'] == datetime.timedelta(seconds=0))
+                                           & (local_frame['DateTime'] >= date_time)
+                                           & (local_frame['DateTime'] <= max_date_time)])
 
     forecast_frame = weather_cache.forecast_frame.copy()
+
+    time_points = [pandas.to_datetime(value)
+                   for value in forecast_frame[(forecast_frame['Delay'] == datetime.timedelta(seconds=0))]['DateTime'].sort_values().unique()]
+    locations = forecast_frame[(forecast_frame['Delay'] == datetime.timedelta(seconds=0))]['City'].sort_values().unique()
+
+    for time_point in time_points:
+        local_forecast_sample = forecast_sample(forecast_frame, time_point)
+        local_observation_sample = observation_sample(forecast_frame, time_point)
+        for location in locations:
+            residual_series = local_forecast_sample[location] - local_observation_sample[location]
+            residual_frame = residual_series.to_frame()
+            residual_frame['DateTime'] = pandas.to_datetime(residual_frame.index)
+            min_time = residual_frame['DateTime'].min()
+            residual_frame['Delay'] = residual_frame['DateTime'] - min_time
+            pass
 
     result_frame = pivot_transform(forecast_frame[(forecast_frame['Delay'] == datetime.timedelta(seconds=0))
                                                   & (forecast_frame['DateTime'] >= datetime.datetime(2019, 6, 20))
@@ -527,13 +539,10 @@ def extend_problem_definition(args):
 
     def extract_forecast(observation_period: TimePeriod, weather_cache: WeatherCache):
         forecast_frame = weather_cache.forecast_frame.copy()
+        forecast_frame['ForecastDateTime'] = forecast_frame['DateTime'] - forecast_frame['Delay']
 
-        filtered_frame = forecast_frame[forecast_frame.apply(lambda row: row['DateTime'].date() == observation_period.begin.date(), axis=1)]
-        available_forecast_start_time = filtered_frame['DateTime'].min()
-        requested_max_delay = observation_period.length
-        forecast_frame_to_use = filtered_frame[
-            (filtered_frame['DateTime'] == available_forecast_start_time) & (filtered_frame['Delay'] <= requested_max_delay)].copy()
-        forecast_frame_to_use['EffectiveDateTime'] = forecast_frame_to_use['DateTime'] + forecast_frame_to_use['Delay']
+        forecast_date_time = forecast_frame[forecast_frame.apply(lambda row: row['ForecastDateTime'].date() == observation_period.begin.date(), axis=1)]['DateTime'].min()
+        forecast_frame_to_use = forecast_frame[forecast_frame['ForecastDateTime'] == forecast_date_time].copy()
         # available_forecast_end_time = available_forecast_start_time + forecast_frame_to_use['Delay'].max()
         # forecast_frame_to_use['EffectiveDateTime'] = forecast_frame_to_use['DateTime'] + forecast_frame_to_use['Delay']
         # if available_forecast_end_time < observation_period[1]:
@@ -565,16 +574,13 @@ def extend_problem_definition(args):
         return filtered_frame
 
     _observation_frame = extract_observation(_problem.observation_period, _weather_cache)
-
     _observation_time_series = list(_observation_frame['DateTime'].unique())
-    _forecast_time_series = list((_forecast_frame['EffectiveDateTime']).unique())
+    _forecast_time_series = list((_forecast_frame['DateTime']).unique())
     _min_time = pandas.to_datetime(max(min(_observation_time_series), min(_forecast_time_series)))
     _max_time = pandas.to_datetime(min(max(_observation_time_series), max(_forecast_time_series)))
 
-    _filtered_forecast_frame = _forecast_frame[(_forecast_frame['EffectiveDateTime'] >= _min_time)
-                                               & (_forecast_frame['EffectiveDateTime'] <= _max_time)]
-    _filtered_observation_frame = _observation_frame[(_observation_frame['DateTime'] >= _min_time)
-                                                     & (_observation_frame['DateTime'] <= _max_time)]
+    _filtered_forecast_frame = _forecast_frame[(_forecast_frame['DateTime'] >= _min_time) & (_forecast_frame['DateTime'] <= _max_time)]
+    _filtered_observation_frame = _observation_frame[(_observation_frame['DateTime'] >= _min_time) & (_observation_frame['DateTime'] <= _max_time)]
 
     _updated_problem = copy.deepcopy(_problem)
     _actual_time_period = _updated_problem.observation_period
