@@ -33,7 +33,7 @@ quake::Solution::Solution(std::unordered_map<GroundStation, std::vector<boost::p
                           std::unordered_map<GroundStation, int64> final_buffers)
         : observations_{std::move(observations)},
           final_buffers_{std::move(final_buffers)} {
-    CHECK_EQ(observations_.size(), final_buffers_.size());
+    CHECK_LE(observations_.size(), final_buffers_.size());
 }
 
 quake::Solution quake::Solution::load_json(const boost::filesystem::path &path) {

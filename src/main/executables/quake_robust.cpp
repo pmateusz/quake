@@ -54,7 +54,7 @@ int main(int argc, char *argv[]) {
     CHECK(worst_case_solution_opt) << "Failed to find the worst case solution";
 //
     quake::IndexEvaluator evaluator{problem};
-    const auto worst_cast_traffic_index = evaluator(*worst_case_solution_opt, weather_forecast);
+    const auto worst_case_traffic_index = evaluator(*worst_case_solution_opt, weather_forecast);
     LOG(INFO) << "Worst Case In-Sample Traffic Index: " << evaluator(*worst_case_solution_opt, weather_forecast);
     LOG(INFO) << "Worst Cast Out-of-Sample Traffic Index: " << evaluator(*worst_case_solution_opt, weather_observed);
 
@@ -64,8 +64,7 @@ int main(int argc, char *argv[]) {
 //              << " at threshold of " << THRESHOLD;
 
 //    const auto worst_case_traffic_index = 8519;
-    const auto worst_case_traffic_index = 4000;
-    quake::RobustIndexMipModel robust_mip_model{&problem, arguments.IntervalStep, worst_case_traffic_index};
+    quake::RobustIndexMipModel robust_mip_model{&problem, arguments.IntervalStep, 0.5 * worst_case_traffic_index};
 //    quake::RobustAverageMipModel robust_mip_model{&problem, arguments.IntervalStep};
     const auto solution_opt = robust_mip_model.Solve(arguments.TimeLimit, arguments.GapLimit, boost::none);
     CHECK(solution_opt);

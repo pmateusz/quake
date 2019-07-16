@@ -290,7 +290,7 @@ quake::RobustIndexMipModel::RobustIndexMipCallback::CreateCloudCoverVariables(co
         return {};
     }
 
-    static const auto max_relative_deviation = 0.1;
+    static const auto max_relative_deviation = 0.3;
     const auto step_duration = model_.cloud_cover_index_.front().length().total_seconds();
     const auto total_duration = (model_.cloud_cover_index_.back().end() - model_.cloud_cover_index_.front().begin()).total_seconds();
 
