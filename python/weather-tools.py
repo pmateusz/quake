@@ -39,6 +39,11 @@ import quake.city
 import tabulate
 import tqdm
 
+# TODO: build confidence intervals on error - are errors correlated between series?
+# TODO: plot confidence interval for weather at given day
+# TODO: read how others forecast weather
+# TODO: study gaussian process, multi-output gaussian process, non-parametric gaussian regression
+
 BUILD_CACHE_COMMAND = 'build-cache'
 PLOT_COMMAND = 'plot-cloud-cover'
 COVARIANCE_COMMAND = 'compute-covariance'
@@ -52,16 +57,13 @@ class WeatherCache:
     FILE_MODE = 'w'
     FORECAST_CACHE_FILE = 'forecast.hdf'
     OBSERVATION_CACHE_FILE = 'observation.hdf'
+    ZERO_TIME_DELTA = datetime.timedelta()
 
     def __init__(self):
         self.__forecast_frame = None
         self.__observation_frame = None
 
     def rebuild(self):
-        resolved_root_directory = os.path.expanduser('~/OneDrive/dev/quake/data/forecasts/')
-
-        file_paths = [os.path.abspath(os.path.join(resolved_root_directory, file_name))
-                      for file_name in os.listdir(resolved_root_directory) if file_name.endswith('.json')]
 
         def load_data_frame(file_path):
             with open(file_path, 'r') as file_stream:
@@ -87,6 +89,24 @@ class WeatherCache:
                 data_frame['Delay'] = data_frame['DateTime'] - min_time
                 return data_frame
 
+        def load_observation_frame(file_path):
+            data_frame = pandas.read_csv(file_path)
+            data_frame['date_time'] = data_frame['dt_iso'].apply(
+                lambda date_string: datetime.datetime.strptime(date_string, '%Y-%m-%d %H:%M:%S %z %Z'))
+            data_frame.drop(columns=['weather_id', 'weather_icon', 'dt', 'dt_iso',
+                                     'lat', 'lon',
+                                     'rain_today', 'snow_today',
+                                     'rain_1h', 'snow_1h',
+                                     'rain_3h', 'snow_3h',
+                                     'rain_24h', 'snow_24h'], inplace=True)
+            data_frame['city_name'] = data_frame['city_id'].apply(quake.city.from_key)
+            return data_frame
+
+        resolved_root_directory = os.path.expanduser('~/OneDrive/dev/quake/data/forecasts/')
+
+        file_paths = [os.path.abspath(os.path.join(resolved_root_directory, file_name))
+                      for file_name in os.listdir(resolved_root_directory) if file_name.endswith('.json')]
+
         data_frames = []
         with warnings.catch_warnings():
             warnings.filterwarnings('ignore', '', tqdm.TqdmSynchronisationWarning)
@@ -101,16 +121,7 @@ class WeatherCache:
         forecast_frame = pandas.concat(data_frames)
         forecast_frame.drop_duplicates(inplace=True)
 
-        observation_frame = pandas.read_csv('/home/pmateusz/dev/quake/data/weather/ground_station_data_set_filled.csv')
-        observation_frame['date_time'] = observation_frame['dt_iso'].apply(
-            lambda date_string: datetime.datetime.strptime(date_string, '%Y-%m-%d %H:%M:%S %z %Z'))
-        observation_frame.drop(columns=['weather_id', 'weather_icon', 'dt', 'dt_iso',
-                                        'lat', 'lon',
-                                        'rain_today', 'snow_today',
-                                        'rain_1h', 'snow_1h',
-                                        'rain_3h', 'snow_3h',
-                                        'rain_24h', 'snow_24h'], inplace=True)
-        observation_frame['city_name'] = observation_frame['city_id'].apply(quake.city.from_key)
+        observation_frame = load_observation_frame('/home/pmateusz/dev/quake/data/weather/ground_station_data_set_filled.csv')
 
         self.__forecast_frame = forecast_frame
         self.__observation_frame = observation_frame
@@ -122,6 +133,44 @@ class WeatherCache:
     def save(self):
         self.__forecast_frame.to_hdf(self.FORECAST_CACHE_FILE, self.FILE_TABLE, mode=self.FILE_MODE)
         self.__observation_frame.to_hdf(self.OBSERVATION_CACHE_FILE, self.FILE_TABLE, mode=self.FILE_MODE)
+
+    def get_forecast_frame(self, start_time, duration):
+        end_time = start_time + duration
+
+        filter_frame \
+            = self.__forecast_frame[(self.__forecast_frame['DateTime'] >= start_time) & (self.__forecast_frame['DateTime'] <= end_time)].copy()
+        filter_frame['ForecastDateTime'] = filter_frame['DateTime'] - filter_frame['Delay']
+        filter_frame['ForecastDateTimeDiff'] = filter_frame['ForecastDateTime'].apply(lambda value: abs((value - start_time).total_seconds()))
+        min_forecast_date_time_diff = filter_frame['ForecastDateTimeDiff'].min()
+        forecast_date_time = filter_frame[filter_frame['ForecastDateTimeDiff'] == min_forecast_date_time_diff]['ForecastDateTime'].iloc[0]
+
+        data_frame = filter_frame[filter_frame['ForecastDateTime'] == forecast_date_time].copy()
+        self.__verify_period(data_frame, start_time, end_time)
+        return self.__pivot_transform(data_frame)
+
+    def get_observation_frame(self, start_time, duration):
+        end_time = start_time + duration
+
+        data_frame = self.__forecast_frame[self.__forecast_frame['Delay'] == self.ZERO_TIME_DELTA].copy()
+        self.__verify_period(data_frame, start_time, end_time)
+        return self.__pivot_transform(data_frame)
+
+    @staticmethod
+    def __verify_period(frame, start_time, end_time):
+        actual_start_time = frame['DateTime'].min()
+        actual_end_time = frame['DateTime'].max()
+
+        if actual_start_time > start_time or actual_end_time < end_time:
+            warnings.warn('Available data [{0},{1}] does not cover requested period [{2}, {3}]'
+                          .format(actual_start_time, actual_end_time, start_time, end_time))
+
+    @staticmethod
+    def __pivot_transform(frame):
+        pivot_frame = pandas.pivot_table(frame, columns=['City'], index=['DateTime'], values=['CloudCover'])
+        pivot_frame.columns = pivot_frame.columns.droplevel()
+        pivot_frame.drop_duplicates(inplace=True)
+        pivot_frame.sort_index(inplace=True)
+        return pivot_frame
 
     @property
     def forecast_frame(self):
@@ -210,25 +259,13 @@ class Problem:
 
     @staticmethod
     def __frame_to_dict(frame):
-        index = frame['DateTime'] + frame['Delay']
-        index.drop_duplicates(inplace=True)
-        index.sort_values(inplace=True)
-        index_to_position = {index_value: index_position for index_position, index_value in enumerate(index)}
-
         station_data = []
-        cities = frame['City'].unique()
+        cities = frame.columns.values
         for city in cities:
-            city_frame = frame[frame['City'] == city].copy()
-            city_frame['IndexDateTime'] = city_frame['DateTime'] + city_frame['Delay']
-            city_frame.set_index('IndexDateTime', inplace=True)
-            city_frame.sort_index(inplace=True)
+            cloud_cover_data = frame[city].values.tolist()
+            station_data.append({'station': city.name, 'cloud_cover': cloud_cover_data})
 
-            cloud_cover_array = [0] * len(index)
-            for row in city_frame.itertuples():
-                cloud_cover_array[index_to_position[row.Index]] = row.CloudCover
-            station_data.append({'station': city.name, 'cloud_cover': cloud_cover_array})
-
-        index_values = [value.strftime(TimePeriod.DATETIME_FORMAT) for value in index]
+        index_values = [value.strftime(TimePeriod.DATETIME_FORMAT) for value in frame.index]
         return {'index': index_values, 'stations': station_data}
 
 
@@ -527,74 +564,34 @@ def compute_vector_auto_regression(args):
 
 
 def extend_problem_definition(args):
-    _problem_file = getattr(args, 'problem_file')
-    _output_file = getattr(args, 'output')
+    problem_file = getattr(args, 'problem_file')
+    output_file = getattr(args, 'output')
 
-    with open(_problem_file, 'r') as _input_stream:
-        _json_object = json.load(_input_stream)
-        _problem = Problem(_json_object)
+    with open(problem_file, 'r') as input_stream:
+        json_object = json.load(input_stream)
+        problem = Problem(json_object)
 
-    _weather_cache = WeatherCache()
-    _weather_cache.load()
+    weather_cache = WeatherCache()
+    weather_cache.load()
 
-    def extract_forecast(observation_period: TimePeriod, weather_cache: WeatherCache):
-        forecast_frame = weather_cache.forecast_frame.copy()
-        forecast_frame['ForecastDateTime'] = forecast_frame['DateTime'] - forecast_frame['Delay']
+    forecast_frame = weather_cache.get_forecast_frame(problem.observation_period.begin, problem.observation_period.length)
+    observation_frame = weather_cache.get_observation_frame(problem.observation_period.begin, problem.observation_period.length)
+    min_time = max(forecast_frame.index.min(), observation_frame.index.min())
+    max_time = min(forecast_frame.index.max(), observation_frame.index.max())
 
-        forecast_date_time = forecast_frame[forecast_frame.apply(lambda row: row['ForecastDateTime'].date() == observation_period.begin.date(), axis=1)]['DateTime'].min()
-        forecast_frame_to_use = forecast_frame[forecast_frame['ForecastDateTime'] == forecast_date_time].copy()
-        # available_forecast_end_time = available_forecast_start_time + forecast_frame_to_use['Delay'].max()
-        # forecast_frame_to_use['EffectiveDateTime'] = forecast_frame_to_use['DateTime'] + forecast_frame_to_use['Delay']
-        # if available_forecast_end_time < observation_period[1]:
-        #     logging.fatal('Available weather forecast [%s,%s] does not cover requested observation period [%s, %s]',
-        #                   available_forecast_start_time,
-        #                   available_forecast_end_time,
-        #                   observation_period[0],
-        #                   observation_period[1])
+    if problem.observation_period.begin < min_time or problem.observation_period.end > max_time:
+        warnings.warn('Problem observation period is reduced from [{0}, {1}] to [{2}, {3}]'.format(problem.observation_period.begin,
+                                                                                                   problem.observation_period.end,
+                                                                                                   min_time,
+                                                                                                   max_time))
 
-        return forecast_frame_to_use
+    updated_problem = copy.deepcopy(problem)
+    updated_problem.trim_observation_period(TimePeriod(min_time, max_time))
+    updated_problem.add_forecast('forecast', forecast_frame[(forecast_frame.index >= min_time) & (forecast_frame.index <= max_time)])
+    updated_problem.add_forecast('real', observation_frame[(observation_frame.index >= min_time) & (observation_frame.index <= max_time)])
 
-    _forecast_frame = extract_forecast(_problem.observation_period, _weather_cache)
-
-    def extract_observation(observation_period: TimePeriod, weather_cache: WeatherCache):
-        forecast_frame = weather_cache.forecast_frame
-        filtered_frame = forecast_frame[forecast_frame['Delay'] == datetime.timedelta()]
-        filtered_frame = filtered_frame[(filtered_frame['DateTime'] >= observation_period.begin)
-                                        & (filtered_frame['DateTime'] <= observation_period.end)].copy()
-
-        # available_observation_start_time = filtered_frame['DateTime'].min()
-        # available_observation_end_time = filtered_frame['DateTime'].max()
-        # if available_observation_end_time < observation_period[1] or available_observation_start_time > observation_period[0]:
-        #     logging.fatal('Available weather observation [%s,%s] does not cover requested observation period [%s, %s]',
-        #                   available_observation_start_time,
-        #                   available_observation_end_time,
-        #                   observation_period[0],
-        #                   observation_period[1])
-
-        return filtered_frame
-
-    _observation_frame = extract_observation(_problem.observation_period, _weather_cache)
-    _observation_time_series = list(_observation_frame['DateTime'].unique())
-    _forecast_time_series = list((_forecast_frame['DateTime']).unique())
-    _min_time = pandas.to_datetime(max(min(_observation_time_series), min(_forecast_time_series)))
-    _max_time = pandas.to_datetime(min(max(_observation_time_series), max(_forecast_time_series)))
-
-    _filtered_forecast_frame = _forecast_frame[(_forecast_frame['DateTime'] >= _min_time) & (_forecast_frame['DateTime'] <= _max_time)]
-    _filtered_observation_frame = _observation_frame[(_observation_frame['DateTime'] >= _min_time) & (_observation_frame['DateTime'] <= _max_time)]
-
-    _updated_problem = copy.deepcopy(_problem)
-    _actual_time_period = _updated_problem.observation_period
-    if _actual_time_period.begin < _min_time or _actual_time_period.end > _max_time:
-        logging.warning('Observation period is reduced from [%s, %s] to [%s, %s]', _updated_problem.observation_period.begin,
-                        _updated_problem.observation_period.end,
-                        _min_time,
-                        _max_time)
-        _updated_problem.trim_observation_period(TimePeriod(_min_time, _max_time))
-    _updated_problem.add_forecast('forecast', _filtered_forecast_frame)
-    _updated_problem.add_forecast('real', _filtered_observation_frame)
-
-    with open(_output_file, 'w') as _output_file:
-        json.dump(_updated_problem.json_object, _output_file)
+    with open(output_file, 'w') as output_file:
+        json.dump(updated_problem.json_object, output_file)
 
 
 def generate_command(args):
