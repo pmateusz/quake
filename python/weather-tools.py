@@ -21,6 +21,7 @@
 # SOFTWARE.
 
 import argparse
+import collections
 import concurrent.futures
 import copy
 import datetime
@@ -29,10 +30,12 @@ import logging
 import os
 import subprocess
 import warnings
+import sys
 
 import matplotlib.dates
 import matplotlib.pyplot
 import matplotlib.ticker
+import matplotlib.colors
 import numpy
 import pandas
 import quake.city
@@ -46,10 +49,12 @@ import tqdm
 
 BUILD_CACHE_COMMAND = 'build-cache'
 PLOT_COMMAND = 'plot-cloud-cover'
+PLOT_FORECAST_COMMAND = 'plot-forecast'
 COVARIANCE_COMMAND = 'compute-covariance'
 VAR_COMMAND = 'compute-var'
 EXTEND_COMMAND = 'extend'
 GENERATE_COMMAND = 'generate'
+DATE_FORMAT = '%Y-%m-%d'
 
 
 class WeatherCache:
@@ -151,7 +156,9 @@ class WeatherCache:
     def get_observation_frame(self, start_time, duration):
         end_time = start_time + duration
 
-        data_frame = self.__forecast_frame[self.__forecast_frame['Delay'] == self.ZERO_TIME_DELTA].copy()
+        data_frame = self.__forecast_frame[(self.__forecast_frame['Delay'] == self.ZERO_TIME_DELTA)
+                                           & (self.__forecast_frame['DateTime'] >= start_time)
+                                           & (self.__forecast_frame['DateTime'] <= end_time)].copy()
         self.__verify_period(data_frame, start_time, end_time)
         return self.__pivot_transform(data_frame)
 
@@ -278,6 +285,14 @@ class JSONEncoder(json.JSONEncoder):
         return json.JSONEncoder.default(self, obj)
 
 
+class ParseDateAction(argparse.Action):
+    DATE_FORMAT = '%Y-%m-%d'
+
+    def __call__(self, parser: argparse.ArgumentParser, namespace: argparse.Namespace, values, option_string=None):
+        date_time_value = datetime.datetime.strptime(values, ParseDateAction.DATE_FORMAT)
+        setattr(namespace, self.dest, date_time_value)
+
+
 def parse_args():
     parser = argparse.ArgumentParser()
 
@@ -298,6 +313,10 @@ def parse_args():
     generate_parser.add_argument('--from')
     generate_parser.add_argument('--to')
     generate_parser.add_argument('--problem-prefix')
+
+    plot_forecast_parser = sub_parsers.add_parser(PLOT_FORECAST_COMMAND)
+    plot_forecast_parser.add_argument('--from', action=ParseDateAction)
+    plot_forecast_parser.add_argument('--to', action=ParseDateAction)
 
     compute_var = sub_parsers.add_parser(VAR_COMMAND)
 
@@ -594,8 +613,88 @@ def extend_problem_definition(args):
         json.dump(updated_problem.json_object, output_file)
 
 
+def plot_forecast_command(args):
+    from_date_time = getattr(args, 'from')
+    to_date_time = getattr(args, 'to')
+
+    weather_cache = WeatherCache()
+    weather_cache.load()
+
+    duration = to_date_time - from_date_time
+
+    time_points = weather_cache.forecast_frame['DateTime'].unique()
+    time_points = list({datetime.datetime.combine(pandas.to_datetime(date_time).date(), datetime.time()) for date_time in time_points})
+    time_points.sort()
+
+    diff_frames = []
+    for time_point in time_points:
+        forecast_frame = weather_cache.get_forecast_frame(time_point, duration)
+        weather_frame = weather_cache.get_observation_frame(time_point, duration)
+        diff_frame = forecast_frame - weather_frame
+        diff_frame.dropna(inplace=True)
+        diff_frame['Delay'] = diff_frame.index - time_point
+        diff_frames.append(diff_frame)
+
+    diff_frame = pandas.concat(diff_frames, ignore_index=True)
+    delay_values = list(pandas.to_timedelta(value, unit='ns') for value in diff_frame['Delay'].unique())
+    delay_values.sort()
+
+    error_data = []
+    for delay_value in delay_values:
+        delay_diff_frame = diff_frame[diff_frame['Delay'] == delay_value]
+
+        for city_column in delay_diff_frame.columns:
+            if not isinstance(city_column, quake.city.City):
+                continue
+            for error_value in delay_diff_frame[city_column]:
+                error_data.append([city_column, pandas.Timedelta(value=delay_value.total_seconds(), unit='s'), error_value])
+    columns = ['City', 'Delay', 'Error']
+    error_frame = pandas.DataFrame(columns=columns, data=error_data)
+
+    delay_values = error_frame['Delay'].unique()
+    rows = []
+    for delay_value in delay_values:
+        row = dict()
+        filter_frame = error_frame[error_frame['Delay'] == delay_value].copy()
+        for city in filter_frame['City'].unique():
+            error_series = filter_frame[filter_frame['City'] == city]['Error']
+            aggregate = numpy.std(error_series)
+            row[city] = aggregate
+        rows.append(row)
+    std_error_frame = pandas.DataFrame(index=delay_values, data=rows)
+
+    def date_axis_formatter(x, pos):
+        date_time = pandas.Timestamp.fromordinal(x.astype(numpy.int64))
+        return date_time.date()
+
+    forecast_frame = weather_cache.get_forecast_frame(from_date_time, duration)
+    observation_frame = weather_cache.get_observation_frame(from_date_time, duration)
+    for city in forecast_frame.columns:
+        if not isinstance(city, quake.city.City):
+            continue
+
+        figure, ax = matplotlib.pyplot.subplots()
+
+        x = forecast_frame[city].index
+        y1 = forecast_frame[city] + 2.5 * std_error_frame[city].values
+        y2 = forecast_frame[city] - 2.5 * std_error_frame[city].values
+        ax.fill_between(x, y1.values, y2.values, color=matplotlib.colors.CSS4_COLORS['lightgrey'], alpha=0.5)
+        ax.plot(x, y1, ls='--', color=matplotlib.colors.CSS4_COLORS['grey'])
+        ax.plot(x, y2, ls='--', color=matplotlib.colors.CSS4_COLORS['grey'], label='95% Confidence Interval')
+        ax.plot(forecast_frame[city], label='Forecast 5-days')
+        ax.plot(observation_frame[city], label='Observation')
+        ax.legend()
+        ax.set_title(city.name)
+        ax.set_xlabel('Time')
+        ax.xaxis.set_tick_params(rotation=90)
+        ax.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(date_axis_formatter))
+        ax.set_ylabel('Cloud Cover [%]')
+        figure.tight_layout()
+
+        matplotlib.pyplot.savefig('forecast_acc_{0}_{1}_{2}.png'.format(city.name, from_date_time.date(), to_date_time.date()))
+
+
 def generate_command(args):
-    DATE_FORMAT = '%Y-%m-%d'
     GENERATE_PROGRAM_PATH = '/home/pmateusz/dev/quake/cmake-build-debug/quake-generate'
 
     problem_prefix_arg = getattr(args, 'problem_prefix')
@@ -649,3 +748,5 @@ if __name__ == '__main__':
         extend_problem_definition(args)
     elif command == GENERATE_COMMAND:
         generate_command(args)
+    elif command == PLOT_FORECAST_COMMAND:
+        plot_forecast_command(args)
