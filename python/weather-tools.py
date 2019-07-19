@@ -27,6 +27,7 @@ import copy
 import datetime
 import json
 import logging
+import multiprocessing
 import os
 import subprocess
 import warnings
@@ -36,6 +37,9 @@ import matplotlib.dates
 import matplotlib.pyplot
 import matplotlib.ticker
 import matplotlib.colors
+
+import scipy.stats
+
 import numpy
 import pandas
 import quake.city
@@ -371,6 +375,15 @@ def plot_command(args):
             matplotlib.pyplot.close(figure)
 
 
+def process_parallel_map(data, function):
+    results = []
+    with concurrent.futures.process.ProcessPoolExecutor() as executor:
+        futures = [executor.submit(function, chunk) for chunk in data]
+        for future in tqdm.tqdm(futures):
+            results.append(future.result())
+    return results
+
+
 def covariance_command(args):
     def save_matrix(matrix, file_name):
         csv_file = file_name + '.csv'
@@ -622,19 +635,19 @@ def plot_forecast_command(args):
 
     duration = to_date_time - from_date_time
 
-    time_points = weather_cache.forecast_frame['DateTime'].unique()
-    time_points = list({datetime.datetime.combine(pandas.to_datetime(date_time).date(), datetime.time()) for date_time in time_points})
-    time_points.sort()
-
-    diff_frames = []
-    for time_point in time_points:
+    def get_diff_frame(time_point):
         forecast_frame = weather_cache.get_forecast_frame(time_point, duration)
         weather_frame = weather_cache.get_observation_frame(time_point, duration)
         diff_frame = forecast_frame - weather_frame
         diff_frame.dropna(inplace=True)
         diff_frame['Delay'] = diff_frame.index - time_point
-        diff_frames.append(diff_frame)
+        return diff_frame
 
+    time_points = weather_cache.forecast_frame['DateTime'].unique()
+    time_points = list({pandas.to_datetime(date_time) for date_time in time_points})
+    time_points.sort()
+
+    diff_frames = [get_diff_frame(time_point) for time_point in time_points]
     diff_frame = pandas.concat(diff_frames, ignore_index=True)
     delay_values = list(pandas.to_timedelta(value, unit='ns') for value in diff_frame['Delay'].unique())
     delay_values.sort()
@@ -676,16 +689,17 @@ def plot_forecast_command(args):
         figure, ax = matplotlib.pyplot.subplots()
 
         x = forecast_frame[city].index
-        y1 = forecast_frame[city] + 2.5 * std_error_frame[city].values
-        y2 = forecast_frame[city] - 2.5 * std_error_frame[city].values
+        y1 = forecast_frame[city] + 1.96 * std_error_frame[city].values
+        y2 = forecast_frame[city] - 1.96 * std_error_frame[city].values
         ax.fill_between(x, y1.values, y2.values, color=matplotlib.colors.CSS4_COLORS['lightgrey'], alpha=0.5)
         ax.plot(x, y1, ls='--', color=matplotlib.colors.CSS4_COLORS['grey'])
         ax.plot(x, y2, ls='--', color=matplotlib.colors.CSS4_COLORS['grey'], label='95% Confidence Interval')
         ax.plot(forecast_frame[city], label='Forecast 5-days')
         ax.plot(observation_frame[city], label='Observation')
-        ax.legend()
+        ax.legend(loc='lower right')
         ax.set_title(city.name)
         ax.set_xlabel('Time')
+        ax.set_ylim(-10, 110)
         ax.xaxis.set_tick_params(rotation=90)
         ax.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(date_axis_formatter))
         ax.set_ylabel('Cloud Cover [%]')
