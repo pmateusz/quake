@@ -46,8 +46,6 @@ import quake.city
 import tabulate
 import tqdm
 
-# TODO: build confidence intervals on error - are errors correlated between series?
-# TODO: plot confidence interval for weather at given day
 # TODO: read how others forecast weather
 # TODO: study gaussian process, multi-output gaussian process, non-parametric gaussian regression
 
@@ -58,6 +56,7 @@ COVARIANCE_COMMAND = 'compute-covariance'
 VAR_COMMAND = 'compute-var'
 EXTEND_COMMAND = 'extend'
 GENERATE_COMMAND = 'generate'
+TRAIN_GP_COMMAND = 'train-gp'
 DATE_FORMAT = '%Y-%m-%d'
 
 
@@ -323,6 +322,8 @@ def parse_args():
     plot_forecast_parser.add_argument('--to', action=ParseDateAction)
 
     compute_var = sub_parsers.add_parser(VAR_COMMAND)
+
+    train_gaussian_process = sub_parsers.add_parser(TRAIN_GP_COMMAND)
 
     return parser.parse_args()
 
@@ -746,6 +747,197 @@ def generate_command(args):
         os.remove(temp_problem)
 
 
+def example():
+    import numpy as np
+    import matplotlib.pyplot as pb
+
+    # This functions generate data corresponding to two outputs
+    f_output1 = lambda x: 4. * np.cos(x / 5.) - .4 * x - 35. + np.random.rand(x.size)[:, None] * 2.
+    f_output2 = lambda x: 6. * np.cos(x / 5.) + .2 * x + 35. + np.random.rand(x.size)[:, None] * 8.
+
+    # {X,Y} training set for each output
+    X1 = np.random.rand(100)[:, None];
+    X1 = X1 * 75
+    X2 = np.random.rand(100)[:, None];
+    X2 = X2 * 70 + 30
+    Y1 = f_output1(X1)
+    Y2 = f_output2(X2)
+    # {X,Y} test set for each output
+    Xt1 = np.random.rand(100)[:, None] * 100
+    Xt2 = np.random.rand(100)[:, None] * 100
+    Yt1 = f_output1(Xt1)
+    Yt2 = f_output2(Xt2)
+
+    xlim = (0, 100);
+    ylim = (0, 50)
+    fig = pb.figure(figsize=(12, 8))
+    ax1 = fig.add_subplot(211)
+    ax1.set_xlim(xlim)
+    ax1.set_title('Output 1')
+    ax1.plot(X1[:, :1], Y1, 'kx', mew=1.5, label='Train set')
+    ax1.plot(Xt1[:, :1], Yt1, 'rx', mew=1.5, label='Test set')
+    ax1.legend()
+    ax2 = fig.add_subplot(212)
+    ax2.set_xlim(xlim)
+    ax2.set_title('Output 2')
+    ax2.plot(X2[:, :1], Y2, 'kx', mew=1.5, label='Train set')
+    ax2.plot(Xt2[:, :1], Yt2, 'rx', mew=1.5, label='Test set')
+    ax2.legend()
+
+    matplotlib.pyplot.show()
+
+    def plot_2outputs(m, xlim, ylim):
+        fig = pb.figure(figsize=(12, 8))
+        # Output 1
+        ax1 = fig.add_subplot(211)
+        ax1.set_xlim(xlim)
+        ax1.set_title('Output 1')
+        m.plot(plot_limits=xlim, fixed_inputs=[(1, 0)], which_data_rows=slice(0, 100), ax=ax1)
+        ax1.plot(Xt1[:, :1], Yt1, 'rx', mew=1.5)
+        # Output 2
+        ax2 = fig.add_subplot(212)
+        ax2.set_xlim(xlim)
+        ax2.set_title('Output 2')
+        m.plot(plot_limits=xlim, fixed_inputs=[(1, 1)], which_data_rows=slice(100, 200), ax=ax2)
+        ax2.plot(Xt2[:, :1], Yt2, 'rx', mew=1.5)
+
+    import GPy
+    K = GPy.kern.RBF(1)
+    B = GPy.kern.Coregionalize(input_dim=1, output_dim=2)
+    multkernel = K.prod(B, name='B.K')
+    print(multkernel)
+
+    # Components of B
+    print('W matrix\n', B.W)
+    print('\nkappa vector\n', B.kappa)
+    print('\nB matrix\n', B.B)
+
+    K = GPy.kern.Matern32(1)
+    icm = GPy.util.multioutput.ICM(input_dim=1, num_outputs=2, kernel=K)
+
+    m = GPy.models.GPCoregionalizedRegression([X1, X2], [Y1, Y2], kernel=icm)
+    m['.*Mat32.var'].constrain_fixed(1.)  # For this kernel, B.kappa encodes the variance now.
+    m.optimize()
+    print(m)
+    plot_2outputs(m, xlim=(0, 100), ylim=(-20, 60))
+
+    matplotlib.pyplot.show()
+
+    print('here')
+
+    icm = GPy.util.multioutput.ICM(input_dim=1, num_outputs=2, kernel=GPy.kern.RBF(1))
+    print(icm)
+
+    K = GPy.kern.Matern32(1)
+
+    m1 = GPy.models.GPRegression(X1, Y1, kernel=K.copy())
+    m1.optimize()
+    m2 = GPy.models.GPRegression(X2, Y2, kernel=K.copy())
+    m2.optimize()
+    fig = pb.figure(figsize=(12, 8))
+    # Output 1
+    ax1 = fig.add_subplot(211)
+    m1.plot(plot_limits=xlim, ax=ax1)
+    ax1.plot(Xt1[:, :1], Yt1, 'rx', mew=1.5)
+    ax1.set_title('Output 1')
+    # Output 2
+    ax2 = fig.add_subplot(212)
+    m2.plot(plot_limits=xlim, ax=ax2)
+    ax2.plot(Xt2[:, :1], Yt2, 'rx', mew=1.5)
+    ax2.set_title('Output 2')
+
+
+def train_gp_command(args):
+    # example()
+
+    import GPy
+    import GPy.util.multioutput
+    import GPy.models
+    import numpy.random
+    import numpy as np
+    import matplotlib.pyplot as pb
+
+    # #build a design matrix with a column of integers indicating the output
+    # X1 = np.random.rand(50, 1) * 8
+    # X2 = np.random.rand(30, 1) * 5
+    #
+    # #build a suitable set of observed variables
+    # Y1 = np.sin(X1) + np.random.randn(*X1.shape) * 0.05
+    # Y2 = np.sin(X2) + np.random.randn(*X2.shape) * 0.05 + 2.
+    #
+    # m = GPy.models.SparseGPCoregionalizedRegression(X_list=[X1,X2], Y_list=[Y1,Y2])
+    # m.optimize('bfgs', max_iters=100)
+    #
+    # slices = GPy.util.multioutput.get_slices([X1,X2])
+    # m.plot(fixed_inputs=[(1,0)],which_data_rows=slices[0],Y_metadata={'output_index':0})
+    # m.plot(fixed_inputs=[(1,1)],which_data_rows=slices[1],Y_metadata={'output_index':1},ax=pb.gca())
+    # pb.ylim(-3,)
+    # matplotlib.pyplot.show()
+
+    weather_cache = WeatherCache()
+    weather_cache.load()
+
+    forecast = weather_cache.get_forecast_frame(datetime.datetime(2019, 7, 1), datetime.timedelta(days=5))
+    cities = [quake.city.LONDON, quake.city.IPSWICH]  # , quake.city.BIRMINGHAM, quake.city.BRISTOL, quake.city.CAMBRIDGE]
+
+    X = numpy.expand_dims(numpy.arange(len(forecast)), axis=1)
+    Y1 = numpy.expand_dims(forecast[quake.city.LONDON].values.astype(float), axis=1)
+    Y2 = numpy.expand_dims(forecast[quake.city.IPSWICH].values.astype(float), axis=1)
+
+    import numpy as np
+    import matplotlib.pyplot as pb
+
+    fig = pb.figure(figsize=(12, 8))
+    ax1 = fig.add_subplot(211)
+    ax1.set_title('Output 1')
+    ax1.plot(X, Y1, 'kx', mew=1.5, label='Train set')
+    ax1.legend()
+    ax2 = fig.add_subplot(212)
+    ax2.set_title('Output 2')
+    ax2.plot(X, Y2, 'kx', mew=1.5, label='Train set')
+    ax2.legend()
+
+    matplotlib.pyplot.show(block=True)
+
+    def plot_2outputs(m):
+        fig = pb.figure(figsize=(12, 8))
+        # Output 1
+        ax1 = fig.add_subplot(211)
+        ax1.set_title('Output 1')
+        m.plot(fixed_inputs=[(1, 0)], which_data_rows=slice(0, 100), ax=ax1)
+        ax1.plot(X, Y1, 'rx', mew=1.5)
+        # Output 2
+        ax2 = fig.add_subplot(212)
+        ax2.set_title('Output 2')
+        m.plot(fixed_inputs=[(1, 1)], which_data_rows=slice(100, 200), ax=ax2)
+        ax2.plot(X, Y2, 'rx', mew=1.5)
+
+    #
+    import GPy
+    K = GPy.kern.RBF(1)
+    B = GPy.kern.Coregionalize(input_dim=1, output_dim=2)
+    multkernel = K.prod(B, name='B.K')
+    print(multkernel)
+
+    # Components of B
+    print('W matrix\n', B.W)
+    print('\nkappa vector\n', B.kappa)
+    print('\nB matrix\n', B.B)
+
+    K = GPy.kern.Matern32(1)
+    icm = GPy.util.multioutput.ICM(input_dim=1, num_outputs=2, kernel=K)
+
+    m = GPy.models.GPCoregionalizedRegression([X, X], [Y1, Y2], kernel=icm)
+    m['.*Mat32.var'].constrain_fixed(1.)  # For this kernel, B.kappa encodes the variance now.
+    m.optimize()
+    print(m)
+    plot_2outputs(m)
+    #
+    matplotlib.pyplot.show(block=True)
+
+    print('test')
+
+
 if __name__ == '__main__':
     args = parse_args()
     command = getattr(args, 'command')
@@ -764,3 +956,5 @@ if __name__ == '__main__':
         generate_command(args)
     elif command == PLOT_FORECAST_COMMAND:
         plot_forecast_command(args)
+    elif command == TRAIN_GP_COMMAND:
+        train_gp_command(args)
