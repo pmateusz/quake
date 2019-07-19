@@ -48,6 +48,7 @@ import tqdm
 
 # TODO: read how others forecast weather
 # TODO: study gaussian process, multi-output gaussian process, non-parametric gaussian regression
+# TODO: compute series of errors in all locations
 
 BUILD_CACHE_COMMAND = 'build-cache'
 PLOT_COMMAND = 'plot-cloud-cover'
