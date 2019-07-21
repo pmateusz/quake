@@ -1028,79 +1028,133 @@ if __name__ == '__main__':
     observation_duration = forecast_time - observation_time
     forecast_frame = weather_cache.get_forecast_frame(forecast_time, forecast_duration)
     observation_frame = weather_cache.get_observation_frame(observation_time, observation_duration)
-    cities = [quake.city.LONDON, quake.city.MANCHESTER, quake.city.GLASGOW, quake.city.CAMBRIDGE, quake.city.BRISTOL]
+    cities = quake.city.ALL
+
+    import matplotlib.offsetbox
+
+    MEAN_COLOR = matplotlib.colors.CSS4_COLORS['yellowgreen']
+    FORECAST_COLOR = matplotlib.colors.CSS4_COLORS['blue']
+    OBSERVATION_COLOR = matplotlib.colors.CSS4_COLORS['green']
+    CONFIDENCE_COLOR = matplotlib.colors.CSS4_COLORS['silver']
 
     # plot input data
     colors = [matplotlib.colors.CSS4_COLORS[name] for name in ['blue', 'crimson', 'green', 'orange', 'salmon']]
-    fig, ax = matplotlib.pyplot.subplots(len(cities), 1, sharex=True, figsize=(10, 5))
-    for city_index in range(0, len(cities)):
-        city = cities[city_index]
-        ax[city_index].scatter(observation_frame.index, observation_frame[city], color=colors[city_index], marker='s', s=1, label=city.name)
-        ax[city_index].scatter(forecast_frame.index, forecast_frame[city], color=matplotlib.colors.CSS4_COLORS['grey'], marker='s', s=1)
-        ax[city_index].legend(loc='lower left')
+    fig, ax = matplotlib.pyplot.subplots(len(cities), 1, sharex=True, figsize=(10, 8))
+    observation_handle, forecast_handle = None, None
+    for city_index, city in enumerate(cities):
+        observation_handle = ax[city_index].scatter(observation_frame[city].index, observation_frame[city], marker='s', s=1, color=OBSERVATION_COLOR)
+        forecast_handle = ax[city_index].scatter(forecast_frame[city].index, forecast_frame[city], marker='s', s=1, color=FORECAST_COLOR)
+        # ax[city_index].legend(loc='lower left')
         ax[city_index].set_ylim(-25, 125)
+
+        at = matplotlib.offsetbox.AnchoredText(city.name, frameon=False, loc='lower left')
+        ax[city_index].add_artist(at)
+
     for tick in ax[-1].get_xticklabels():
         tick.set_rotation(90)
-    ax[2].set_ylabel('Cloud Cover [%]')
+    ax[int(len(cities) / 2)].set_ylabel('Cloud Cover [%]')
     ax[-1].set_xlabel('Date')
+
+    legend_artist = ax[-1].legend([observation_handle, forecast_handle], ['Observation', 'Forecast'],
+                                  ncol=2, loc='center', bbox_to_anchor=(0.5, -2))
+    ax[-1].add_artist(legend_artist)
+
     fig.tight_layout()
+    fig.subplots_adjust(bottom=0.2, hspace=0.10)
+
     # matplotlib.pyplot.show(block=True)
+    matplotlib.pyplot.savefig('generate_samples_input_{0}.png'.format(forecast_time.strftime('%Y-%m-%d')))
     matplotlib.pyplot.close(fig)
 
     # prepare input
-    X_data = []
-    Y_data = []
+    X = []
+    Y = []
 
-    value_index = 0
-    time_index = {}
-    for value in observation_frame.index:
-        time_index[value] = value_index
-        value_index += 1
 
-    for value in forecast_frame.index:
-        time_index[value] = value_index
-        value_index += 1
+    def elapsed_hours(time):
+        return int((time - observation_time).total_seconds() / 3600)
+
 
     for city_index, city in enumerate(cities):
-        for time, cloud_cover in forecast_frame[city].items():
-            X_data.append([(time - observation_time).total_seconds() / 3600, city_index])
-            Y_data.append([cloud_cover])
-
         for time, cloud_cover in observation_frame[city].items():
-            X_data.append([(time - observation_time).total_seconds() / 3600, city_index])
-            Y_data.append([cloud_cover])
+            X.append([time, elapsed_hours(time), city_index])
+            Y.append([cloud_cover])
 
-    X = numpy.array(X_data)
-    Y = numpy.array(Y_data)
-    del X_data, Y_data
+        for time, cloud_cover in forecast_frame[city].items():
+            X.append([time, elapsed_hours(time), city_index])
+            Y.append([cloud_cover])
+
+    X = numpy.array(X)
+    Y = numpy.array(Y)
+
+    rows_train = X[:, 0] < forecast_time
+    X_train = X[rows_train]
+    Y_train = Y[rows_train]
+
+    rows_test = X[:, 0] >= forecast_time
+    X_test = X[rows_test]
+    Y_test = Y[rows_test]
 
     # plot output data
     import GPy
 
     matrix_rank = len(cities)
-    kernel_1 = GPy.kern.RBF(input_dim=1, lengthscale=6) + GPy.kern.White(1)
+    kernel_1 = GPy.kern.RBF(1, lengthscale=6) + GPy.kern.Linear(1, 1, active_dims=[0]) + GPy.kern.White(1) + GPy.kern.Bias(1)
     kernel_2 = GPy.kern.Coregionalize(1, output_dim=len(cities), rank=matrix_rank)
 
-    model = GPy.models.GPRegression(X, Y, kernel_1 ** kernel_2)
+    X_Gpy = X[:, [1, 2]]
+    model = GPy.models.GPRegression(X_Gpy, Y, kernel_1 ** kernel_2)
+    # model.optimize(messages=True, max_iters=5)
     model.optimize(messages=True)
 
-    X_data = []
-    for city_index, city in enumerate(cities):
-        for time, cloud_cover in forecast_frame[city].items():
-            X_data.append([(time - observation_time).total_seconds() / 3600, city_index])
-
-    X_test = numpy.array(X_data)
-    del X_data
-
     samples = 5
-    Y_posterior_samples = model.posterior_samples_f(X_test, full_cov=True, size=samples)
+    Y_posterior_test_samples = model.posterior_samples_f(X_test[:, [1, 2]], full_cov=True, size=samples)
+    mean, variance = model.predict(X_Gpy, full_cov=True)
+    quantiles = model.predict_quantiles(X_Gpy)
 
-    fig, ax = matplotlib.pyplot.subplots(len(cities), 1, sharex=True, figsize=(10, 5))
-    for city_index in range(0, len(cities)):
-        model.plot(fixed_inputs=[(1, city_index)], which_data_rows=numpy.where(X[:, 1] == city_index), ax=ax[city_index])
+    mean_handle, confidence_handle, observation_handle, forecast_handle = None, None, None, None
+    sample_handles = []
+    fig, ax = matplotlib.pyplot.subplots(len(cities), 1, sharex=True, figsize=(10, 8))
+    for city_index, city in enumerate(cities):
+        city_rows = numpy.where(X[:, 2] == city_index)[0]
+        city_mean = mean[city_rows]
+        city_lower_quantile = quantiles[0][city_rows].flatten()
+        city_upper_quantile = quantiles[1][city_rows].flatten()
+        X_city_index = X[city_rows][:, 0].flatten()
+        confidence_handle = ax[city_index].fill_between(X_city_index, city_upper_quantile, city_lower_quantile, color=CONFIDENCE_COLOR, alpha=0.5)
+        mean_handle = ax[city_index].plot(X_city_index, city_mean, color=MEAN_COLOR)[0]
+
+        city_test_rows = numpy.where(X_test[:, 2] == city_index)[0]
+        Y_posterior_test_city = Y_posterior_test_samples[city_test_rows]
+        X_test_city_index = X_test[city_test_rows][:, 0].flatten()
+        sample_handles = []
         for sample_index in range(samples):
-            city_samples = Y_posterior_samples[numpy.where(X_test[:, 1] == city_index)]
-            X_sample = X_test[X_test[:, 1] == city_index][:, 0].astype(int).tolist()
-            Y_sample = city_samples[:, :, sample_index].transpose()[0, :]
-            ax[city_index].plot(X_sample, Y_sample)
-    matplotlib.pyplot.show(block=True)
+            city_Y_test_sample = Y_posterior_test_city[:, :, sample_index].transpose()[0, :]
+            sample_handle = ax[city_index].plot(X_test_city_index, city_Y_test_sample)[0]
+            sample_handles.append(sample_handle)
+
+        at = matplotlib.offsetbox.AnchoredText(city.name, frameon=False, loc='lower left')
+        ax[city_index].add_artist(at)
+        ax[city_index].set_ylim(-25, 125)
+
+        city_train_rows = numpy.where(X_train[:, 2] == city_index)[0]
+        X_train_city_index = X_train[city_train_rows][:, 0].flatten()
+        Y_train_city = Y_train[city_train_rows]
+        Y_test_city = Y_test[city_test_rows]
+        observation_handle = ax[city_index].scatter(X_train_city_index, Y_train_city, marker='s', s=1.0, color=OBSERVATION_COLOR)
+        forecast_handle = ax[city_index].scatter(X_test_city_index, Y_test_city, marker='s', s=1.0, color=FORECAST_COLOR)
+    for tick in ax[-1].get_xticklabels():
+        tick.set_rotation(90)
+    ax[int(len(cities) / 2)].set_ylabel('Cloud Cover [%]')
+    ax[-1].set_xlabel('Date')
+    legend_artist = ax[-1].legend([mean_handle, confidence_handle, observation_handle, forecast_handle,
+                                   sample_handles[0], sample_handles[1], sample_handles[2], sample_handles[3]],
+                                  ['Mean', 'Confidence', 'Observation', 'Forecast', 'Sample 1', 'Sample 2', 'Sample 3', 'Sample 4'],
+                                  ncol=4, loc='center', bbox_to_anchor=(0.5, -2.1))
+    ax[-1].add_artist(legend_artist)
+    fig.tight_layout()
+    fig.subplots_adjust(bottom=0.2, hspace=0.10)
+
+    # matplotlib.pyplot.show(block=True)
+    matplotlib.pyplot.savefig('generate_samples_output_{0}.png'.format(forecast_time.strftime('%Y-%m-%d')))
+    matplotlib.pyplot.close(fig)
