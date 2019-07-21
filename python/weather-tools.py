@@ -31,8 +31,10 @@ import os
 import subprocess
 import warnings
 
+import GPy
 import matplotlib.colors
 import matplotlib.dates
+import matplotlib.offsetbox
 import matplotlib.pyplot
 import matplotlib.ticker
 import numpy
@@ -47,13 +49,13 @@ import tqdm
 
 BUILD_CACHE_COMMAND = 'build-cache'
 PLOT_COMMAND = 'plot-cloud-cover'
-PLOT_FORECAST_COMMAND = 'plot-forecast'
 COVARIANCE_COMMAND = 'compute-covariance'
+PLOT_FORECAST_COMMAND = 'plot-forecast'
+PLOT_COREGIONALIZATION_COMMAND = 'plot-coregionalization'
 VAR_COMMAND = 'compute-var'
 EXTEND_COMMAND = 'extend'
 GENERATE_COMMAND = 'generate'
 TRAIN_GP_COMMAND = 'train-gp'
-DATE_FORMAT = '%Y-%m-%d'
 
 
 def load_data_frame(file_path):
@@ -315,8 +317,8 @@ def parse_args():
     extend_parser.add_argument('--output')
 
     generate_parser = sub_parsers.add_parser(GENERATE_COMMAND)
-    generate_parser.add_argument('--from')
-    generate_parser.add_argument('--to')
+    generate_parser.add_argument('--from', action=ParseDateAction)
+    generate_parser.add_argument('--to', action=ParseDateAction)
     generate_parser.add_argument('--problem-prefix')
 
     plot_forecast_parser = sub_parsers.add_parser(PLOT_FORECAST_COMMAND)
@@ -327,6 +329,11 @@ def parse_args():
 
     train_gaussian_process = sub_parsers.add_parser(TRAIN_GP_COMMAND)
 
+    plot_coregionalization_parser = sub_parsers.add_parser(PLOT_COREGIONALIZATION_COMMAND)
+    plot_coregionalization_parser.add_argument('--observation-start-time', action=ParseDateAction)
+    plot_coregionalization_parser.add_argument('--forecast-start-time', action=ParseDateAction)
+    plot_coregionalization_parser.add_argument('--output-prefix')
+
     return parser.parse_args()
 
 
@@ -334,48 +341,6 @@ def build_cache_command(args):
     weather_cache = WeatherCache()
     weather_cache.rebuild()
     weather_cache.save()
-
-
-def plot_command(args):
-    from_arg = getattr(args, 'from')
-    if from_arg:
-        left_time_limit = datetime.datetime.strptime(from_arg, '%Y-%m-%d')
-    else:
-        left_time_limit = None
-
-    weather_cache = WeatherCache()
-    weather_cache.load()
-
-    forecast_frame = weather_cache.forecast_frame
-    if left_time_limit:
-        forecast_frame = forecast_frame[forecast_frame['DateTime'] > left_time_limit].copy()
-
-    cities = forecast_frame['City'].unique()
-    for forecast_distance in [pandas.Timedelta(days=1), pandas.Timedelta(days=2),
-                              pandas.Timedelta(days=3), pandas.Timedelta(days=4)]:
-        for city in cities:
-            forecast_hours = forecast_distance.total_seconds() / matplotlib.dates.SEC_PER_HOUR
-
-            data_frame = forecast_frame[forecast_frame['City'] == city].copy()
-
-            figure, axis = matplotlib.pyplot.subplots(1, 1)
-
-            observed_series = data_frame[data_frame['Delay'] == pandas.Timedelta(seconds=0)].copy()
-            observed_series.set_index('DateTime', inplace=True)
-            observed_series.sort_index(inplace=True)
-
-            forecast_series = data_frame[data_frame['Delay'] == forecast_distance].copy()
-            forecast_series.set_index('DateTime', inplace=True)
-            forecast_series.sort_index(inplace=True)
-
-            axis.plot(observed_series['CloudCover'], '.', label='Observed')
-            axis.plot(forecast_series['CloudCover'], '--', label='Forecast {0}'.format(int(forecast_hours)))
-            axis.xaxis.set_tick_params(rotation=90)
-            axis.set_title(city.name)
-            axis.legend(loc='lower right')
-            figure.tight_layout()
-            matplotlib.pyplot.savefig('cloud_cover_forecast_{0}_{1}.png'.format(city.name, int(forecast_hours)))
-            matplotlib.pyplot.close(figure)
 
 
 def process_parallel_map(data, function):
@@ -629,94 +594,12 @@ def extend_problem_definition(args):
         json.dump(updated_problem.json_object, output_file)
 
 
-def plot_forecast_command(args):
-    from_date_time = getattr(args, 'from')
-    to_date_time = getattr(args, 'to')
-
-    weather_cache = WeatherCache()
-    weather_cache.load()
-
-    duration = to_date_time - from_date_time
-
-    def get_diff_frame(time_point):
-        forecast_frame = weather_cache.get_forecast_frame(time_point, duration)
-        weather_frame = weather_cache.get_observation_frame(time_point, duration)
-        diff_frame = forecast_frame - weather_frame
-        diff_frame.dropna(inplace=True)
-        diff_frame['Delay'] = diff_frame.index - time_point
-        return diff_frame
-
-    time_points = weather_cache.forecast_frame['DateTime'].unique()
-    time_points = list({pandas.to_datetime(date_time) for date_time in time_points})
-    time_points.sort()
-
-    diff_frames = [get_diff_frame(time_point) for time_point in time_points]
-    diff_frame = pandas.concat(diff_frames, ignore_index=True)
-    delay_values = list(pandas.to_timedelta(value, unit='ns') for value in diff_frame['Delay'].unique())
-    delay_values.sort()
-
-    error_data = []
-    for delay_value in delay_values:
-        delay_diff_frame = diff_frame[diff_frame['Delay'] == delay_value]
-
-        for city_column in delay_diff_frame.columns:
-            if not isinstance(city_column, quake.city.City):
-                continue
-            for error_value in delay_diff_frame[city_column]:
-                error_data.append([city_column, pandas.Timedelta(value=delay_value.total_seconds(), unit='s'), error_value])
-    columns = ['City', 'Delay', 'Error']
-    error_frame = pandas.DataFrame(columns=columns, data=error_data)
-
-    delay_values = error_frame['Delay'].unique()
-    rows = []
-    for delay_value in delay_values:
-        row = dict()
-        filter_frame = error_frame[error_frame['Delay'] == delay_value].copy()
-        for city in filter_frame['City'].unique():
-            error_series = filter_frame[filter_frame['City'] == city]['Error']
-            aggregate = numpy.std(error_series)
-            row[city] = aggregate
-        rows.append(row)
-    std_error_frame = pandas.DataFrame(index=delay_values, data=rows)
-
-    def date_axis_formatter(x, pos):
-        date_time = pandas.Timestamp.fromordinal(x.astype(numpy.int64))
-        return date_time.date()
-
-    forecast_frame = weather_cache.get_forecast_frame(from_date_time, duration)
-    observation_frame = weather_cache.get_observation_frame(from_date_time, duration)
-    for city in forecast_frame.columns:
-        if not isinstance(city, quake.city.City):
-            continue
-
-        figure, ax = matplotlib.pyplot.subplots()
-
-        x = forecast_frame[city].index
-        y1 = forecast_frame[city] + 1.96 * std_error_frame[city].values
-        y2 = forecast_frame[city] - 1.96 * std_error_frame[city].values
-        ax.fill_between(x, y1.values, y2.values, color=matplotlib.colors.CSS4_COLORS['lightgrey'], alpha=0.5)
-        ax.plot(x, y1, ls='--', color=matplotlib.colors.CSS4_COLORS['grey'])
-        ax.plot(x, y2, ls='--', color=matplotlib.colors.CSS4_COLORS['grey'], label='95% Confidence Interval')
-        ax.plot(forecast_frame[city], label='Forecast 5-days')
-        ax.plot(observation_frame[city], label='Observation')
-        ax.legend(loc='lower right')
-        ax.set_title(city.name)
-        ax.set_xlabel('Time')
-        ax.set_ylim(-10, 110)
-        ax.xaxis.set_tick_params(rotation=90)
-        ax.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(date_axis_formatter))
-        ax.set_ylabel('Cloud Cover [%]')
-        figure.tight_layout()
-
-        matplotlib.pyplot.savefig('forecast_acc_{0}_{1}_{2}.png'.format(city.name, from_date_time.date(), to_date_time.date()))
-
-
 def generate_command(args):
     GENERATE_PROGRAM_PATH = '/home/pmateusz/dev/quake/cmake-build-debug/quake-generate'
 
     problem_prefix_arg = getattr(args, 'problem_prefix')
-    from_date_arg = datetime.datetime.strptime(getattr(args, 'from'), DATE_FORMAT)
-    to_date_arg = datetime.datetime.strptime(getattr(args, 'to'), DATE_FORMAT)
+    from_date_arg = getattr(args, 'from')
+    to_date_arg = getattr(args, 'to')
 
     configurations = []
     current_date = from_date_arg
@@ -935,102 +818,152 @@ def train_gp_command(args):
     print('test')
 
 
-if __name__ == '__main__':
-    args = parse_args()
-    command = getattr(args, 'command')
-
-    if command == BUILD_CACHE_COMMAND:
-        build_cache_command(args)
-    elif command == PLOT_COMMAND:
-        plot_command(args)
-    elif command == COVARIANCE_COMMAND:
-        covariance_command(args)
-    elif command == VAR_COMMAND:
-        compute_vector_auto_regression(args)
-    elif command == EXTEND_COMMAND:
-        extend_problem_definition(args)
-    elif command == GENERATE_COMMAND:
-        generate_command(args)
-    elif command == PLOT_FORECAST_COMMAND:
-        plot_forecast_command(args)
-    elif command == TRAIN_GP_COMMAND:
-        train_gp_command(args)
+def save_figure(fig, file_name):
+    fig.savefig('{0}.png'.format(file_name))
 
 
-    def plot_errors(station, begin_start_time, end_start_time):
-        weather_cache = WeatherCache()
-        weather_cache.load()
-
-        period_start = begin_start_time
-        period_length = datetime.timedelta(days=5)
-        while period_start <= end_start_time:
-            forecast_frame = weather_cache.get_forecast_frame(period_start, period_length)
-            observation_frame = weather_cache.get_observation_frame(period_start, period_length)
-            error_frame = forecast_frame - observation_frame
-            error_frame.dropna(inplace=True)
-            error_frame.reset_index(inplace=True)
-            if not error_frame.empty:
-                error_frame[station].plot(style='-')
-            period_start += datetime.timedelta(days=1)
-        matplotlib.pyplot.show(block=True)
-
-
-    def plot_pacf(station, start_time, duration):
-        weather_cache = WeatherCache()
-        weather_cache.load()
-
-        forecast_frame = weather_cache.get_forecast_frame(start_time, duration)
-        observation_frame = weather_cache.get_observation_frame(start_time, duration)
-        error_frame = forecast_frame - observation_frame
-        error_frame.dropna(inplace=True)
-        error_frame.reset_index(inplace=True)
-
-        import statsmodels.graphics.tsaplots
-        statsmodels.graphics.tsaplots.plot_pacf(error_frame[quake.city.LONDON].values.transpose())
-        matplotlib.pyplot.show(block=True)
-
-
-    def sample_gp():
-        import GPy
-        import numpy as np
-
-        sample_size = 5
-        X = np.random.uniform(0, 1., (sample_size, 1))
-        Y = np.sin(X) + np.random.randn(sample_size, 1) * 0.05
-
-        kernel = GPy.kern.RBF(input_dim=1, variance=1., lengthscale=1.)
-        model = GPy.models.GPRegression(X, Y, kernel, noise_var=1e-10)
-
-        testX = np.linspace(0, 1, 100).reshape(-1, 1)
-        posteriorTestY = model.posterior_samples_f(testX, full_cov=True, size=5)
-        simY, simMse = model.predict(testX)
-
-        import matplotlib.pyplot as plt
-
-        plt.plot(testX[:, 0], posteriorTestY[:, :, 0])
-        plt.plot(testX[:, 0], posteriorTestY[:, :, 1])
-        plt.plot(testX[:, 0], posteriorTestY[:, :, 2])
-        plt.plot(testX[:, 0], posteriorTestY[:, :, 3])
-        plt.plot(testX[:, 0], posteriorTestY[:, :, 4])
-        plt.plot(X, Y, 'ok', markersize=10)
-        plt.plot(testX, simY - 3 * simMse ** 0.5, '--g')
-        plt.plot(testX, simY + 3 * simMse ** 0.5, '--g')
-
-        plt.show(block=True)
-
+def plot_command(args):
+    from_arg = getattr(args, 'from')
+    if from_arg:
+        left_time_limit = datetime.datetime.strptime(from_arg, '%Y-%m-%d')
+    else:
+        left_time_limit = None
 
     weather_cache = WeatherCache()
     weather_cache.load()
 
-    forecast_time = datetime.datetime(2019, 7, 14)
-    forecast_duration = datetime.timedelta(days=5)
-    observation_time = datetime.datetime(2019, 7, 1)
-    observation_duration = forecast_time - observation_time
-    forecast_frame = weather_cache.get_forecast_frame(forecast_time, forecast_duration)
-    observation_frame = weather_cache.get_observation_frame(observation_time, observation_duration)
-    cities = quake.city.ALL
+    forecast_frame = weather_cache.forecast_frame
+    if left_time_limit:
+        forecast_frame = forecast_frame[forecast_frame['DateTime'] > left_time_limit].copy()
 
-    import matplotlib.offsetbox
+    cities = forecast_frame['City'].unique()
+    for forecast_distance in [pandas.Timedelta(days=1), pandas.Timedelta(days=2),
+                              pandas.Timedelta(days=3), pandas.Timedelta(days=4)]:
+        for city in cities:
+            forecast_hours = forecast_distance.total_seconds() / matplotlib.dates.SEC_PER_HOUR
+
+            data_frame = forecast_frame[forecast_frame['City'] == city].copy()
+
+            figure, axis = matplotlib.pyplot.subplots(1, 1)
+
+            observed_series = data_frame[data_frame['Delay'] == pandas.Timedelta(seconds=0)].copy()
+            observed_series.set_index('DateTime', inplace=True)
+            observed_series.sort_index(inplace=True)
+
+            forecast_series = data_frame[data_frame['Delay'] == forecast_distance].copy()
+            forecast_series.set_index('DateTime', inplace=True)
+            forecast_series.sort_index(inplace=True)
+
+            axis.plot(observed_series['CloudCover'], '.', label='Observed')
+            axis.plot(forecast_series['CloudCover'], '--', label='Forecast {0}'.format(int(forecast_hours)))
+            axis.xaxis.set_tick_params(rotation=90)
+            axis.set_title(city.name)
+            axis.legend(loc='lower right')
+            figure.tight_layout()
+            matplotlib.pyplot.savefig('cloud_cover_forecast_{0}_{1}.png'.format(city.name, int(forecast_hours)))
+            matplotlib.pyplot.close(figure)
+
+
+def simple_date_str(date_time):
+    return date_time.strftime('%Y-%m-%d')
+
+
+def plot_forecast_command(args):
+    from_date_time = getattr(args, 'from')
+    to_date_time = getattr(args, 'to')
+    output_prefix = getattr(args, 'output_prefix')
+
+    weather_cache = WeatherCache()
+    weather_cache.load()
+
+    duration = to_date_time - from_date_time
+
+    def get_diff_frame(time_point):
+        forecast_frame = weather_cache.get_forecast_frame(time_point, duration)
+        weather_frame = weather_cache.get_observation_frame(time_point, duration)
+        diff_frame = forecast_frame - weather_frame
+        diff_frame.dropna(inplace=True)
+        diff_frame['Delay'] = diff_frame.index - time_point
+        return diff_frame
+
+    time_points = weather_cache.forecast_frame['DateTime'].unique()
+    time_points = list({pandas.to_datetime(date_time) for date_time in time_points})
+    time_points.sort()
+
+    diff_frames = [get_diff_frame(time_point) for time_point in time_points]
+    diff_frame = pandas.concat(diff_frames, ignore_index=True)
+    delay_values = list(pandas.to_timedelta(value, unit='ns') for value in diff_frame['Delay'].unique())
+    delay_values.sort()
+
+    error_data = []
+    for delay_value in delay_values:
+        delay_diff_frame = diff_frame[diff_frame['Delay'] == delay_value]
+
+        for city_column in delay_diff_frame.columns:
+            if not isinstance(city_column, quake.city.City):
+                continue
+            for error_value in delay_diff_frame[city_column]:
+                error_data.append([city_column, pandas.Timedelta(value=delay_value.total_seconds(), unit='s'), error_value])
+    columns = ['City', 'Delay', 'Error']
+    error_frame = pandas.DataFrame(columns=columns, data=error_data)
+
+    delay_values = error_frame['Delay'].unique()
+    rows = []
+    for delay_value in delay_values:
+        row = dict()
+        filter_frame = error_frame[error_frame['Delay'] == delay_value].copy()
+        for city in filter_frame['City'].unique():
+            error_series = filter_frame[filter_frame['City'] == city]['Error']
+            aggregate = numpy.std(error_series)
+            row[city] = aggregate
+        rows.append(row)
+    std_error_frame = pandas.DataFrame(index=delay_values, data=rows)
+
+    def date_axis_formatter(x, pos):
+        date_time = pandas.Timestamp.fromordinal(x.astype(numpy.int64))
+        return date_time.date()
+
+    forecast_frame = weather_cache.get_forecast_frame(from_date_time, duration)
+    observation_frame = weather_cache.get_observation_frame(from_date_time, duration)
+    for city in forecast_frame.columns:
+        if not isinstance(city, quake.city.City):
+            continue
+
+        figure, ax = matplotlib.pyplot.subplots()
+
+        x = forecast_frame[city].index
+        y1 = forecast_frame[city] + 1.96 * std_error_frame[city].values
+        y2 = forecast_frame[city] - 1.96 * std_error_frame[city].values
+        ax.fill_between(x, y1.values, y2.values, color=matplotlib.colors.CSS4_COLORS['lightgrey'], alpha=0.5)
+        ax.plot(x, y1, ls='--', color=matplotlib.colors.CSS4_COLORS['grey'])
+        ax.plot(x, y2, ls='--', color=matplotlib.colors.CSS4_COLORS['grey'], label='95% Confidence Interval')
+        ax.plot(forecast_frame[city], label='Forecast 5-days')
+        ax.plot(observation_frame[city], label='Observation')
+        ax.legend(loc='lower right')
+        ax.set_title(city.name)
+        ax.set_xlabel('Time')
+        ax.set_ylim(-10, 110)
+        ax.xaxis.set_tick_params(rotation=90)
+        ax.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(date_axis_formatter))
+        ax.set_ylabel('Cloud Cover [%]')
+        figure.tight_layout()
+
+        save_figure('{0}_{1}_{2}_{3}'.format(output_prefix, city.name, simple_date_str(from_date_time), simple_date_str(to_date_time)))
+
+
+def plot_coregionalization(args):
+    forecast_start_time = getattr(args, 'forecast_start_time')
+    observation_start_time = getattr(args, 'observation_start_time')
+    output_prefix = getattr(args, 'output_prefix')
+
+    weather_cache = WeatherCache()
+    weather_cache.load()
+
+    forecast_duration = datetime.timedelta(days=5)
+    observation_duration = forecast_start_time - observation_start_time
+    forecast_frame = weather_cache.get_forecast_frame(forecast_start_time, forecast_duration)
+    observation_frame = weather_cache.get_observation_frame(observation_start_time, observation_duration)
+    cities = quake.city.ALL
 
     MEAN_COLOR = matplotlib.colors.CSS4_COLORS['yellowgreen']
     FORECAST_COLOR = matplotlib.colors.CSS4_COLORS['blue']
@@ -1038,13 +971,11 @@ if __name__ == '__main__':
     CONFIDENCE_COLOR = matplotlib.colors.CSS4_COLORS['silver']
 
     # plot input data
-    colors = [matplotlib.colors.CSS4_COLORS[name] for name in ['blue', 'crimson', 'green', 'orange', 'salmon']]
     fig, ax = matplotlib.pyplot.subplots(len(cities), 1, sharex=True, figsize=(10, 8))
     observation_handle, forecast_handle = None, None
     for city_index, city in enumerate(cities):
         observation_handle = ax[city_index].scatter(observation_frame[city].index, observation_frame[city], marker='s', s=1, color=OBSERVATION_COLOR)
         forecast_handle = ax[city_index].scatter(forecast_frame[city].index, forecast_frame[city], marker='s', s=1, color=FORECAST_COLOR)
-        # ax[city_index].legend(loc='lower left')
         ax[city_index].set_ylim(-25, 125)
 
         at = matplotlib.offsetbox.AnchoredText(city.name, frameon=False, loc='lower left')
@@ -1062,18 +993,15 @@ if __name__ == '__main__':
     fig.tight_layout()
     fig.subplots_adjust(bottom=0.2, hspace=0.10)
 
-    # matplotlib.pyplot.show(block=True)
-    matplotlib.pyplot.savefig('generate_samples_input_{0}.png'.format(forecast_time.strftime('%Y-%m-%d')))
+    def elapsed_hours(date_time):
+        return int((date_time - observation_start_time).total_seconds() / 3600)
+
+    save_figure(fig, '{0}_{1}_input'.format(output_prefix, simple_date_str(forecast_start_time)))
     matplotlib.pyplot.close(fig)
 
     # prepare input
     X = []
     Y = []
-
-
-    def elapsed_hours(time):
-        return int((time - observation_time).total_seconds() / 3600)
-
 
     for city_index, city in enumerate(cities):
         for time, cloud_cover in observation_frame[city].items():
@@ -1087,24 +1015,21 @@ if __name__ == '__main__':
     X = numpy.array(X)
     Y = numpy.array(Y)
 
-    rows_train = X[:, 0] < forecast_time
+    rows_train = X[:, 0] < forecast_start_time
     X_train = X[rows_train]
     Y_train = Y[rows_train]
 
-    rows_test = X[:, 0] >= forecast_time
+    rows_test = X[:, 0] >= forecast_start_time
     X_test = X[rows_test]
     Y_test = Y[rows_test]
 
     # plot output data
-    import GPy
-
     matrix_rank = len(cities)
     kernel_1 = GPy.kern.RBF(1, lengthscale=6) + GPy.kern.Linear(1, 1, active_dims=[0]) + GPy.kern.White(1) + GPy.kern.Bias(1)
     kernel_2 = GPy.kern.Coregionalize(1, output_dim=len(cities), rank=matrix_rank)
 
     X_Gpy = X[:, [1, 2]]
     model = GPy.models.GPRegression(X_Gpy, Y, kernel_1 ** kernel_2)
-    # model.optimize(messages=True, max_iters=5)
     model.optimize(messages=True)
 
     samples = 5
@@ -1155,6 +1080,62 @@ if __name__ == '__main__':
     fig.tight_layout()
     fig.subplots_adjust(bottom=0.2, hspace=0.10)
 
-    # matplotlib.pyplot.show(block=True)
-    matplotlib.pyplot.savefig('generate_samples_output_{0}.png'.format(forecast_time.strftime('%Y-%m-%d')))
+    save_figure(fig, '{0}_{1}_output'.format(output_prefix, simple_date_str(forecast_start_time)))
     matplotlib.pyplot.close(fig)
+
+
+if __name__ == '__main__':
+    args = parse_args()
+    command = getattr(args, 'command')
+
+    if command == BUILD_CACHE_COMMAND:
+        build_cache_command(args)
+    elif command == PLOT_COMMAND:
+        plot_command(args)
+    elif command == COVARIANCE_COMMAND:
+        covariance_command(args)
+    elif command == VAR_COMMAND:
+        compute_vector_auto_regression(args)
+    elif command == EXTEND_COMMAND:
+        extend_problem_definition(args)
+    elif command == GENERATE_COMMAND:
+        generate_command(args)
+    elif command == TRAIN_GP_COMMAND:
+        train_gp_command(args)
+    elif command == PLOT_FORECAST_COMMAND:
+        plot_forecast_command(args)
+    elif command == PLOT_COREGIONALIZATION_COMMAND:
+        plot_coregionalization(args)
+
+
+    def plot_errors(station, begin_start_time, end_start_time):
+        weather_cache = WeatherCache()
+        weather_cache.load()
+
+        period_start = begin_start_time
+        period_length = datetime.timedelta(days=5)
+        while period_start <= end_start_time:
+            forecast_frame = weather_cache.get_forecast_frame(period_start, period_length)
+            observation_frame = weather_cache.get_observation_frame(period_start, period_length)
+            error_frame = forecast_frame - observation_frame
+            error_frame.dropna(inplace=True)
+            error_frame.reset_index(inplace=True)
+            if not error_frame.empty:
+                error_frame[station].plot(style='-')
+            period_start += datetime.timedelta(days=1)
+        matplotlib.pyplot.show(block=True)
+
+
+    def plot_pacf(station, start_time, duration):
+        weather_cache = WeatherCache()
+        weather_cache.load()
+
+        forecast_frame = weather_cache.get_forecast_frame(start_time, duration)
+        observation_frame = weather_cache.get_observation_frame(start_time, duration)
+        error_frame = forecast_frame - observation_frame
+        error_frame.dropna(inplace=True)
+        error_frame.reset_index(inplace=True)
+
+        import statsmodels.graphics.tsaplots
+        statsmodels.graphics.tsaplots.plot_pacf(error_frame[quake.city.LONDON].values.transpose())
+        matplotlib.pyplot.show(block=True)
