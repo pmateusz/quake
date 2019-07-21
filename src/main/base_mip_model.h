@@ -83,8 +83,8 @@ namespace quake {
             CHECK_NE(solver_status, SolverStatus::Loaded);
             CHECK_NE(solver_status, SolverStatus::InProgress);
             CHECK_NE(solver_status, SolverStatus::Numeric);
-//            CHECK_NE(solver_status, SolverStatus::Unbounded);
-//            CHECK_NE(solver_status, SolverStatus::InfiniteOrUnbounded);
+            CHECK_NE(solver_status, SolverStatus::Unbounded);
+            CHECK_NE(solver_status, SolverStatus::InfiniteOrUnbounded);
             CHECK_NE(solver_status, SolverStatus::Infeasible);
             ReportResults(solver_status);
 

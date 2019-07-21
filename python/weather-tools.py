@@ -315,6 +315,7 @@ def parse_args():
     extend_parser = sub_parsers.add_parser(EXTEND_COMMAND)
     extend_parser.add_argument('problem_file')
     extend_parser.add_argument('--output')
+    extend_parser.add_argument('--num-scenarios', default=0, type=int)
 
     generate_parser = sub_parsers.add_parser(GENERATE_COMMAND)
     generate_parser.add_argument('--from', action=ParseDateAction)
@@ -324,6 +325,7 @@ def parse_args():
     plot_forecast_parser = sub_parsers.add_parser(PLOT_FORECAST_COMMAND)
     plot_forecast_parser.add_argument('--from', action=ParseDateAction)
     plot_forecast_parser.add_argument('--to', action=ParseDateAction)
+    plot_forecast_parser.add_argument('--output-prefix')
 
     compute_var = sub_parsers.add_parser(VAR_COMMAND)
 
@@ -566,6 +568,7 @@ def compute_vector_auto_regression(args):
 def extend_problem_definition(args):
     problem_file = getattr(args, 'problem_file')
     output_file = getattr(args, 'output')
+    num_scenarios = getattr(args, 'num_scenarios')
 
     with open(problem_file, 'r') as input_stream:
         json_object = json.load(input_stream)
@@ -575,9 +578,9 @@ def extend_problem_definition(args):
     weather_cache.load()
 
     forecast_frame = weather_cache.get_forecast_frame(problem.observation_period.begin, problem.observation_period.length)
-    observation_frame = weather_cache.get_observation_frame(problem.observation_period.begin, problem.observation_period.length)
-    min_time = max(forecast_frame.index.min(), observation_frame.index.min())
-    max_time = min(forecast_frame.index.max(), observation_frame.index.max())
+    real_frame = weather_cache.get_observation_frame(problem.observation_period.begin, problem.observation_period.length)
+    min_time = max(forecast_frame.index.min(), real_frame.index.min())
+    max_time = min(forecast_frame.index.max(), real_frame.index.max())
 
     if problem.observation_period.begin < min_time or problem.observation_period.end > max_time:
         warnings.warn('Problem observation period is reduced from [{0}, {1}] to [{2}, {3}]'.format(problem.observation_period.begin,
@@ -585,10 +588,27 @@ def extend_problem_definition(args):
                                                                                                    min_time,
                                                                                                    max_time))
 
+    scenario_frames = []
+    if num_scenarios > 0:
+        observation_length = datetime.timedelta(days=14)
+        observation_frame = weather_cache.get_observation_frame(forecast_frame.index.min() - observation_length, observation_length)
+        model = CoregionalizationModel(observation_frame, forecast_frame)
+        model.optimize()
+        sample_frames = model.posterior_samples(num_scenarios)
+        for sample_frame in sample_frames:
+            scenario_frame = sample_frame.pivot_table(index='DateTime', columns='City', values='y')
+            scenario_frames.append(scenario_frame)
+
+    def trim_to_time_interval(frame):
+        return frame[(frame.index >= min_time) & (frame.index <= max_time)]
+
     updated_problem = copy.deepcopy(problem)
     updated_problem.trim_observation_period(TimePeriod(min_time, max_time))
-    updated_problem.add_forecast('forecast', forecast_frame[(forecast_frame.index >= min_time) & (forecast_frame.index <= max_time)])
-    updated_problem.add_forecast('real', observation_frame[(observation_frame.index >= min_time) & (observation_frame.index <= max_time)])
+    updated_problem.add_forecast('forecast', trim_to_time_interval(forecast_frame))
+    updated_problem.add_forecast('real', trim_to_time_interval(real_frame))
+
+    for scenario_index, scenario_frame in enumerate(scenario_frames):
+        updated_problem.add_forecast('scenario_{0}'.format(scenario_index), trim_to_time_interval(scenario_frame))
 
     with open(output_file, 'w') as output_file:
         json.dump(updated_problem.json_object, output_file)
@@ -951,6 +971,73 @@ def plot_forecast_command(args):
         save_figure('{0}_{1}_{2}_{3}'.format(output_prefix, city.name, simple_date_str(from_date_time), simple_date_str(to_date_time)))
 
 
+class CoregionalizationModel:
+
+    def __init__(self, observation_frame, forecast_frame):
+        assert observation_frame.index.max() <= forecast_frame.index.min()
+
+        self.__observation_frame = observation_frame
+        self.__forecast_frame = forecast_frame
+        self.__model = None
+
+    def optimize(self):
+        # prepare input
+        X, Y = [], []
+        observation_start_time = self.__observation_frame.index.min()
+
+        def elapsed_hours(date_time):
+            return int((date_time - observation_start_time).total_seconds() / 3600)
+
+        cities = self.__forecast_frame.columns
+        for city_index, city in enumerate(cities):
+            for time, cloud_cover in self.__observation_frame[city].items():
+                X.append([time, elapsed_hours(time), city_index])
+                Y.append([cloud_cover])
+
+            for time, cloud_cover in self.__forecast_frame[city].items():
+                X.append([time, elapsed_hours(time), city_index])
+                Y.append([cloud_cover])
+
+        self.__X = numpy.array(X)
+        self.__Y = numpy.array(Y)
+        del X, Y
+
+        # plot output data
+        matrix_rank = len(cities)
+        kernel_1 = GPy.kern.RBF(1, lengthscale=6) + GPy.kern.Linear(1, 1, active_dims=[0]) + GPy.kern.White(1) + GPy.kern.Bias(1)
+        kernel_2 = GPy.kern.Coregionalize(1, output_dim=len(cities), rank=matrix_rank)
+
+        X_Gpy = self.__X[:, [1, 2]]
+        self.__model = GPy.models.GPRegression(X_Gpy, self.__Y, kernel_1 ** kernel_2)
+        self.__model.optimize(messages=True, max_iters=1)
+
+        mean, variance = self.__model.predict(X_Gpy, full_cov=True)
+        quantiles = self.__model.predict_quantiles(X_Gpy)
+
+        X_cities = numpy.array([cities[city_index] for city_index in self.__X[:, 2]])
+        data = numpy.hstack((self.__X[:, [0]], X_cities.reshape(-1, 1), self.__Y.reshape(-1, 1), mean, quantiles[0], quantiles[1]))
+        data_frame = pandas.DataFrame(data=data, columns=['DateTime', 'City', 'y', 'yhat', 'yhat_lower', 'yhat_upper'])
+        data_frame = data_frame.infer_objects()
+        return data_frame
+
+    def posterior_samples(self, size):
+        test_X = self.__X[self.__X[:, 0] >= self.__forecast_frame.index.min()]
+        Y_posterior_samples = self.__model.posterior_samples_f(test_X[:, [1, 2]], full_cov=True, size=size)
+        time_index = test_X[:, [0]]
+
+        cities = self.__forecast_frame.columns
+        X_cities = numpy.array([cities[city_index] for city_index in test_X[:, 2]])
+        X_cities = X_cities.reshape(-1, 1)
+
+        sample_frames = []
+        for sample_index in range(size):
+            data = numpy.hstack((time_index, X_cities, Y_posterior_samples[:, :, sample_index]))
+            data_frame = pandas.DataFrame(data=data, columns=['DateTime', 'City', 'y'])
+            data_frame = data_frame.infer_objects()
+            sample_frames.append(data_frame)
+        return sample_frames
+
+
 def plot_coregionalization(args):
     forecast_start_time = getattr(args, 'forecast_start_time')
     observation_start_time = getattr(args, 'observation_start_time')
@@ -963,7 +1050,7 @@ def plot_coregionalization(args):
     observation_duration = forecast_start_time - observation_start_time
     forecast_frame = weather_cache.get_forecast_frame(forecast_start_time, forecast_duration)
     observation_frame = weather_cache.get_observation_frame(observation_start_time, observation_duration)
-    cities = quake.city.ALL
+    cities = forecast_frame.columns
 
     MEAN_COLOR = matplotlib.colors.CSS4_COLORS['yellowgreen']
     FORECAST_COLOR = matplotlib.colors.CSS4_COLORS['blue']
@@ -993,81 +1080,40 @@ def plot_coregionalization(args):
     fig.tight_layout()
     fig.subplots_adjust(bottom=0.2, hspace=0.10)
 
-    def elapsed_hours(date_time):
-        return int((date_time - observation_start_time).total_seconds() / 3600)
-
     save_figure(fig, '{0}_{1}_input'.format(output_prefix, simple_date_str(forecast_start_time)))
     matplotlib.pyplot.close(fig)
 
-    # prepare input
-    X = []
-    Y = []
-
-    for city_index, city in enumerate(cities):
-        for time, cloud_cover in observation_frame[city].items():
-            X.append([time, elapsed_hours(time), city_index])
-            Y.append([cloud_cover])
-
-        for time, cloud_cover in forecast_frame[city].items():
-            X.append([time, elapsed_hours(time), city_index])
-            Y.append([cloud_cover])
-
-    X = numpy.array(X)
-    Y = numpy.array(Y)
-
-    rows_train = X[:, 0] < forecast_start_time
-    X_train = X[rows_train]
-    Y_train = Y[rows_train]
-
-    rows_test = X[:, 0] >= forecast_start_time
-    X_test = X[rows_test]
-    Y_test = Y[rows_test]
-
-    # plot output data
-    matrix_rank = len(cities)
-    kernel_1 = GPy.kern.RBF(1, lengthscale=6) + GPy.kern.Linear(1, 1, active_dims=[0]) + GPy.kern.White(1) + GPy.kern.Bias(1)
-    kernel_2 = GPy.kern.Coregionalize(1, output_dim=len(cities), rank=matrix_rank)
-
-    X_Gpy = X[:, [1, 2]]
-    model = GPy.models.GPRegression(X_Gpy, Y, kernel_1 ** kernel_2)
-    model.optimize(messages=True)
-
-    samples = 5
-    Y_posterior_test_samples = model.posterior_samples_f(X_test[:, [1, 2]], full_cov=True, size=samples)
-    mean, variance = model.predict(X_Gpy, full_cov=True)
-    quantiles = model.predict_quantiles(X_Gpy)
+    model = CoregionalizationModel(observation_frame, forecast_frame)
+    fitted_frame = model.optimize()
+    sample_frames = model.posterior_samples(5)
 
     mean_handle, confidence_handle, observation_handle, forecast_handle = None, None, None, None
     sample_handles = []
     fig, ax = matplotlib.pyplot.subplots(len(cities), 1, sharex=True, figsize=(10, 8))
     for city_index, city in enumerate(cities):
-        city_rows = numpy.where(X[:, 2] == city_index)[0]
-        city_mean = mean[city_rows]
-        city_lower_quantile = quantiles[0][city_rows].flatten()
-        city_upper_quantile = quantiles[1][city_rows].flatten()
-        X_city_index = X[city_rows][:, 0].flatten()
-        confidence_handle = ax[city_index].fill_between(X_city_index, city_upper_quantile, city_lower_quantile, color=CONFIDENCE_COLOR, alpha=0.5)
-        mean_handle = ax[city_index].plot(X_city_index, city_mean, color=MEAN_COLOR)[0]
+        city_frame = fitted_frame[fitted_frame['City'] == city]
+        confidence_handle = ax[city_index].fill_between(city_frame['DateTime'],
+                                                        city_frame['yhat_upper'],
+                                                        city_frame['yhat_lower'],
+                                                        color=CONFIDENCE_COLOR, alpha=0.5)
+        mean_handle = ax[city_index].plot(city_frame['DateTime'], city_frame['yhat'], color=MEAN_COLOR)[0]
 
-        city_test_rows = numpy.where(X_test[:, 2] == city_index)[0]
-        Y_posterior_test_city = Y_posterior_test_samples[city_test_rows]
-        X_test_city_index = X_test[city_test_rows][:, 0].flatten()
         sample_handles = []
-        for sample_index in range(samples):
-            city_Y_test_sample = Y_posterior_test_city[:, :, sample_index].transpose()[0, :]
-            sample_handle = ax[city_index].plot(X_test_city_index, city_Y_test_sample)[0]
+        for sample_frame in sample_frames:
+            city_sample_frame = sample_frame[sample_frame['City'] == city]
+            sample_handle = ax[city_index].plot(city_sample_frame['DateTime'], city_sample_frame['y'])[0]
             sample_handles.append(sample_handle)
 
         at = matplotlib.offsetbox.AnchoredText(city.name, frameon=False, loc='lower left')
         ax[city_index].add_artist(at)
         ax[city_index].set_ylim(-25, 125)
 
-        city_train_rows = numpy.where(X_train[:, 2] == city_index)[0]
-        X_train_city_index = X_train[city_train_rows][:, 0].flatten()
-        Y_train_city = Y_train[city_train_rows]
-        Y_test_city = Y_test[city_test_rows]
-        observation_handle = ax[city_index].scatter(X_train_city_index, Y_train_city, marker='s', s=1.0, color=OBSERVATION_COLOR)
-        forecast_handle = ax[city_index].scatter(X_test_city_index, Y_test_city, marker='s', s=1.0, color=FORECAST_COLOR)
+        observation_city_series = observation_frame[city]
+        forecast_city_series = forecast_frame[city]
+        observation_handle = ax[city_index].scatter(observation_city_series.index, observation_city_series.values,
+                                                    marker='s', s=1.0, color=OBSERVATION_COLOR)
+        forecast_handle = ax[city_index].scatter(forecast_city_series.index, forecast_city_series.values,
+                                                 marker='s', s=1.0, color=FORECAST_COLOR)
     for tick in ax[-1].get_xticklabels():
         tick.set_rotation(90)
     ax[int(len(cities) / 2)].set_ylabel('Cloud Cover [%]')
