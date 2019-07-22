@@ -30,6 +30,7 @@ import logging
 import os
 import subprocess
 import warnings
+import collections
 
 import GPy
 import matplotlib.colors
@@ -84,8 +85,9 @@ def load_data_frame(file_path):
 
 
 class WeatherCache:
-    FILE_TABLE = 'a'
-    FILE_MODE = 'w'
+    HDF_FILE_TABLE = 'a'
+    HDF_FILE_MODE = 'w'
+    HDF_FORMAT = 'table'
     FORECAST_CACHE_FILE = 'forecast.hdf'
     OBSERVATION_CACHE_FILE = 'observation.hdf'
     ZERO_TIME_DELTA = datetime.timedelta()
@@ -117,7 +119,7 @@ class WeatherCache:
         data_frames = []
         with warnings.catch_warnings():
             warnings.filterwarnings('ignore', '', tqdm.TqdmSynchronisationWarning)
-            with concurrent.futures.process.ProcessPoolExecutor() as executor:
+            with concurrent.futures.ThreadPoolExecutor() as executor:
                 future_to_path = {executor.submit(load_data_frame, file_path): file_path for file_path in file_paths}
                 for future in tqdm.tqdm(concurrent.futures.as_completed(future_to_path), total=len(future_to_path)):
                     file_path = future_to_path[future]
@@ -127,19 +129,28 @@ class WeatherCache:
                         logging.exception('%s generated error %s', file_path, ex)
         forecast_frame = pandas.concat(data_frames)
         forecast_frame.drop_duplicates(inplace=True)
+        forecast_frame = forecast_frame.infer_objects()
 
         observation_frame = load_observation_frame('/home/pmateusz/dev/quake/data/weather/ground_station_data_set_filled.csv')
+        observation_frame = observation_frame.infer_objects()
 
         self.__forecast_frame = forecast_frame
         self.__observation_frame = observation_frame
 
     def load(self):
-        self.__forecast_frame = pandas.read_hdf(self.FORECAST_CACHE_FILE, self.FILE_TABLE)
-        self.__observation_frame = pandas.read_hdf(self.OBSERVATION_CACHE_FILE, self.FILE_TABLE)
+        forecast_frame = pandas.read_hdf(self.FORECAST_CACHE_FILE, self.HDF_FILE_TABLE)
+        forecast_frame['City'] = forecast_frame['City'].apply(lambda name: quake.city.from_name(name))
+        self.__forecast_frame = forecast_frame
+        self.__observation_frame = pandas.read_hdf(self.OBSERVATION_CACHE_FILE, self.HDF_FILE_TABLE)
 
     def save(self):
-        self.__forecast_frame.to_hdf(self.FORECAST_CACHE_FILE, self.FILE_TABLE, mode=self.FILE_MODE)
-        self.__observation_frame.to_hdf(self.OBSERVATION_CACHE_FILE, self.FILE_TABLE, mode=self.FILE_MODE)
+        forecast_frame = self.__forecast_frame.copy()
+        forecast_frame['City'] = forecast_frame['City'].apply(lambda city: city.name)
+        forecast_frame.to_hdf(self.FORECAST_CACHE_FILE, self.HDF_FILE_TABLE, mode=self.HDF_FILE_MODE, format=self.HDF_FORMAT)
+
+        observation_frame = self.__observation_frame.copy()
+        observation_frame['city_name'] = observation_frame['city_name'].astype(str)
+        observation_frame.to_hdf(self.OBSERVATION_CACHE_FILE, self.HDF_FILE_TABLE, mode=self.HDF_FILE_MODE, format=self.HDF_FORMAT)
 
     def get_forecast_frame(self, start_time, duration):
         end_time = start_time + duration
@@ -300,6 +311,73 @@ class ParseDateAction(argparse.Action):
         setattr(namespace, self.dest, date_time_value)
 
 
+class CoregionalizationModel:
+
+    def __init__(self, observation_frame, forecast_frame):
+        assert observation_frame.index.max() <= forecast_frame.index.min()
+
+        self.__observation_frame = observation_frame
+        self.__forecast_frame = forecast_frame
+        self.__model = None
+
+    def optimize(self):
+        # prepare input
+        X, Y = [], []
+        observation_start_time = self.__observation_frame.index.min()
+
+        def elapsed_hours(date_time):
+            return int((date_time - observation_start_time).total_seconds() / 3600)
+
+        cities = self.__forecast_frame.columns
+        for city_index, city in enumerate(cities):
+            for time, cloud_cover in self.__observation_frame[city].items():
+                X.append([time, elapsed_hours(time), city_index])
+                Y.append([cloud_cover])
+
+            for time, cloud_cover in self.__forecast_frame[city].items():
+                X.append([time, elapsed_hours(time), city_index])
+                Y.append([cloud_cover])
+
+        self.__X = numpy.array(X)
+        self.__Y = numpy.array(Y)
+        del X, Y
+
+        # plot output data
+        matrix_rank = len(cities)
+        kernel_1 = GPy.kern.RBF(1, lengthscale=6, ARD=True) + GPy.kern.Linear(1, 1, active_dims=[0], ARD=True) + GPy.kern.White(1) + GPy.kern.Bias(1)
+        kernel_2 = GPy.kern.Coregionalize(1, output_dim=len(cities), rank=matrix_rank)
+
+        X_Gpy = self.__X[:, [1, 2]]
+        self.__model = GPy.models.GPRegression(X_Gpy, self.__Y, kernel_1 ** kernel_2)
+        self.__model.optimize(messages=True)
+
+        mean, variance = self.__model.predict(X_Gpy, full_cov=True)
+        quantiles = self.__model.predict_quantiles(X_Gpy)
+
+        X_cities = numpy.array([cities[city_index] for city_index in self.__X[:, 2]])
+        data = numpy.hstack((self.__X[:, [0]], X_cities.reshape(-1, 1), self.__Y.reshape(-1, 1), mean, quantiles[0], quantiles[1]))
+        data_frame = pandas.DataFrame(data=data, columns=['DateTime', 'City', 'y', 'yhat', 'yhat_lower', 'yhat_upper'])
+        data_frame = data_frame.infer_objects()
+        return data_frame
+
+    def posterior_samples(self, size):
+        test_X = self.__X[self.__X[:, 0] >= self.__forecast_frame.index.min()]
+        Y_posterior_samples = self.__model.posterior_samples_f(test_X[:, [1, 2]], full_cov=True, size=size)
+        time_index = test_X[:, [0]]
+
+        cities = self.__forecast_frame.columns
+        X_cities = numpy.array([cities[city_index] for city_index in test_X[:, 2]])
+        X_cities = X_cities.reshape(-1, 1)
+
+        sample_frames = []
+        for sample_index in range(size):
+            data = numpy.hstack((time_index, X_cities, Y_posterior_samples[:, :, sample_index]))
+            data_frame = pandas.DataFrame(data=data, columns=['DateTime', 'City', 'y'])
+            data_frame = data_frame.infer_objects()
+            sample_frames.append(data_frame)
+        return sample_frames
+
+
 def parse_args():
     parser = argparse.ArgumentParser()
 
@@ -321,6 +399,7 @@ def parse_args():
     generate_parser.add_argument('--from', action=ParseDateAction)
     generate_parser.add_argument('--to', action=ParseDateAction)
     generate_parser.add_argument('--problem-prefix')
+    generate_parser.add_argument('--num-scenarios', default=0, type=int)
 
     plot_forecast_parser = sub_parsers.add_parser(PLOT_FORECAST_COMMAND)
     plot_forecast_parser.add_argument('--from', action=ParseDateAction)
@@ -347,7 +426,7 @@ def build_cache_command(args):
 
 def process_parallel_map(data, function):
     results = []
-    with concurrent.futures.process.ProcessPoolExecutor() as executor:
+    with concurrent.futures.ThreadPoolExecutor() as executor:
         futures = [executor.submit(function, chunk) for chunk in data]
         for future in tqdm.tqdm(futures):
             results.append(future.result())
@@ -579,6 +658,7 @@ def extend_problem_definition(args):
 
     forecast_frame = weather_cache.get_forecast_frame(problem.observation_period.begin, problem.observation_period.length)
     real_frame = weather_cache.get_observation_frame(problem.observation_period.begin, problem.observation_period.length)
+
     min_time = max(forecast_frame.index.min(), real_frame.index.min())
     max_time = min(forecast_frame.index.max(), real_frame.index.max())
 
@@ -587,6 +667,46 @@ def extend_problem_definition(args):
                                                                                                    problem.observation_period.end,
                                                                                                    min_time,
                                                                                                    max_time))
+
+    def fill_missing_values(frame):
+        freq = pandas.infer_freq(frame.index)
+        counter = collections.Counter()
+        if freq:
+            return frame
+        index_it = iter(frame.index)
+        prev_value = next(index_it, None)
+        if prev_value:
+            for current_value in index_it:
+                time_distance = current_value - prev_value
+                counter[time_distance] += 1
+                prev_value = current_value
+
+        inferred_feq = counter.most_common(1)[0][0]
+
+        missing_values = []
+        for index_value in frame.index:
+            expected_next_value = index_value + inferred_feq
+            if expected_next_value not in frame.index:
+                missing_values.append(expected_next_value)
+
+        # remove last index
+        missing_values.remove(frame.index.max() + inferred_feq)
+
+        data = numpy.full((len(missing_values), len(frame.columns)), numpy.NaN)
+        missing_values_frame = pandas.DataFrame(index=missing_values, data=data, columns=frame.columns)
+        filled_frame = frame.append(missing_values_frame)
+        filled_frame.sort_index(inplace=True)
+        filled_frame.fillna(method='ffill', inplace=True)
+        return filled_frame
+
+    filled_real_frame = fill_missing_values(real_frame)
+    filled_forecast_frame = fill_missing_values(forecast_frame)
+
+    if len(filled_real_frame) != len(real_frame):
+        warnings.warn('Real frame was filled with {0} rows'.format(len(filled_real_frame) - len(real_frame)))
+
+    if len(filled_forecast_frame) != len(forecast_frame):
+        warnings.warn('Forecast frame was filled with {0} rows'.format(len(filled_forecast_frame) - len(forecast_frame)))
 
     scenario_frames = []
     if num_scenarios > 0:
@@ -620,6 +740,7 @@ def generate_command(args):
     problem_prefix_arg = getattr(args, 'problem_prefix')
     from_date_arg = getattr(args, 'from')
     to_date_arg = getattr(args, 'to')
+    num_scenarios = getattr(args, 'num_scenarios')
 
     configurations = []
     current_date = from_date_arg
@@ -643,7 +764,7 @@ def generate_command(args):
         if not os.path.exists(temp_problem):
             raise Exception('Failed to generate problem {0}'.format(temp_problem))
 
-        args = argparse.Namespace(**{'problem_file': temp_problem, 'output': problem})
+        args = argparse.Namespace(**{'problem_file': temp_problem, 'output': problem, 'num_scenarios': num_scenarios})
         extend_problem_definition(args)
 
         if not os.path.exists(problem):
@@ -969,73 +1090,6 @@ def plot_forecast_command(args):
         figure.tight_layout()
 
         save_figure('{0}_{1}_{2}_{3}'.format(output_prefix, city.name, simple_date_str(from_date_time), simple_date_str(to_date_time)))
-
-
-class CoregionalizationModel:
-
-    def __init__(self, observation_frame, forecast_frame):
-        assert observation_frame.index.max() <= forecast_frame.index.min()
-
-        self.__observation_frame = observation_frame
-        self.__forecast_frame = forecast_frame
-        self.__model = None
-
-    def optimize(self):
-        # prepare input
-        X, Y = [], []
-        observation_start_time = self.__observation_frame.index.min()
-
-        def elapsed_hours(date_time):
-            return int((date_time - observation_start_time).total_seconds() / 3600)
-
-        cities = self.__forecast_frame.columns
-        for city_index, city in enumerate(cities):
-            for time, cloud_cover in self.__observation_frame[city].items():
-                X.append([time, elapsed_hours(time), city_index])
-                Y.append([cloud_cover])
-
-            for time, cloud_cover in self.__forecast_frame[city].items():
-                X.append([time, elapsed_hours(time), city_index])
-                Y.append([cloud_cover])
-
-        self.__X = numpy.array(X)
-        self.__Y = numpy.array(Y)
-        del X, Y
-
-        # plot output data
-        matrix_rank = len(cities)
-        kernel_1 = GPy.kern.RBF(1, lengthscale=6) + GPy.kern.Linear(1, 1, active_dims=[0]) + GPy.kern.White(1) + GPy.kern.Bias(1)
-        kernel_2 = GPy.kern.Coregionalize(1, output_dim=len(cities), rank=matrix_rank)
-
-        X_Gpy = self.__X[:, [1, 2]]
-        self.__model = GPy.models.GPRegression(X_Gpy, self.__Y, kernel_1 ** kernel_2)
-        self.__model.optimize(messages=True, max_iters=1)
-
-        mean, variance = self.__model.predict(X_Gpy, full_cov=True)
-        quantiles = self.__model.predict_quantiles(X_Gpy)
-
-        X_cities = numpy.array([cities[city_index] for city_index in self.__X[:, 2]])
-        data = numpy.hstack((self.__X[:, [0]], X_cities.reshape(-1, 1), self.__Y.reshape(-1, 1), mean, quantiles[0], quantiles[1]))
-        data_frame = pandas.DataFrame(data=data, columns=['DateTime', 'City', 'y', 'yhat', 'yhat_lower', 'yhat_upper'])
-        data_frame = data_frame.infer_objects()
-        return data_frame
-
-    def posterior_samples(self, size):
-        test_X = self.__X[self.__X[:, 0] >= self.__forecast_frame.index.min()]
-        Y_posterior_samples = self.__model.posterior_samples_f(test_X[:, [1, 2]], full_cov=True, size=size)
-        time_index = test_X[:, [0]]
-
-        cities = self.__forecast_frame.columns
-        X_cities = numpy.array([cities[city_index] for city_index in test_X[:, 2]])
-        X_cities = X_cities.reshape(-1, 1)
-
-        sample_frames = []
-        for sample_index in range(size):
-            data = numpy.hstack((time_index, X_cities, Y_posterior_samples[:, :, sample_index]))
-            data_frame = pandas.DataFrame(data=data, columns=['DateTime', 'City', 'y'])
-            data_frame = data_frame.infer_objects()
-            sample_frames.append(data_frame)
-        return sample_frames
 
 
 def plot_coregionalization(args):
