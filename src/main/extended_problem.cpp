@@ -19,7 +19,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include <string>
 #include <unordered_set>
+
+#include <boost/config.hpp>
+#include <boost/algorithm/string.hpp>
+
+#include <regex>
 
 #include <glog/logging.h>
 
@@ -214,6 +220,57 @@ quake::ExtendedProblem quake::ExtendedProblem::load_json(const boost::filesystem
 
     ExtendedProblem problem = json_object;
     return problem;
+}
+
+std::string GetReferenceKey(quake::ExtendedProblem::WeatherSample sample) {
+    switch (sample) {
+        case quake::ExtendedProblem::WeatherSample::Forecast:
+            return "forecast";
+        case quake::ExtendedProblem::WeatherSample::Real:
+            return "real";
+        default:
+            LOG(FATAL) << "Weather sample " << static_cast<int>(sample) << " not supported";
+    }
+}
+
+const quake::Forecast &quake::ExtendedProblem::GetWeatherSample(quake::ExtendedProblem::WeatherSample sample) const {
+    return forecasts_.at(GetReferenceKey(sample));
+}
+
+int forecast_scenario_comparator(const std::pair<quake::Forecast, int> &left, const std::pair<quake::Forecast, int> &right) {
+    return left.second < right.second;
+}
+
+std::vector<quake::Forecast> quake::ExtendedProblem::GetWeatherSamples(quake::ExtendedProblem::WeatherSample sample) const {
+    static const std::regex SCENARIO_NAME_PATTERN{"^scenario_(\\d+)$"};
+
+    if (sample == WeatherSample::Scenario) {
+        std::vector<std::pair<Forecast, int> > forecast_index_pairs;
+        for (const auto &element : forecasts_) {
+            std::smatch match;
+            std::regex_match(element.first, match, SCENARIO_NAME_PATTERN);
+
+            if (boost::algorithm::istarts_with(element.first, "scenario_")) {
+                CHECK_GT(match.size(), 0);
+                const auto scenario_number = std::stod(match[1]);
+                forecast_index_pairs.emplace_back(element.second, scenario_number);
+            }
+        }
+
+        std::sort(std::begin(forecast_index_pairs), std::end(forecast_index_pairs), forecast_scenario_comparator);
+        std::vector<Forecast> forecasts;
+        forecasts.reserve(forecast_index_pairs.size());
+        for (const auto &index_pair : forecast_index_pairs) {
+            forecasts.emplace_back(index_pair.first);
+        }
+        return forecasts;
+    } else {
+        const auto reference_key = GetReferenceKey(sample);
+        const auto find_it = forecasts_.find(reference_key);
+        if (find_it != std::cend(forecasts_)) {
+            return {find_it->second};
+        }
+    }
 }
 
 void quake::to_json(nlohmann::json &json, const quake::ExtendedProblem::MetaData &metadata) {

@@ -42,7 +42,8 @@ namespace quake {
         enum class WeatherSample {
             None,
             Forecast,
-            Real
+            Real,
+            Scenario
         };
 
         struct MetaData {
@@ -132,17 +133,9 @@ namespace quake {
 
         double ElevationAngle(const GroundStation &station, const boost::posix_time::ptime &datetime) const;
 
-        inline const Forecast &GetWeatherSample(ExtendedProblem::WeatherSample sample) const {
-            switch (sample) {
-                case WeatherSample::Forecast:
-                    return forecasts_.at("forecast");
-                case WeatherSample::Real:
-                    return forecasts_.at("real");
-                case WeatherSample::None:
-                default:
-                    LOG(FATAL) << "Weather sample " << static_cast<int>(sample) << " not supported";
-            }
-        }
+        const Forecast &GetWeatherSample(ExtendedProblem::WeatherSample sample) const;
+
+        std::vector<Forecast> GetWeatherSamples(ExtendedProblem::WeatherSample sample) const;
 
     private:
 

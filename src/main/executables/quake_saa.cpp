@@ -49,18 +49,35 @@ int main(int argc, char *argv[]) {
     const auto problem = quake::ExtendedProblem::load_json(arguments.ProblemPath);
     const auto &weather_forecast = problem.GetWeatherSample(quake::ExtendedProblem::WeatherSample::Forecast);
     const auto &weather_observed = problem.GetWeatherSample(quake::ExtendedProblem::WeatherSample::Real);
+    const auto forecast_scenarios = problem.GetWeatherSamples(quake::ExtendedProblem::WeatherSample::Scenario);
 
-    const auto NUM_SCENARIOS = 128;
-    quake::GaussianForecastGenerator gaussian_forecast_generator{1.0};
-    auto forecast_scenarios = gaussian_forecast_generator.Generate(weather_forecast, NUM_SCENARIOS);
+    quake::IndexEvaluator evaluator{problem};
 
-    LOG(INFO) << "Generated " << NUM_SCENARIOS << " scenarios";
-    forecast_scenarios.insert(forecast_scenarios.begin(), weather_forecast);
+    // compute best achievable out of sample
+    quake::WorstCaseMipModel worst_case_model(&problem, arguments.IntervalStep, {weather_observed});
+    const auto observed_solution_opt = worst_case_model.Solve(arguments.TimeLimit, arguments.GapLimit, boost::none);
 
-    LOG(INFO) << "Computing Worst Case";
-    quake::WorstCaseMipModel worst_case_model(&problem, arguments.IntervalStep, forecast_scenarios);
-    const auto worst_case_solution_opt = worst_case_model.Solve(arguments.TimeLimit, arguments.GapLimit, boost::none);
-    CHECK(worst_case_solution_opt) << "Failed to find the worst case solution";
+    LOG(INFO) << "Best out of sample performance: " << evaluator(*observed_solution_opt);
+
+    // compute saa index over generated scenarios
+    const auto target_traffic_index = evaluator(*observed_solution_opt);
+    LOG(INFO) << "Computing Sample Average Approximation with the target index of " << target_traffic_index;
+    quake::SampleAverageMipModel mip_model(&problem, arguments.IntervalStep, forecast_scenarios, target_traffic_index);
+    const auto saa_solution_opt = mip_model.Solve(arguments.TimeLimit, arguments.GapLimit, boost::none);
+    CHECK(saa_solution_opt) << "Failed to find the solution for Sample Average Approximation";
+    LOG(INFO) << "Sample Average Approximation  In-Sample Traffic Index: " << evaluator(*saa_solution_opt, weather_forecast);
+    LOG(INFO) << "Sample Average Approximation Out-of-Sample Traffic Index: " << evaluator(*saa_solution_opt, weather_observed);
+
+    quake::CVarMipModel cvar_mip_model(&problem, arguments.IntervalStep, forecast_scenarios, target_traffic_index, 0.05);
+    const auto cvar_solution_opt = cvar_mip_model.Solve(arguments.TimeLimit, arguments.GapLimit, boost::none);
+    CHECK(cvar_solution_opt) << "Failed to find the solution using CVar optimization";
+    LOG(INFO) << "Conditional Value at Risk In-Sample Traffic Index: " << evaluator(*cvar_solution_opt, weather_forecast);
+    LOG(INFO) << "Conditional Value at Risk Out-of-Sample Traffic Index: " << evaluator(*cvar_solution_opt, weather_observed);
+
+//    LOG(INFO) << "Computing Worst Case";
+//    quake::WorstCaseMipModel worst_case_model(&problem, arguments.IntervalStep, forecast_scenarios);
+
+//    CHECK(worst_case_solution_opt) << "Failed to find the worst case solution";
 
 //    LOG(INFO) << "Computing Average Case";
 //    quake::AverageCaseMipModel average_case_model(&model, arguments.TimeStep, forecast_scenarios);
@@ -78,18 +95,14 @@ int main(int argc, char *argv[]) {
 //    CHECK(best_case_solution_opt) << "Failed to find the best case solution";
 //
 
-    quake::IndexEvaluator evaluator{problem};
-    const auto THRESHOLD = 1.25;
-    const auto worst_cast_traffic_index = evaluator(*worst_case_solution_opt, weather_forecast);
-    const auto target_traffic_index = worst_cast_traffic_index * THRESHOLD;
 
-    LOG(INFO) << "Computing Sample Average Approximation with the target index of " << target_traffic_index << " at threshold of " << THRESHOLD;
-    quake::SampleAverageMipModel mip_model(&problem, arguments.IntervalStep, forecast_scenarios, target_traffic_index);
-    const auto saa_solution_opt = mip_model.Solve(arguments.TimeLimit, arguments.GapLimit, boost::none);
-    CHECK(saa_solution_opt) << "Failed to find the solution for Sample Average Approximation";
+//    const auto THRESHOLD = 1.25;
+//    const auto worst_cast_traffic_index = evaluator(*worst_case_solution_opt, weather_forecast);
+//    const auto target_traffic_index = worst_cast_traffic_index * THRESHOLD;
 
-    LOG(INFO) << "Sample Average Approximation  In-Sample Traffic Index: " << evaluator(*saa_solution_opt, weather_forecast);
-    LOG(INFO) << "Sample Average Approximation Out-of-Sample Traffic Index: " << evaluator(*saa_solution_opt, weather_observed);
+
+
+
 
 //    LOG(INFO) << "Worst case: " << best_case_model.GetTrafficIndex(*worst_case_solution_opt);
 //    LOG(INFO) << "Average case: " << best_case_model.GetTrafficIndex(*average_case_solution_opt);
@@ -99,9 +112,7 @@ int main(int argc, char *argv[]) {
 //    LOG(INFO) << "Computing Conditional Value at Risk (epsilon: 0.05)";
 //    const auto cvar_target_traffic_index = worst_case_model.GetTrafficIndex(*worst_case_solution_opt) * 1.10;
 //    const auto cvar_target_traffic_index = 2.64726e+06 * 1.1;
-//    quake::CVarMipModel cvar_mip_model(&model, arguments.TimeStep, forecast_scenarios, cvar_target_traffic_index, 0.05);
-//    const auto cvar_solution_opt = cvar_mip_model.Solve(arguments.TimeLimit, arguments.Gap, boost::none);
-//    CHECK(cvar_solution_opt) << "Failed to find the solution using CVar optimization";
+
 
 //    LOG(INFO) << "Conditional Value at Risk case (epsilon: 0.05): "
 //              << best_case_model.GetTrafficIndex(*cvar_solution_opt);
