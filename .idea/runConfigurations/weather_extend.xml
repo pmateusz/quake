@@ -12,7 +12,7 @@
     <option name="ADD_CONTENT_ROOTS" value="true" />
     <option name="ADD_SOURCE_ROOTS" value="true" />
     <option name="SCRIPT_NAME" value="$PROJECT_DIR$/python/weather-tools.py" />
-    <option name="PARAMETERS" value="extend $PROJECT_DIR$/cmake-build-debug/problem.json --output $PROJECT_DIR$/cmake-build-debug/long-problem-extended.json --num-scenarios=32" />
+    <option name="PARAMETERS" value="extend $PROJECT_DIR$/python/problem_2019-07-13.json --output $PROJECT_DIR$/cmake-build-debug/long-problem-extended.json --num-scenarios=32" />
     <option name="SHOW_COMMAND_LINE" value="false" />
     <option name="EMULATE_TERMINAL" value="false" />
     <option name="MODULE_MODE" value="false" />

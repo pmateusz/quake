@@ -95,6 +95,7 @@ class WeatherCache:
     def __init__(self):
         self.__forecast_frame = None
         self.__observation_frame = None
+        self.__forecast_length = datetime.timedelta(days=4, hours=21)
 
     def rebuild(self):
 
@@ -152,7 +153,7 @@ class WeatherCache:
         observation_frame['city_name'] = observation_frame['city_name'].astype(str)
         observation_frame.to_hdf(self.OBSERVATION_CACHE_FILE, self.HDF_FILE_TABLE, mode=self.HDF_FILE_MODE, format=self.HDF_FORMAT)
 
-    def get_forecast_frame(self, start_time, duration):
+    def get_forecast_frame(self, start_time, duration, fill_missing=True):
         end_time = start_time + duration
 
         filter_frame \
@@ -169,16 +170,60 @@ class WeatherCache:
 
         data_frame = filter_frame[filter_frame['ForecastDateTime'] == forecast_date_time].copy()
         self.__verify_period(data_frame, start_time, end_time)
-        return self.__pivot_transform(data_frame)
 
-    def get_observation_frame(self, start_time, duration):
+        pivoted_frame = self.__pivot_transform(data_frame)
+        if fill_missing:
+            return self.__fill_missing_values(pivoted_frame)
+        return pivoted_frame
+
+    def get_observation_frame(self, start_time, duration, fill_missing=True):
         end_time = start_time + duration
 
         data_frame = self.__forecast_frame[(self.__forecast_frame['Delay'] == self.ZERO_TIME_DELTA)
                                            & (self.__forecast_frame['DateTime'] >= start_time)
                                            & (self.__forecast_frame['DateTime'] <= end_time)].copy()
         self.__verify_period(data_frame, start_time, end_time)
-        return self.__pivot_transform(data_frame)
+
+        pivoted_frame = self.__pivot_transform(data_frame)
+        if fill_missing:
+            return self.__fill_missing_values(pivoted_frame)
+        return pivoted_frame
+
+    @staticmethod
+    def __fill_missing_values(frame):
+        freq = pandas.infer_freq(frame.index)
+
+        counter = collections.Counter()
+        if freq:
+            return frame
+        index_it = iter(frame.index)
+        prev_value = next(index_it, None)
+        if prev_value:
+            for current_value in index_it:
+                time_distance = current_value - prev_value
+                counter[time_distance] += 1
+                prev_value = current_value
+
+        inferred_feq = counter.most_common(1)[0][0]
+        start_index = frame.index.min()
+        end_index = frame.index.max()
+
+        missing_values = []
+        current_index = start_index
+        while current_index < end_index:
+            if current_index not in frame.index:
+                missing_values.append(current_index)
+            current_index += inferred_feq
+
+        if missing_values:
+            warnings.warn('Filling missing values: {0}'.format(missing_values))
+
+        data = numpy.full((len(missing_values), len(frame.columns)), numpy.NaN)
+        missing_values_frame = pandas.DataFrame(index=missing_values, data=data, columns=frame.columns)
+        filled_frame = frame.append(missing_values_frame)
+        filled_frame.sort_index(inplace=True)
+        filled_frame.fillna(method='ffill', inplace=True)
+        return filled_frame
 
     @staticmethod
     def __verify_period(frame, start_time, end_time):
@@ -196,6 +241,10 @@ class WeatherCache:
         pivot_frame.drop_duplicates(inplace=True)
         pivot_frame.sort_index(inplace=True)
         return pivot_frame
+
+    @property
+    def forecast_length(self):
+        return self.__forecast_length
 
     @property
     def forecast_frame(self):
@@ -360,7 +409,7 @@ class CoregionalizationModel:
         data_frame = data_frame.infer_objects()
         return data_frame
 
-    def posterior_samples(self, size):
+    def samples(self, size):
         test_X = self.__X[self.__X[:, 0] >= self.__forecast_frame.index.min()]
         Y_posterior_samples = self.__model.posterior_samples_f(test_X[:, [1, 2]], full_cov=True, size=size)
         time_index = test_X[:, [0]]
@@ -375,6 +424,61 @@ class CoregionalizationModel:
             data_frame = pandas.DataFrame(data=data, columns=['DateTime', 'City', 'y'])
             data_frame = data_frame.infer_objects()
             sample_frames.append(data_frame)
+        return sample_frames
+
+
+class PastErrorsModel:
+
+    def __init__(self, weather_cache, forecast_frame):
+        self.__weather_cache = weather_cache
+        self.__forecast_frame = forecast_frame
+        self.__error_frames = []
+
+    def optimize(self):
+        filtered_time_points = {datetime.datetime.combine(pandas.to_datetime(time_point).date(), datetime.time())
+                                for time_point in self.__weather_cache.forecast_frame['DateTime']}
+        filtered_time_points = list(filtered_time_points)
+        filtered_time_points.sort()
+        forecast_length = self.__weather_cache.forecast_length
+        max_forecast_duration = 40
+        min_values_required = int(0.95 * max_forecast_duration)
+
+        self.__error_frames = []
+        for time_point in filtered_time_points:
+            forecast_frame = self.__weather_cache.get_forecast_frame(time_point, forecast_length, fill_missing=False)
+            observation_frame = self.__weather_cache.get_observation_frame(time_point, forecast_length, fill_missing=False)
+
+            if len(forecast_frame) < max_forecast_duration or len(observation_frame) < max_forecast_duration:
+                if len(forecast_frame) >= min_values_required and len(observation_frame) >= min_values_required:
+                    if len(forecast_frame) < max_forecast_duration:
+                        forecast_frame = self.__weather_cache.get_forecast_frame(time_point, forecast_length, fill_missing=True)
+                    if len(observation_frame) < max_forecast_duration:
+                        observation_frame = self.__weather_cache.get_observation_frame(time_point, forecast_length, fill_missing=True)
+
+                    # data after extension should have all points
+                    if len(forecast_frame) < max_forecast_duration or len(observation_frame) < max_forecast_duration:
+                        continue
+                else:
+                    continue
+
+            error_frame = forecast_frame - observation_frame
+            assert error_frame.isna().sum().max() == 0
+            self.__error_frames.append(error_frame)
+
+    def samples(self, size):
+        draw_with_replacement = size > len(self.__error_frames)
+        samples_selected = numpy.random.choice(len(self.__error_frames), replace=draw_with_replacement, size=size)
+
+        # column names for a sample frame are: DateTime, City and y
+        sample_frames = []
+        for sample_index in samples_selected:
+            values = self.__forecast_frame.values + self.__error_frames[sample_index].values[:len(self.__forecast_frame)]
+            rows = []
+            for city_index, city in enumerate(self.__forecast_frame.columns):
+                for row_index, date_time in enumerate(self.__forecast_frame.index):
+                    rows.append([date_time, city, values[row_index, city_index]])
+            sample_frame = pandas.DataFrame(columns=['DateTime', 'City', 'y'], data=rows)
+            sample_frames.append(sample_frame)
         return sample_frames
 
 
@@ -656,8 +760,8 @@ def extend_problem_definition(args):
     weather_cache = WeatherCache()
     weather_cache.load()
 
-    forecast_frame = weather_cache.get_forecast_frame(problem.observation_period.begin, problem.observation_period.length)
-    real_frame = weather_cache.get_observation_frame(problem.observation_period.begin, problem.observation_period.length)
+    forecast_frame = weather_cache.get_forecast_frame(problem.observation_period.begin, problem.observation_period.length, fill_missing=True)
+    real_frame = weather_cache.get_observation_frame(problem.observation_period.begin, problem.observation_period.length, fill_missing=True)
 
     min_time = max(forecast_frame.index.min(), real_frame.index.min())
     max_time = min(forecast_frame.index.max(), real_frame.index.max())
@@ -668,55 +772,27 @@ def extend_problem_definition(args):
                                                                                                    min_time,
                                                                                                    max_time))
 
-    def fill_missing_values(frame):
-        freq = pandas.infer_freq(frame.index)
-        counter = collections.Counter()
-        if freq:
-            return frame
-        index_it = iter(frame.index)
-        prev_value = next(index_it, None)
-        if prev_value:
-            for current_value in index_it:
-                time_distance = current_value - prev_value
-                counter[time_distance] += 1
-                prev_value = current_value
-
-        inferred_feq = counter.most_common(1)[0][0]
-
-        missing_values = []
-        for index_value in frame.index:
-            expected_next_value = index_value + inferred_feq
-            if expected_next_value not in frame.index:
-                missing_values.append(expected_next_value)
-
-        # remove last index
-        missing_values.remove(frame.index.max() + inferred_feq)
-
-        data = numpy.full((len(missing_values), len(frame.columns)), numpy.NaN)
-        missing_values_frame = pandas.DataFrame(index=missing_values, data=data, columns=frame.columns)
-        filled_frame = frame.append(missing_values_frame)
-        filled_frame.sort_index(inplace=True)
-        filled_frame.fillna(method='ffill', inplace=True)
-        return filled_frame
-
-    filled_real_frame = fill_missing_values(real_frame)
-    filled_forecast_frame = fill_missing_values(forecast_frame)
-
-    if len(filled_real_frame) != len(real_frame):
-        warnings.warn('Real frame was filled with {0} rows'.format(len(filled_real_frame) - len(real_frame)))
-
-    if len(filled_forecast_frame) != len(forecast_frame):
-        warnings.warn('Forecast frame was filled with {0} rows'.format(len(filled_forecast_frame) - len(forecast_frame)))
+    def enforce_cloud_cover_limits(frame):
+        frame_to_use = frame.copy()
+        for column in frame.columns:
+            frame_to_use[column] = frame_to_use[column].apply(lambda value: max(0.0, min(1.0, value)))
+        return frame_to_use
 
     scenario_frames = []
     if num_scenarios > 0:
-        observation_length = datetime.timedelta(days=14)
-        observation_frame = weather_cache.get_observation_frame(forecast_frame.index.min() - observation_length, observation_length)
-        model = CoregionalizationModel(observation_frame, forecast_frame)
+        # # coregionalization model
+        # observation_length = datetime.timedelta(days=14)
+        # observation_frame = weather_cache.get_observation_frame(forecast_frame.index.min() - observation_length, observation_length)
+        # model = CoregionalizationModel(observation_frame, forecast_frame)
+
+        # past errors model
+        model = PastErrorsModel(weather_cache, forecast_frame)
         model.optimize()
-        sample_frames = model.posterior_samples(num_scenarios)
+
+        sample_frames = model.samples(num_scenarios)
         for sample_frame in sample_frames:
             scenario_frame = sample_frame.pivot_table(index='DateTime', columns='City', values='y')
+            scenario_frame = enforce_cloud_cover_limits(scenario_frame)
             scenario_frames.append(scenario_frame)
 
     def trim_to_time_interval(frame):
@@ -1239,3 +1315,12 @@ if __name__ == '__main__':
         import statsmodels.graphics.tsaplots
         statsmodels.graphics.tsaplots.plot_pacf(error_frame[quake.city.LONDON].values.transpose())
         matplotlib.pyplot.show(block=True)
+
+
+    weather_cache = WeatherCache()
+    weather_cache.load()
+
+    past_errors_model = PastErrorsModel(weather_cache, weather_cache.get_forecast_frame(datetime.datetime(2019, 7, 18), weather_cache.forecast_length,
+                                                                                        fill_missing=True))
+    past_errors_model.optimize()
+    samples = past_errors_model.samples(5)
