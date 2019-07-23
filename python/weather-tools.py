@@ -21,6 +21,7 @@
 # SOFTWARE.
 
 import argparse
+import collections
 import concurrent.futures
 import concurrent.futures.process
 import copy
@@ -30,7 +31,6 @@ import logging
 import os
 import subprocess
 import warnings
-import collections
 
 import GPy
 import matplotlib.colors
@@ -1587,10 +1587,42 @@ if __name__ == '__main__':
 
     # my_test_error_regression_md()
 
-    def modelling_errors_independenty():
+    def heteroscedastatic_example():
         import GPy.likelihoods
         import GPy.likelihoods.link_functions
 
+        import matplotlib.pyplot as plt
+        import numpy as np
+
+        N = 40
+        X = np.random.uniform(low=0, high=10, size=(N, 1)).flatten().tolist()
+
+        X.sort()
+        X = np.array(X).reshape(-1, 1)
+
+        V = np.random.uniform(0.1, 3.0, size=(N, 1)) ** 2
+        Y = np.sin(X) + np.random.normal(size=(N, 1)) * np.sqrt(V)
+        x1 = np.linspace(0, 10, 1000)
+
+        m = GPy.models.GPHeteroscedasticRegression(X, Y, GPy.kern.RBF(1))
+        m['.*het_Gauss.variance'] = V  # Set the noise parameters to the error in Y
+        m.het_Gauss.variance.fix()  # We can fix the noise term, since we already know it
+        m.optimize()
+
+        fig, ax = matplotlib.pyplot.subplots(1, 1)
+        m.plot(plot_density=False, plot_data=False, ax=ax)
+
+        ax.plot(x1, np.sin(x1), 'r')
+
+        num_samples = 10
+        samples = m.posterior_samples_f(X, size=num_samples)
+        for sample_index in range(num_samples):
+            prediction = samples[:, :, sample_index] + np.random.normal(size=(N, 1)) * np.sqrt(V)
+            ax.plot(X.flatten(), prediction.flatten())
+        matplotlib.pyplot.show(block=True)
+
+
+    def modelling_errors_independenty():
         weather_cache = WeatherCache()
         weather_cache.load()
 
