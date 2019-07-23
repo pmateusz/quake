@@ -96,6 +96,7 @@ class WeatherCache:
         self.__forecast_frame = None
         self.__observation_frame = None
         self.__forecast_length = datetime.timedelta(days=4, hours=21)
+        self.__forecast_frequency = datetime.timedelta(hours=3)
 
     def rebuild(self):
 
@@ -153,7 +154,10 @@ class WeatherCache:
         observation_frame['city_name'] = observation_frame['city_name'].astype(str)
         observation_frame.to_hdf(self.OBSERVATION_CACHE_FILE, self.HDF_FILE_TABLE, mode=self.HDF_FILE_MODE, format=self.HDF_FORMAT)
 
-    def get_forecast_frame(self, start_time, duration, fill_missing=True):
+    def get_forecast_frame(self, start_time, duration):
+        return self.__get_forecast_frame(start_time, duration, fill_missing=True)[0]
+
+    def __get_forecast_frame(self, start_time, duration, fill_missing=True):
         end_time = start_time + duration
 
         filter_frame \
@@ -163,7 +167,7 @@ class WeatherCache:
 
         if filter_frame.empty:
             warnings.warn('No forecast records found in requested period [{0}, {1}]'.format(start_time, end_time))
-            return pandas.DataFrame(columns=self.__forecast_frame.columns)
+            return pandas.DataFrame(columns=self.__forecast_frame.columns), []
 
         min_forecast_date_time_diff = filter_frame['ForecastDateTimeDiff'].min()
         forecast_date_time = filter_frame[filter_frame['ForecastDateTimeDiff'] == min_forecast_date_time_diff]['ForecastDateTime'].iloc[0]
@@ -173,10 +177,13 @@ class WeatherCache:
 
         pivoted_frame = self.__pivot_transform(data_frame)
         if fill_missing:
-            return self.__fill_missing_values(pivoted_frame)
-        return pivoted_frame
+            pivoted_frame, _missing_values = self.__fill_missing_values(pivoted_frame)
+        return pivoted_frame, []
 
-    def get_observation_frame(self, start_time, duration, fill_missing=True):
+    def get_observation_frame(self, start_time, duration):
+        return self.__get_observation_frame(start_time, duration, fill_missing=True)[0]
+
+    def __get_observation_frame(self, start_time, duration, fill_missing=True):
         end_time = start_time + duration
 
         data_frame = self.__forecast_frame[(self.__forecast_frame['Delay'] == self.ZERO_TIME_DELTA)
@@ -186,8 +193,37 @@ class WeatherCache:
 
         pivoted_frame = self.__pivot_transform(data_frame)
         if fill_missing:
-            return self.__fill_missing_values(pivoted_frame)
-        return pivoted_frame
+            pivoted_frame, _missing_values = self.__fill_missing_values(pivoted_frame)
+        return pivoted_frame, []
+
+    def get_error_frames(self):
+        forecast_time_points = {datetime.datetime.combine(pandas.to_datetime(time_point).date(), datetime.time())
+                                for time_point in self.forecast_frame['DateTime']}
+        filtered_time_points = list(forecast_time_points)
+        filtered_time_points.sort()
+
+        num_values = int(self.forecast_length.total_seconds() / self.__forecast_frequency.total_seconds()) + 1
+        max_filled_values = int(0.05 * num_values)
+
+        error_frames = []
+        for time_point in filtered_time_points:
+            forecast_frame, forecast_filled = self.get_forecast_frame(time_point, self.forecast_length, fill_missing=True)
+
+            if len(forecast_filled) > max_filled_values or len(forecast_frame) != num_values:
+                continue
+
+            observation_frame, observation_filled = self.get_observation_frame(time_point, self.forecast_length, fill_missing=True)
+
+            if len(observation_filled) > max_filled_values or len(observation_frame) != num_values:
+                continue
+
+            error_frame = forecast_frame - observation_frame
+
+            # error frame has no missing values
+            assert error_frame.isna().sum().max() == 0
+
+            error_frames.append(error_frame)
+        return error_frames
 
     @staticmethod
     def __fill_missing_values(frame):
@@ -195,7 +231,7 @@ class WeatherCache:
 
         counter = collections.Counter()
         if freq:
-            return frame
+            return frame, []
         index_it = iter(frame.index)
         prev_value = next(index_it, None)
         if prev_value:
@@ -223,7 +259,7 @@ class WeatherCache:
         filled_frame = frame.append(missing_values_frame)
         filled_frame.sort_index(inplace=True)
         filled_frame.fillna(method='ffill', inplace=True)
-        return filled_frame
+        return filled_frame, missing_values
 
     @staticmethod
     def __verify_period(frame, start_time, end_time):
@@ -393,7 +429,9 @@ class CoregionalizationModel:
 
         # plot output data
         matrix_rank = len(cities)
-        kernel_1 = GPy.kern.RBF(1, lengthscale=6, ARD=True) + GPy.kern.Linear(1, 1, active_dims=[0], ARD=True) + GPy.kern.White(1) + GPy.kern.Bias(1)
+        kernel_1 = GPy.kern.RBF(1, lengthscale=6, ARD=True) + GPy.kern.Linear(1, 1, active_dims=[0], ARD=True) + GPy.kern.White(1,
+                                                                                                                                variance=81) + GPy.kern.Bias(
+            1)
         kernel_2 = GPy.kern.Coregionalize(1, output_dim=len(cities), rank=matrix_rank)
 
         X_Gpy = self.__X[:, [1, 2]]
@@ -443,27 +481,7 @@ class PastErrorsModel:
         max_forecast_duration = 40
         min_values_required = int(0.95 * max_forecast_duration)
 
-        self.__error_frames = []
-        for time_point in filtered_time_points:
-            forecast_frame = self.__weather_cache.get_forecast_frame(time_point, forecast_length, fill_missing=False)
-            observation_frame = self.__weather_cache.get_observation_frame(time_point, forecast_length, fill_missing=False)
-
-            if len(forecast_frame) < max_forecast_duration or len(observation_frame) < max_forecast_duration:
-                if len(forecast_frame) >= min_values_required and len(observation_frame) >= min_values_required:
-                    if len(forecast_frame) < max_forecast_duration:
-                        forecast_frame = self.__weather_cache.get_forecast_frame(time_point, forecast_length, fill_missing=True)
-                    if len(observation_frame) < max_forecast_duration:
-                        observation_frame = self.__weather_cache.get_observation_frame(time_point, forecast_length, fill_missing=True)
-
-                    # data after extension should have all points
-                    if len(forecast_frame) < max_forecast_duration or len(observation_frame) < max_forecast_duration:
-                        continue
-                else:
-                    continue
-
-            error_frame = forecast_frame - observation_frame
-            assert error_frame.isna().sum().max() == 0
-            self.__error_frames.append(error_frame)
+        self.__error_frames = self.__weather_cache.get_error_frames()
 
     def samples(self, size):
         draw_with_replacement = size > len(self.__error_frames)
@@ -1215,7 +1233,7 @@ def plot_coregionalization(args):
 
     model = CoregionalizationModel(observation_frame, forecast_frame)
     fitted_frame = model.optimize()
-    sample_frames = model.posterior_samples(5)
+    sample_frames = model.samples(5)
 
     mean_handle, confidence_handle, observation_handle, forecast_handle = None, None, None, None
     sample_handles = []
@@ -1316,11 +1334,351 @@ if __name__ == '__main__':
         statsmodels.graphics.tsaplots.plot_pacf(error_frame[quake.city.LONDON].values.transpose())
         matplotlib.pyplot.show(block=True)
 
+        # def test_multiout_regression_md():
+        #     import GPy
+        #     import numpy as np
+        #
+        #     np.random.seed(0)
+        #
+        #     N = 20
+        #     N_train = 5
+        #     D = 8
+        #     noise_var = 0.3
+        #
+        #     k = GPy.kern.RBF(1, lengthscale=0.1)
+        #     x_raw = np.random.rand(N * D, 1)
+        #
+        #     # dimension assignment
+        #     D_list = []
+        #     for i in range(2):
+        #         while True:
+        #             D_sub_list = []
+        #             ratios = []
+        #             r_p = 0.
+        #             for j in range(3):
+        #                 ratios.append(np.random.rand() * (1 - r_p) + r_p)
+        #                 D_sub_list.append(int((ratios[-1] - r_p) * 4 * N_train))
+        #                 r_p = ratios[-1]
+        #             D_sub_list.append(4 * N_train - np.sum(D_sub_list))
+        #             if (np.array(D_sub_list) != 0).all():
+        #                 D_list.extend([a + N - N_train for a in D_sub_list])
+        #                 break
+        #
+        #     cov = k.K(x_raw)
+        #
+        #     k_r = GPy.kern.RBF(2, lengthscale=.4)
+        #     x_r = np.random.rand(D, 2)
+        #     cov_r = k_r.K(x_r)
+        #
+        #     cov_all = np.repeat(np.repeat(cov_r, D_list, axis=0), D_list, axis=1) * cov
+        #     L = GPy.util.linalg.jitchol(cov_all)
+        #
+        #     y_latent = L.dot(np.random.randn(N * D))
+        #
+        #     x = np.zeros((D * N_train,))
+        #     y = np.zeros((D * N_train,))
+        #     x_test = np.zeros((D * (N - N_train),))
+        #     y_test = np.zeros((D * (N - N_train),))
+        #     indexD = np.zeros((D * N_train), dtype=np.int)
+        #     indexD_test = np.zeros((D * (N - N_train)), dtype=np.int)
+        #
+        #     offset_all = 0
+        #     offset_train = 0
+        #     offset_test = 0
+        #     for i in range(D):
+        #         D_test = N - N_train
+        #         D_train = D_list[i] - N + N_train
+        #         y[offset_train:offset_train + D_train] = y_latent[offset_all:offset_all + D_train]
+        #         x[offset_train:offset_train + D_train] = x_raw[offset_all:offset_all + D_train, 0]
+        #         y_test[offset_test:offset_test + D_test] = y_latent[offset_all + D_train:offset_all + D_train + D_test]
+        #         x_test[offset_test:offset_test + D_test] = x_raw[offset_all + D_train:offset_all + D_train + D_test, 0]
+        #         indexD[offset_train:offset_train + D_train] = i
+        #         indexD_test[offset_test:offset_test + D_test] = i
+        #         offset_train += D_train
+        #         offset_test += D_test
+        #         offset_all += D_train + D_test
+        #
+        #     y_noisefree = y.copy()
+        #     y += np.random.randn(*y.shape) * np.sqrt(noise_var)
+        #     x_flat = x.flatten()[:, None]
+        #     y_flat = y.flatten()[:, None]
+        #
+        #     Mr, Mc, Qr, Qc = 4, 3, 2, 1
+        #
+        #     m = GPy.models.GPMultioutRegressionMD(x_flat, y_flat, indexD, Xr_dim=Qr, kernel_row=GPy.kern.RBF(Qr, ARD=False), num_inducing=(Mc, Mr))
+        #     m.optimize_auto(max_iters=1)
+        #     m.randomize()
+        #     assert m.checkgrad()
+        #
+        #     m = GPy.models.GPMultioutRegressionMD(x_flat, y_flat, indexD, Xr_dim=Qr, kernel_row=GPy.kern.RBF(Qr, ARD=False), num_inducing=(Mc, Mr),
+        #                                           init='rand')
+        #     m.optimize_auto(max_iters=1)
+        #     m.randomize()
+        #     assert m.checkgrad()
+        #
+        #
+        # def test_multiout_regression():
+        #     import numpy as np
+        #
+        #     np.random.seed(0)
+        #     import GPy
+        #
+        #     N = 10
+        #     N_train = 5
+        #     D = 4
+        #     noise_var = .3
+        #
+        #     k = GPy.kern.RBF(1, lengthscale=0.1)
+        #     x = np.random.rand(N, 2)
+        #     cov = k.K(x)
+        #
+        #     k_r = GPy.kern.RBF(2, lengthscale=.4)
+        #     x_r = np.random.rand(D, 2)
+        #     cov_r = k_r.K(x_r)
+        #
+        #     cov_all = np.kron(cov_r, cov)
+        #     L = GPy.util.linalg.jitchol(cov_all)
+        #
+        #     y_latent = L.dot(np.random.randn(N * D)).reshape(D, N).T
+        #
+        #     x_test = x[N_train:]
+        #     y_test = y_latent[N_train:]
+        #     x = x[:N_train]
+        #     y = y_latent[:N_train] + np.random.randn(N_train, D) * np.sqrt(noise_var)
+        #
+        #     Mr = D
+        #     Mc = x.shape[0]
+        #     Qr = 5
+        #     Qc = x.shape[1]
+        #
+        #     m_mr = GPy.models.GPMultioutRegression(x, y, Xr_dim=Qr, kernel_row=GPy.kern.RBF(Qr, ARD=True), num_inducing=(Mc, Mr), init='GP')
+        #     m_mr.optimize_auto(max_iters=1)
+        #     m_mr.randomize()
+        #     assert m_mr.checkgrad()
+        #
+        #     m_mr = GPy.models.GPMultioutRegression(x, y, Xr_dim=Qr, kernel_row=GPy.kern.RBF(Qr, ARD=True), num_inducing=(Mc, Mr), init='rand')
+        #     m_mr.optimize_auto(max_iters=1)
+        #     m_mr.randomize()
+        #     assert m_mr.checkgrad()
+        #
+        #     mean, variance = m_mr.predict(x)
+        #     quantiles = m_mr.predict_quantiles(x)
+        #
+        #     print('here')
+        #
+        #
+        # def my_test_regression_with_missing_values():
+        #     weather_cache = WeatherCache()
+        #     weather_cache.load()
+        #
+        #     forecasts = [weather_cache.get_observation_frame(datetime.datetime(2019, 6, 20), weather_cache.forecast_length),
+        #                  weather_cache.get_observation_frame(datetime.datetime(2019, 6, 25), weather_cache.forecast_length),
+        #                  weather_cache.get_observation_frame(datetime.datetime(2019, 7, 1), weather_cache.forecast_length),
+        #                  weather_cache.get_observation_frame(datetime.datetime(2019, 7, 5), weather_cache.forecast_length),
+        #                  weather_cache.get_observation_frame(datetime.datetime(2019, 7, 10), weather_cache.forecast_length),
+        #                  weather_cache.get_observation_frame(datetime.datetime(2019, 7, 15), weather_cache.forecast_length)]
+        #
+        #     restricted_cities = forecasts[0].columns
+        #
+        #     X = []
+        #     Y = []
+        #     D_index = []
+        #     for forecast_index, forecast in enumerate(forecasts):
+        #         min_start_time = forecast.index.min()
+        #         for city_index, city in enumerate(restricted_cities):
+        #             for time_index, cloud_cover in forecast[city].items():
+        #                 X.append([city_index, int((time_index - min_start_time).total_seconds() // 3600)])
+        #                 Y.append([cloud_cover])
+        #                 D_index.append(forecast_index)
+        #     X = numpy.array(X)
+        #     Y = numpy.array(Y)
+        #     D_index = numpy.array(D_index)
+        #
+        #     Mr = len(forecasts)
+        #     Mc = len(forecasts[0]) * len(restricted_cities)
+        #     Qr = len(forecasts)
+        #     Qc = 2
+        #
+        #     m = GPy.models.GPMultioutRegressionMD(X, Y, D_index, Xr_dim=Qr, kernel_row=GPy.kern.RBF(Qr, ARD=False), num_inducing=(Mc, Mr), init='GP')
+        #     m.optimize_auto(max_iters=1)
+        #     m.randomize()
+        #     assert m.checkgrad()
+        #
+        #
 
-    weather_cache = WeatherCache()
-    weather_cache.load()
 
-    past_errors_model = PastErrorsModel(weather_cache, weather_cache.get_forecast_frame(datetime.datetime(2019, 7, 18), weather_cache.forecast_length,
-                                                                                        fill_missing=True))
-    past_errors_model.optimize()
-    samples = past_errors_model.samples(5)
+    # def my_test_error_regression_md():
+    #     weather_cache = WeatherCache()
+    #     weather_cache.load()
+    #
+    #     import pickle
+    #     if os.path.exists('error_frames.pickle'):
+    #         with open('error_frames.pickle', 'rb') as input_stream:
+    #             error_frames = pickle.load(input_stream)
+    #     else:
+    #         error_frames = weather_cache.get_error_frames()
+    #         with open('error_frames.pickle', 'wb') as output_stream:
+    #             pickle.dump(error_frames, output_stream)
+    #
+    #     assert error_frames
+    #     # error_frames = error_frames[:5]
+    #
+    #     data = []
+    #     for frame_index, error_frame in enumerate(error_frames):
+    #         error_frame_start = error_frame.index.min()
+    #         for city_index, city in enumerate(error_frame.columns):
+    #             city_series = error_frame[city]
+    #             for time_index, error in city_series.items():
+    #                 data.append(
+    #                     [frame_index, city, city_index, time_index, int((time_index - error_frame_start).total_seconds() // 3600), error])
+    #     data_frame = pandas.DataFrame(data=data, columns=['SampleIndex', 'City', 'CityIndex', 'DateTime', 'Delay', 'CloudCover'])
+    #     del data
+    #
+    #     city_indices = list(data_frame['CityIndex'].unique())
+    #     city_indices.sort()
+    #
+    #     delays = list(data_frame['Delay'].unique())
+    #     delays.sort()
+    #
+    #     X = []
+    #     Y = []
+    #
+    #     for city_index in city_indices:
+    #         for delay in delays:
+    #             city_delay_frame = data_frame[(data_frame['CityIndex'] == city_index) & (data_frame['Delay'] == delay)]
+    #             cloud_cover_frame = city_delay_frame[['SampleIndex', 'CloudCover']]
+    #             cloud_cover_frame.set_index('SampleIndex', inplace=True)
+    #             cloud_cover_frame.sort_index(inplace=True)
+    #             y = cloud_cover_frame.values.flatten().tolist()
+    #             X.append([city_index, delay])
+    #             Y.append(y)
+    #     X = numpy.array(X)
+    #     Y = numpy.array(Y)
+    #
+    #     Mr = Y.shape[1]
+    #     Mc = 10  # int(X.shape[0] * 0.05)
+    #     Qr = 10  # int(X.shape[0] * 0.05)
+    #
+    #     model = GPy.models.GPMultioutRegression(X, Y, Xr_dim=Qr, kernel_row=GPy.kern.RBF(Qr, ARD=False), num_inducing=(Mc, Mr), init='GP')
+    #     model.optimize_auto(max_iters=1000)
+    #
+    #     model.plot_f()
+    #     matplotlib.pyplot.show(block=True)
+
+    # mean, variance = model.predict(X)
+    # quantiles = model.predict_quantiles(X)
+
+    # m_mr.randomize()
+    # assert m_mr.checkgrad()
+
+    # sample from posterior - print examples
+    # samples = model.posterior_samples_f(X, size=10)
+
+    #
+    #
+    # test_multiout_regression()
+
+    # my_test_error_regression_md()
+
+    # test_multiout_regression_md()
+    # test_multiout_regression_md()
+
+    # test_multiout_regression()
+
+    # my_test_error_regression_md()
+
+    def modelling_errors_independenty():
+        import GPy.likelihoods
+        import GPy.likelihoods.link_functions
+
+        weather_cache = WeatherCache()
+        weather_cache.load()
+
+        import pickle
+
+        if os.path.exists('error_frames.pickle'):
+            with open('error_frames.pickle', 'rb') as input_stream:
+                error_frames = pickle.load(input_stream)
+        else:
+            error_frames = weather_cache.get_error_frames()
+            with open('error_frames.pickle', 'wb') as output_stream:
+                pickle.dump(error_frames, output_stream)
+
+        X = []
+        Y = []
+
+        # fig, ax = matplotlib.pyplot.subplots(1, 1)
+        # for error_frame in error_frames:
+        #     city_frame = error_frame[quake.city.LONDON].to_frame()
+        #     city_frame['Delay'] = city_frame.index - city_frame.index.min()
+        #     city_frame['Delay'] = city_frame['Delay'].apply(lambda value: int(value.total_seconds() / 3600))
+        #     ax.scatter(city_frame['Delay'], city_frame[quake.city.LONDON])
+        # matplotlib.pyplot.show(block=True)
+
+        partial_frames = []
+        for error_frame in error_frames:
+            working_frame = error_frame.copy()
+            min_date_time = working_frame.index.min()
+            working_frame['DateTime'] = working_frame.index
+            working_frame['Delay'] = working_frame['DateTime'].apply(lambda value: int((value - min_date_time).total_seconds() / 3600))
+            partial_frames.append(working_frame)
+
+        error_frame = pandas.concat(partial_frames, ignore_index=True)
+        error_frame.sort_values(by=['Delay', 'DateTime'], inplace=True)
+
+        Y = []
+        X = []
+
+        delays = list(error_frame['Delay'].unique())
+        delays.sort()
+
+        Y_mean = []
+        Y_std = []
+
+        for delay in delays:
+            series = error_frame[error_frame['Delay'] == delay][quake.city.LONDON]
+            mean = series.mean()
+            std = series.std()
+            for value in series:
+                # if std != 0.0:
+                #     Y.append((value - mean) / std)
+                # else:
+                #     Y.append((value - mean))
+                Y.append(value)
+                X.append(delay)
+            Y_mean.append([mean])
+            Y_std.append([std if std > 0.0 else 1.0])
+
+        Y_mean = numpy.array(Y_mean)
+        Y_std = numpy.array(Y_std)
+
+        Y = numpy.array(Y).reshape(-1, 1)
+        X = numpy.array(X).reshape(-1, 1)
+        kern = GPy.kern.Matern32(1) + GPy.kern.White(1, variance=81) + GPy.kern.Bias(1)  # + GPy.kern.Linear(1, 1, active_dims=[0])
+
+        model = GPy.models.GPRegression(X, Y, kern, normalizer=True)
+        model.optimize(messages=True)
+
+        num_samples = 30
+        X_sample = numpy.array(delays).reshape(-1, 1)
+        samples = model.posterior_samples_f(X_sample, size=num_samples, full_cov=True)
+
+        model.plot(samples=1)
+        matplotlib.pyplot.show(block=True)
+
+        fig, ax = matplotlib.pyplot.subplots(1, 1)
+        for error_frame in error_frames:
+            city_frame = error_frame[quake.city.LONDON].to_frame()
+            city_frame['Delay'] = city_frame.index - city_frame.index.min()
+            city_frame['Delay'] = city_frame['Delay'].apply(lambda value: int(value.total_seconds() / 3600))
+            ax.plot(city_frame['Delay'], city_frame[quake.city.LONDON], alpha=0.5)
+
+        for sample_index in range(num_samples):
+            inverse_correction = samples[:, :, sample_index]  # numpy.multiply(samples[:, :, sample_index], Y_std) + Y_mean
+            ax.plot(X_sample.flatten(), inverse_correction.flatten(), c='black')
+
+        matplotlib.pyplot.show(block=True)
+        print('here')
+
+
+    modelling_errors_independenty()
