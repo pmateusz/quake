@@ -53,10 +53,13 @@ PLOT_COMMAND = 'plot-cloud-cover'
 COVARIANCE_COMMAND = 'compute-covariance'
 PLOT_FORECAST_COMMAND = 'plot-forecast'
 PLOT_COREGIONALIZATION_COMMAND = 'plot-coregionalization'
+PLOT_GENERATED_SCENARIOS_COMMAND = 'plot-generated-scenarios'
 VAR_COMMAND = 'compute-var'
 EXTEND_COMMAND = 'extend'
 GENERATE_COMMAND = 'generate'
 TRAIN_GP_COMMAND = 'train-gp'
+
+BBOX_STYLE = {'boxstyle': 'square,pad=0.0', 'lw': 0, 'fc': 'w', 'alpha': 0.8}
 
 
 def load_data_frame(file_path):
@@ -87,7 +90,7 @@ def load_data_frame(file_path):
 class WeatherCache:
     HDF_FILE_TABLE = 'a'
     HDF_FILE_MODE = 'w'
-    HDF_FORMAT = 'table'
+    HDF_FORMAT = 'fixed'
     FORECAST_CACHE_FILE = 'forecast.hdf'
     OBSERVATION_CACHE_FILE = 'observation.hdf'
     ZERO_TIME_DELTA = datetime.timedelta()
@@ -132,6 +135,8 @@ class WeatherCache:
         forecast_frame = pandas.concat(data_frames)
         forecast_frame.drop_duplicates(inplace=True)
         forecast_frame = forecast_frame.infer_objects()
+        forecast_frame.set_index(['DateTime', 'Delay', 'City'], inplace=True, drop=True)
+        forecast_frame.sort_index(0, inplace=True)
 
         observation_frame = load_observation_frame('/home/pmateusz/dev/quake/data/weather/ground_station_data_set_filled.csv')
         observation_frame = observation_frame.infer_objects()
@@ -140,24 +145,30 @@ class WeatherCache:
         self.__observation_frame = observation_frame
 
     def load(self):
-        forecast_frame = pandas.read_hdf(self.FORECAST_CACHE_FILE, self.HDF_FILE_TABLE)
-        forecast_frame['City'] = forecast_frame['City'].apply(lambda name: quake.city.from_name(name))
-        self.__forecast_frame = forecast_frame
-        self.__observation_frame = pandas.read_hdf(self.OBSERVATION_CACHE_FILE, self.HDF_FILE_TABLE)
+        self.__forecast_frame = pandas.read_hdf(self.FORECAST_CACHE_FILE, self.HDF_FILE_TABLE)
+        # temporarily disabled for performance
+        # self.__observation_frame = pandas.read_hdf(self.OBSERVATION_CACHE_FILE, self.HDF_FILE_TABLE)
 
     def save(self):
-        forecast_frame = self.__forecast_frame.copy()
-        forecast_frame['City'] = forecast_frame['City'].apply(lambda city: city.name)
-        forecast_frame.to_hdf(self.FORECAST_CACHE_FILE, self.HDF_FILE_TABLE, mode=self.HDF_FILE_MODE, format=self.HDF_FORMAT)
+        self.__forecast_frame.to_hdf(self.FORECAST_CACHE_FILE, self.HDF_FILE_TABLE, mode=self.HDF_FILE_MODE, format=self.HDF_FORMAT)
 
         observation_frame = self.__observation_frame.copy()
         observation_frame['city_name'] = observation_frame['city_name'].astype(str)
         observation_frame.to_hdf(self.OBSERVATION_CACHE_FILE, self.HDF_FILE_TABLE, mode=self.HDF_FILE_MODE, format=self.HDF_FORMAT)
 
     def get_forecast_frame(self, start_time, duration):
-        return self.__get_forecast_frame(start_time, duration, fill_missing=True)[0]
+        end_time = start_time + duration
+        first_filter_frame = self.__forecast_frame[start_time:end_time]
+        second_filter_frame = first_filter_frame[first_filter_frame.index.get_level_values('DateTime')
+                                                 - first_filter_frame.index.get_level_values('Delay') == start_time]
+        return self.__pivot_transform(second_filter_frame)
 
-    def __get_forecast_frame(self, start_time, duration, fill_missing=True):
+    def get_observation_frame(self, start_time, duration):
+        end_time = start_time + duration
+        data_frame = self.__forecast_frame.loc[pandas.IndexSlice[start_time:end_time, self.ZERO_TIME_DELTA], :]
+        return self.__pivot_transform(data_frame)
+
+    def __get_forecast_frame_or_resolve(self, start_time, duration):
         end_time = start_time + duration
 
         filter_frame \
@@ -173,57 +184,98 @@ class WeatherCache:
         forecast_date_time = filter_frame[filter_frame['ForecastDateTimeDiff'] == min_forecast_date_time_diff]['ForecastDateTime'].iloc[0]
 
         data_frame = filter_frame[filter_frame['ForecastDateTime'] == forecast_date_time].copy()
-        self.__verify_period(data_frame, start_time, end_time)
+        return self.__pivot_transform(data_frame)
 
-        pivoted_frame = self.__pivot_transform(data_frame)
-        if fill_missing:
-            pivoted_frame, _missing_values = self.__fill_missing_values(pivoted_frame)
-        return pivoted_frame, []
+    # def get_error_frames(self):
+    #     forecast_time_points = {datetime.datetime.combine(pandas.to_datetime(time_point).date(), datetime.time())
+    #                             for time_point in self.forecast_frame['DateTime']}
+    #     filtered_time_points = list(forecast_time_points)
+    #     filtered_time_points.sort()
+    #
+    #     num_values = int(self.forecast_length.total_seconds() / self.__forecast_frequency.total_seconds()) + 1
+    #     max_filled_values = int(0.05 * num_values)
+    #
+    #     error_frames = []
+    #     for time_point in filtered_time_points:
+    #         forecast_frame, forecast_filled = self.get_forecast_frame(time_point, self.forecast_length, fill_missing=True)
+    #
+    #         if len(forecast_filled) > max_filled_values or len(forecast_frame) != num_values:
+    #             continue
+    #
+    #         observation_frame, observation_filled = self.get_observation_frame(time_point, self.forecast_length, fill_missing=True)
+    #
+    #         if len(observation_filled) > max_filled_values or len(observation_frame) != num_values:
+    #             continue
+    #
+    #         error_frame = forecast_frame - observation_frame
+    #
+    #         # error frame has no missing values
+    #         assert error_frame.isna().sum().max() == 0
+    #
+    #         error_frames.append(error_frame)
+    #     return error_frames
 
-    def get_observation_frame(self, start_time, duration):
-        return self.__get_observation_frame(start_time, duration, fill_missing=True)[0]
+    def get_forecast_time_points(self):
+        filter_frame = self.__forecast_frame.loc[pandas.IndexSlice[:, self.ZERO_TIME_DELTA], :]
+        time_points = list(filter_frame.index.get_level_values('DateTime').unique().to_pydatetime())
+        return time_points
+        # forecast_time_points = {datetime.datetime.combine(pandas.to_datetime(time_point).date(), datetime.time()) for time_point in time_points}
+        # filtered_time_points = list(forecast_time_points)
+        # filtered_time_points.sort()
+        # return filtered_time_points
 
-    def __get_observation_frame(self, start_time, duration, fill_missing=True):
-        end_time = start_time + duration
+    def get_error_frames(self, time_points):
+        result = []
 
-        data_frame = self.__forecast_frame[(self.__forecast_frame['Delay'] == self.ZERO_TIME_DELTA)
-                                           & (self.__forecast_frame['DateTime'] >= start_time)
-                                           & (self.__forecast_frame['DateTime'] <= end_time)].copy()
-        self.__verify_period(data_frame, start_time, end_time)
-
-        pivoted_frame = self.__pivot_transform(data_frame)
-        if fill_missing:
-            pivoted_frame, _missing_values = self.__fill_missing_values(pivoted_frame)
-        return pivoted_frame, []
-
-    def get_error_frames(self):
-        forecast_time_points = {datetime.datetime.combine(pandas.to_datetime(time_point).date(), datetime.time())
-                                for time_point in self.forecast_frame['DateTime']}
-        filtered_time_points = list(forecast_time_points)
-        filtered_time_points.sort()
-
-        num_values = int(self.forecast_length.total_seconds() / self.__forecast_frequency.total_seconds()) + 1
-        max_filled_values = int(0.05 * num_values)
-
-        error_frames = []
-        for time_point in filtered_time_points:
-            forecast_frame, forecast_filled = self.get_forecast_frame(time_point, self.forecast_length, fill_missing=True)
-
-            if len(forecast_filled) > max_filled_values or len(forecast_frame) != num_values:
-                continue
-
-            observation_frame, observation_filled = self.get_observation_frame(time_point, self.forecast_length, fill_missing=True)
-
-            if len(observation_filled) > max_filled_values or len(observation_frame) != num_values:
-                continue
-
+        for time_point in tqdm.tqdm(time_points, desc='Creating Error Frames', leave=False):
+            forecast_frame = self.get_forecast_frame(time_point, self.forecast_length)
+            observation_frame = self.get_observation_frame(time_point, self.forecast_length)
             error_frame = forecast_frame - observation_frame
+            error_frame['Delay'] = error_frame.index - error_frame.index.min()
+            error_frame.dropna(inplace=True)
+            if error_frame.empty:
+                continue
+            result.append(error_frame)
+        return result
 
-            # error frame has no missing values
-            assert error_frame.isna().sum().max() == 0
+    def get_forecast_error_variance(self, error_frames=None):
+        if not error_frames:
+            error_frames = self.get_error_frames(self.get_forecast_time_points())
+        master_error_frame = pandas.concat(error_frames)
+        master_error_frame['DateTime'] = master_error_frame.index
+        master_error_frame.reset_index(drop=True, inplace=True)
 
-            error_frames.append(error_frame)
-        return error_frames
+        city_columns = [column for column in master_error_frame.columns if isinstance(column, quake.city.City)]
+        melted_master_error_frame = pandas.melt(master_error_frame, value_vars=city_columns,
+                                                var_name='City', value_name='Error', id_vars=['DateTime', 'Delay'])
+        var_series = melted_master_error_frame.groupby(['City', 'Delay'])['Error'].var()
+        return var_series
+
+    def get_forecast_error_covariance(self, city, error_frames):
+        rows = []
+        time_steps = [datetime.timedelta(hours=value) for value in range(0,
+                                                                         int(self.__forecast_length.total_seconds() / 3600) + 1,
+                                                                         int(self.__forecast_frequency.total_seconds() / 3600))]
+        for error_frame in error_frames:
+            min_time = error_frame.index.min()
+            max_time = error_frame.index.max()
+
+            series = error_frame[city]
+            series_index_set = set(series.index.to_pydatetime().tolist())
+            current_time = min_time
+            while current_time < max_time:
+                row = []
+                for time_step in time_steps:
+                    time_index = current_time + time_step
+                    if time_index in series_index_set:
+                        row.append(series[time_index])
+                    else:
+                        row.append(numpy.NaN)
+                rows.append(row)
+                current_time = current_time + self.__forecast_frequency
+        master_frame = pandas.DataFrame(data=rows, columns=time_steps)
+        covariance = master_frame.cov()
+        return covariance.values
 
     @staticmethod
     def __fill_missing_values(frame):
@@ -404,6 +456,8 @@ class CoregionalizationModel:
         self.__observation_frame = observation_frame
         self.__forecast_frame = forecast_frame
         self.__model = None
+        self.__X = None
+        self.__Y = None
 
     def optimize(self):
         # prepare input
@@ -429,14 +483,13 @@ class CoregionalizationModel:
 
         # plot output data
         matrix_rank = len(cities)
-        kernel_1 = GPy.kern.RBF(1, lengthscale=6, ARD=True) + GPy.kern.Linear(1, 1, active_dims=[0], ARD=True) + GPy.kern.White(1,
-                                                                                                                                variance=81) + GPy.kern.Bias(
-            1)
+        kernel_1 = GPy.kern.RBF(1, lengthscale=6, ARD=True) + GPy.kern.Linear(1, 1, active_dims=[0], ARD=True) \
+                   + GPy.kern.White(1, variance=81) + GPy.kern.Bias(1)
         kernel_2 = GPy.kern.Coregionalize(1, output_dim=len(cities), rank=matrix_rank)
 
         X_Gpy = self.__X[:, [1, 2]]
         self.__model = GPy.models.GPRegression(X_Gpy, self.__Y, kernel_1 ** kernel_2)
-        self.__model.optimize(messages=True)
+        self.__model.optimize(messages=True, max_iters=32)
 
         mean, variance = self.__model.predict(X_Gpy, full_cov=True)
         quantiles = self.__model.predict_quantiles(X_Gpy)
@@ -466,6 +519,7 @@ class CoregionalizationModel:
 
 
 class PastErrorsModel:
+    DATE_TIME_FREQ = datetime.timedelta(hours=3)
 
     def __init__(self, weather_cache, forecast_frame):
         self.__weather_cache = weather_cache
@@ -473,15 +527,55 @@ class PastErrorsModel:
         self.__error_frames = []
 
     def optimize(self):
-        filtered_time_points = {datetime.datetime.combine(pandas.to_datetime(time_point).date(), datetime.time())
-                                for time_point in self.__weather_cache.forecast_frame['DateTime']}
-        filtered_time_points = list(filtered_time_points)
-        filtered_time_points.sort()
-        forecast_length = self.__weather_cache.forecast_length
-        max_forecast_duration = 40
-        min_values_required = int(0.95 * max_forecast_duration)
+        error_frames = self.__weather_cache.get_error_frames(self.__weather_cache.get_forecast_time_points())
+        num_rows_min = self.__forecast_frame.shape[0]
+        num_missing_rows_max = int(0.2 * num_rows_min)
+        num_cities = len([column for column in self.__forecast_frame.columns if isinstance(column, quake.city.City)])
 
-        self.__error_frames = self.__weather_cache.get_error_frames()
+        # get error frames that do not have many missing entries and cover forecast's period fully
+        valid_error_frames = []
+
+        for error_frame in error_frames:
+            assert not error_frame.empty
+
+            first_date_time = error_frame.index[0] - error_frame.iloc[0]['Delay']
+            last_date_time = error_frame.index.max()
+
+            num_rows_after_filling = int((last_date_time - first_date_time).total_seconds() / self.DATE_TIME_FREQ.total_seconds()) + 1
+            if num_rows_after_filling < num_rows_min:
+                continue
+
+            num_missing_rows = num_rows_min - error_frame.shape[0]
+            if num_missing_rows > num_missing_rows_max:
+                continue
+
+            missing_entries = []
+            current_date_time = first_date_time
+            while current_date_time <= last_date_time:
+                if current_date_time not in error_frame.index:
+                    missing_entries.append(current_date_time)
+                current_date_time += self.DATE_TIME_FREQ
+
+            if not missing_entries:
+                valid_error_frames.append(error_frame)
+                continue
+
+            # create frame with missing entries
+            missing_rows = []
+            for entry in missing_entries:
+                row = [numpy.NaN] * num_cities
+                row.append(entry - first_date_time)
+                missing_rows.append(row)
+
+            missing_values_frame = pandas.DataFrame(index=missing_entries, data=missing_rows, columns=error_frame.columns)
+
+            # join frames
+            filled_error_frame = error_frame.append(missing_values_frame)
+            filled_error_frame.sort_index(inplace=True)
+            filled_error_frame.fillna(value=0.0, inplace=True)
+            valid_error_frames.append(filled_error_frame)
+
+        self.__error_frames = valid_error_frames
 
     def samples(self, size):
         draw_with_replacement = size > len(self.__error_frames)
@@ -490,7 +584,9 @@ class PastErrorsModel:
         # column names for a sample frame are: DateTime, City and y
         sample_frames = []
         for sample_index in samples_selected:
-            values = self.__forecast_frame.values + self.__error_frames[sample_index].values[:len(self.__forecast_frame)]
+            error_frame = self.__error_frames[sample_index]
+            values = self.__forecast_frame.values + error_frame.values[:len(self.__forecast_frame),
+                                                    :len(error_frame.columns) - 1]  # trim the last delay column
             rows = []
             for city_index, city in enumerate(self.__forecast_frame.columns):
                 for row_index, date_time in enumerate(self.__forecast_frame.index):
@@ -498,6 +594,64 @@ class PastErrorsModel:
             sample_frame = pandas.DataFrame(columns=['DateTime', 'City', 'y'], data=rows)
             sample_frames.append(sample_frame)
         return sample_frames
+
+
+class HeteroscedasticIndependentNoiseModel:
+
+    def __init__(self, weather_cache, forecast_frame):
+        self.__weather_cache = weather_cache
+        self.__forecast_frame = forecast_frame
+        self.__step_city_variance = None
+
+    def optimize(self):
+        error_frames = self.__weather_cache.get_error_frames(self.__weather_cache.get_forecast_time_points())
+        self.__step_city_variance = self.__weather_cache.get_forecast_error_variance(error_frames)
+
+    def samples(self, size):
+        sample_frames = [self.__generate_sample_frame() for _ in range(size)]
+        return sample_frames
+
+    def __generate_sample_frame(self):
+        num_rows = self.__forecast_frame.shape[0]
+
+        rows = []
+        for city in self.__forecast_frame.columns:
+            V = self.__step_city_variance[city].values
+            prediction = self.__forecast_frame[city].values + numpy.random.normal(size=num_rows) * numpy.sqrt(V[:num_rows])
+            for time_delta, value in zip(self.__forecast_frame.index, prediction):
+                rows.append([city, time_delta, value])
+        sample_frame = pandas.DataFrame(data=rows, columns=['City', 'DateTime', 'y'])
+        return sample_frame
+
+
+class HeteroscedasticAutoCorrelatedNoiseModel:
+
+    def __init__(self, weather_cache, forecast_frame):
+        self.__weather_cache = weather_cache
+        self.__forecast_frame = forecast_frame
+        self.__city_covariance = None
+
+    def optimize(self):
+        error_frames = self.__weather_cache.get_error_frames(self.__weather_cache.get_forecast_time_points())
+
+        self.__city_covariance = dict()
+        for city in tqdm.tqdm(self.__forecast_frame.columns, leave=False, desc='Building covariance matrices'):
+            self.__city_covariance[city] = self.__weather_cache.get_forecast_error_covariance(city, error_frames)
+
+    def samples(self, size):
+        sample_frames = [self.__generate_sample_frame() for _ in range(size)]
+        return sample_frames
+
+    def __generate_sample_frame(self):
+
+        rows = []
+        for city in self.__forecast_frame.columns:
+            city_covariance = self.__city_covariance[city]
+            prediction = self.__forecast_frame[city].values + numpy.random.multivariate_normal(numpy.zeros(city_covariance.shape[0]), city_covariance)
+            for time_delta, value in zip(self.__forecast_frame.index, prediction):
+                rows.append([city, time_delta, value])
+        sample_frame = pandas.DataFrame(data=rows, columns=['City', 'DateTime', 'y'])
+        return sample_frame
 
 
 def parse_args():
@@ -536,6 +690,11 @@ def parse_args():
     plot_coregionalization_parser.add_argument('--observation-start-time', action=ParseDateAction)
     plot_coregionalization_parser.add_argument('--forecast-start-time', action=ParseDateAction)
     plot_coregionalization_parser.add_argument('--output-prefix')
+
+    plot_generated_scenarios_parser = sub_parsers.add_parser(PLOT_GENERATED_SCENARIOS_COMMAND)
+    plot_generated_scenarios_parser.add_argument('--from', action=ParseDateAction)
+    plot_generated_scenarios_parser.add_argument('--num-scenarios', default=0, type=int)
+    plot_generated_scenarios_parser.add_argument('--output-prefix')
 
     return parser.parse_args()
 
@@ -865,6 +1024,74 @@ def generate_command(args):
             raise Exception('Failed to generate problem {0}'.format(problem))
 
         os.remove(temp_problem)
+
+
+# TODO: plug in
+def plot_generated_scenarios(args):
+    forecast_time = getattr(args, 'from')
+    num_samples = getattr(args, 'num_scenarios')
+    output_prefix = getattr(args, 'output_prefix')
+
+    weather_cache = WeatherCache()
+    weather_cache.load()
+    forecast_frame = weather_cache.get_forecast_frame(forecast_time, weather_cache.forecast_length)
+
+    past_error_model = PastErrorsModel(weather_cache, forecast_frame)
+    past_error_model.optimize()
+
+    independent_noise_error_model = HeteroscedasticIndependentNoiseModel(weather_cache, forecast_frame)
+    independent_noise_error_model.optimize()
+
+    autocorrelated_noise_error_model = HeteroscedasticAutoCorrelatedNoiseModel(weather_cache, forecast_frame)
+    autocorrelated_noise_error_model.optimize()
+
+    coregionalized_observation_length = datetime.timedelta(days=14)
+    coregionalized_observation_start = forecast_time - coregionalized_observation_length
+    coregionalized_observe = weather_cache.get_observation_frame(coregionalized_observation_start, coregionalized_observation_length)
+    coregionalized_model = CoregionalizationModel(coregionalized_observe, forecast_frame)
+    coregionalized_model.optimize()
+
+    def domain_filter(values):
+        return [max(0, min(100, value)) for value in values]
+
+    models = [past_error_model, independent_noise_error_model, autocorrelated_noise_error_model, coregionalized_model]
+    model_labels = ['Past Errors Replication', 'Independent Noise Generation', 'Autocorrelated Noise Genration', 'Coregionalization Model']
+
+    observation_frame = weather_cache.get_observation_frame(forecast_time, weather_cache.forecast_length)
+
+    for city in forecast_frame.columns:
+        fig, ax = matplotlib.pyplot.subplots(len(models), 1, sharex=True)
+        real_handle = None
+        forecast_handle = None
+        model_handles = []
+        for model_index, model in enumerate(models):
+            local_ax = ax[model_index]
+
+            model_handle = None
+            for sample_index, sample_frame in enumerate(past_error_model.samples(num_samples)):
+                city_series = sample_frame[sample_frame['City'] == city]
+                model_handle = local_ax.plot(city_series['DateTime'], domain_filter(city_series['y'].values), c='blue', alpha=0.3)[0]
+            model_handles.append(model_handle)
+            real_handle = local_ax.plot(observation_frame[city].index.values, observation_frame[city].values, c='red')[0]
+            forecast_handle = local_ax.plot(forecast_frame[city].index.values, forecast_frame[city].values, c='black')[0]
+
+            local_ax.annotate(model_labels[model_index],
+                        xy=(0.0, 0.0),
+                        xycoords='axes fraction',
+                        horizontalalignment='left',
+                        verticalalignment='bottom',
+                        bbox=BBOX_STYLE.copy())
+
+        ax[int(len(models) / 2)].set_ylabel('Cloud Cover [%]')
+        ax[-1].legend((model_handles[0], forecast_handle, real_handle), ('Generated Scenario', 'Forecast Scenario', 'Real Scenario'),
+                      ncol=3, loc='upper center', bbox_to_anchor=(0.5, -0.4))
+        ax[-1].set_xlabel('Time')
+
+        fig.tight_layout()
+        fig.subplots_adjust(bottom=0.15, hspace=0.05)
+
+        matplotlib.pyplot.savefig('{0}_{1}_{2}.png'.format(output_prefix, city, forecast_time.date()))
+        matplotlib.pyplot.close(fig)
 
 
 def example():
@@ -1300,6 +1527,8 @@ if __name__ == '__main__':
         plot_forecast_command(args)
     elif command == PLOT_COREGIONALIZATION_COMMAND:
         plot_coregionalization(args)
+    elif command == PLOT_GENERATED_SCENARIOS_COMMAND:
+        plot_generated_scenarios(args)
 
 
     def plot_errors(station, begin_start_time, end_start_time):
@@ -1711,6 +1940,3 @@ if __name__ == '__main__':
 
         matplotlib.pyplot.show(block=True)
         print('here')
-
-
-    modelling_errors_independenty()
