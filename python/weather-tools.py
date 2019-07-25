@@ -86,6 +86,7 @@ class WeatherCache:
     HDF_FILE_TABLE = 'a'
     HDF_FILE_MODE = 'w'
     HDF_FORMAT = 'fixed'
+    PERCENTAGE_MISSING_VALUES_THRESHOLD = 0.10
     FORECAST_CACHE_FILE = 'forecast.hdf'
     OBSERVATION_CACHE_FILE = 'observation.hdf'
     ZERO_TIME_DELTA = datetime.timedelta()
@@ -141,6 +142,8 @@ class WeatherCache:
 
     def load(self):
         self.__forecast_frame = pandas.read_hdf(self.FORECAST_CACHE_FILE, self.HDF_FILE_TABLE)
+
+        warnings.warn('Disabled loading of historical observation data frame for performance reasons')
         # temporarily disabled for performance
         # self.__observation_frame = pandas.read_hdf(self.OBSERVATION_CACHE_FILE, self.HDF_FILE_TABLE)
 
@@ -163,23 +166,21 @@ class WeatherCache:
         data_frame = self.__forecast_frame.loc[pandas.IndexSlice[start_time:end_time, self.ZERO_TIME_DELTA], :]
         return self.__pivot_transform(data_frame)
 
-    def __get_forecast_frame_or_resolve(self, start_time, duration):
+    def get_closest_forecast_frame(self, start_time, duration):
         end_time = start_time + duration
 
-        filter_frame \
-            = self.__forecast_frame[(self.__forecast_frame['DateTime'] >= start_time) & (self.__forecast_frame['DateTime'] <= end_time)].copy()
-        filter_frame['ForecastDateTime'] = filter_frame['DateTime'] - filter_frame['Delay']
-        filter_frame['ForecastDateTimeDiff'] = filter_frame['ForecastDateTime'].apply(lambda value: abs((value - start_time).total_seconds()))
+        filter_frame = self.__forecast_frame[start_time:end_time].copy()
 
         if filter_frame.empty:
             warnings.warn('No forecast records found in requested period [{0}, {1}]'.format(start_time, end_time))
-            return pandas.DataFrame(columns=self.__forecast_frame.columns), []
+            return pandas.DataFrame(columns=self.__forecast_frame.columns)
 
-        min_forecast_date_time_diff = filter_frame['ForecastDateTimeDiff'].min()
-        forecast_date_time = filter_frame[filter_frame['ForecastDateTimeDiff'] == min_forecast_date_time_diff]['ForecastDateTime'].iloc[0]
+        filter_frame['ForecastDateTime'] = filter_frame.index.get_level_values('DateTime') - filter_frame.index.get_level_values('Delay')
+        filter_frame['ForecastOffsetDiff'] = filter_frame['ForecastDateTime'].apply(lambda value: abs((value - start_time).total_seconds()))
 
-        data_frame = filter_frame[filter_frame['ForecastDateTime'] == forecast_date_time].copy()
-        return self.__pivot_transform(data_frame)
+        min_forecast_date_time_diff = filter_frame['ForecastOffsetDiff'].min()
+        forecast_date_time = filter_frame[filter_frame['ForecastOffsetDiff'] == min_forecast_date_time_diff]
+        return self.__pivot_transform(forecast_date_time)
 
     def get_forecast_time_points(self):
         filter_frame = self.__forecast_frame.loc[pandas.IndexSlice[:, self.ZERO_TIME_DELTA], :]
@@ -244,12 +245,12 @@ class WeatherCache:
         return covariance.values
 
     @staticmethod
-    def __fill_missing_values(frame):
+    def fill_missing_values(frame):
         freq = pandas.infer_freq(frame.index)
 
         counter = collections.Counter()
         if freq:
-            return frame, []
+            return frame
         index_it = iter(frame.index)
         prev_value = next(index_it, None)
         if prev_value:
@@ -269,15 +270,17 @@ class WeatherCache:
                 missing_values.append(current_index)
             current_index += inferred_feq
 
-        if missing_values:
-            warnings.warn('Filling missing values: {0}'.format(missing_values))
+        percentage_missing_values = float(len(missing_values)) / frame.shape[0] + len(missing_values)
+        if percentage_missing_values > WeatherCache.PERCENTAGE_MISSING_VALUES_THRESHOLD:
+            warnings.warn('Filling missing values constitute {0}% of all values in the frame which exceeds {1}% threshold'
+                          .format(percentage_missing_values, WeatherCache.PERCENTAGE_MISSING_VALUES_THRESHOLD))
 
         data = numpy.full((len(missing_values), len(frame.columns)), numpy.NaN)
         missing_values_frame = pandas.DataFrame(index=missing_values, data=data, columns=frame.columns)
         filled_frame = frame.append(missing_values_frame)
         filled_frame.sort_index(inplace=True)
         filled_frame.fillna(method='ffill', inplace=True)
-        return filled_frame, missing_values
+        return filled_frame
 
     @staticmethod
     def __verify_period(frame, start_time, end_time):
@@ -600,16 +603,20 @@ class HeteroscedasticAutoCorrelatedNoiseModel:
     def optimize(self):
         error_frames = self.__weather_cache.get_error_frames(self.__weather_cache.get_forecast_time_points())
 
+        num_forecast_rows = len(self.__forecast_frame)
         self.__city_covariance = dict()
         for city in tqdm.tqdm(self.__forecast_frame.columns, leave=False, desc='Building covariance matrices'):
-            self.__city_covariance[city] = self.__weather_cache.get_forecast_error_covariance(city, error_frames)
+            full_covariance_matrix = self.__weather_cache.get_forecast_error_covariance(city, error_frames)
+
+            # limit covariance matrix to weather forecast
+            covariance_matrix_to_use = full_covariance_matrix[0:num_forecast_rows, 0:num_forecast_rows]
+            self.__city_covariance[city] = covariance_matrix_to_use
 
     def samples(self, size):
         sample_frames = [self.__generate_sample_frame() for _ in range(size)]
         return sample_frames
 
     def __generate_sample_frame(self):
-
         rows = []
         for city in self.__forecast_frame.columns:
             city_covariance = self.__city_covariance[city]
@@ -649,8 +656,6 @@ def parse_args():
     plot_forecast_parser.add_argument('--output-prefix')
 
     compute_var = sub_parsers.add_parser(VAR_COMMAND)
-
-    train_gaussian_process = sub_parsers.add_parser(TRAIN_GP_COMMAND)
 
     plot_coregionalization_parser = sub_parsers.add_parser(PLOT_COREGIONALIZATION_COMMAND)
     plot_coregionalization_parser.add_argument('--observation-start-time', action=ParseDateAction)
@@ -814,22 +819,29 @@ def extend_problem_definition(args):
     weather_cache = WeatherCache()
     weather_cache.load()
 
-    forecast_frame = weather_cache.get_forecast_frame(problem.observation_period.begin, problem.observation_period.length, fill_missing=True)
-    real_frame = weather_cache.get_observation_frame(problem.observation_period.begin, problem.observation_period.length, fill_missing=True)
+    forecast_frame = weather_cache.get_closest_forecast_frame(problem.observation_period.begin, problem.observation_period.length)
+    real_frame = weather_cache.get_observation_frame(problem.observation_period.begin, problem.observation_period.length)
+
+    forecast_frame = weather_cache.fill_missing_values(forecast_frame)
+    real_frame = weather_cache.fill_missing_values(real_frame)
 
     min_time = max(forecast_frame.index.min(), real_frame.index.min())
     max_time = min(forecast_frame.index.max(), real_frame.index.max())
 
     if problem.observation_period.begin < min_time or problem.observation_period.end > max_time:
-        warnings.warn('Problem observation period is reduced from [{0}, {1}] to [{2}, {3}]'.format(problem.observation_period.begin,
-                                                                                                   problem.observation_period.end,
-                                                                                                   min_time,
-                                                                                                   max_time))
+        assert problem.observation_period.begin <= min_time
+        assert problem.observation_period.end >= max_time
+        total_reduction = (min_time - problem.observation_period.begin) + (problem.observation_period.end - max_time)
+        if total_reduction > datetime.timedelta(hours=3):
+            warnings.warn('Problem observation period is reduced from [{0}, {1}] to [{2}, {3}]'.format(problem.observation_period.begin,
+                                                                                                       problem.observation_period.end,
+                                                                                                       min_time,
+                                                                                                       max_time))
 
     def enforce_cloud_cover_limits(frame):
         frame_to_use = frame.copy()
         for column in frame.columns:
-            frame_to_use[column] = frame_to_use[column].apply(lambda value: max(0.0, min(1.0, value)))
+            frame_to_use[column] = frame_to_use[column].apply(lambda value: max(0.0, min(100.0, value)))
         return frame_to_use
 
     scenario_frames = []
@@ -839,8 +851,8 @@ def extend_problem_definition(args):
         # observation_frame = weather_cache.get_observation_frame(forecast_frame.index.min() - observation_length, observation_length)
         # model = CoregionalizationModel(observation_frame, forecast_frame)
 
-        # past errors model
-        model = PastErrorsModel(weather_cache, forecast_frame)
+        # error model
+        model = HeteroscedasticAutoCorrelatedNoiseModel(weather_cache, forecast_frame)
         model.optimize()
 
         sample_frames = model.samples(num_scenarios)
@@ -910,7 +922,16 @@ def plot_generated_scenarios(args):
 
     weather_cache = WeatherCache()
     weather_cache.load()
-    forecast_frame = weather_cache.get_forecast_frame(forecast_time, weather_cache.forecast_length)
+    forecast_frame = weather_cache.get_closest_forecast_frame(forecast_time, weather_cache.forecast_length)
+
+    coregionalized_observation_length = datetime.timedelta(days=14)
+    coregionalized_observation_start = forecast_time - coregionalized_observation_length
+    coregionalized_observe = weather_cache.get_observation_frame(coregionalized_observation_start, coregionalized_observation_length)
+
+    assert not coregionalized_observe.empty, 'No historical observations are available for coregionalization model'
+
+    coregionalized_model = CoregionalizationModel(coregionalized_observe, forecast_frame)
+    coregionalized_model.optimize()
 
     past_error_model = PastErrorsModel(weather_cache, forecast_frame)
     past_error_model.optimize()
@@ -921,11 +942,7 @@ def plot_generated_scenarios(args):
     autocorrelated_noise_error_model = HeteroscedasticAutoCorrelatedNoiseModel(weather_cache, forecast_frame)
     autocorrelated_noise_error_model.optimize()
 
-    coregionalized_observation_length = datetime.timedelta(days=14)
-    coregionalized_observation_start = forecast_time - coregionalized_observation_length
-    coregionalized_observe = weather_cache.get_observation_frame(coregionalized_observation_start, coregionalized_observation_length)
-    coregionalized_model = CoregionalizationModel(coregionalized_observe, forecast_frame)
-    coregionalized_model.optimize()
+
 
     def domain_filter(values):
         return [max(0, min(100, value)) for value in values]
@@ -1434,6 +1451,7 @@ if __name__ == '__main__':
             mean = series.mean()
             std = series.std()
             for value in series:
+                # # variance stabilising transform
                 # if std != 0.0:
                 #     Y.append((value - mean) / std)
                 # else:
@@ -1443,8 +1461,8 @@ if __name__ == '__main__':
             Y_mean.append([mean])
             Y_std.append([std if std > 0.0 else 1.0])
 
-        Y_mean = numpy.array(Y_mean)
-        Y_std = numpy.array(Y_std)
+        # Y_mean = numpy.array(Y_mean)
+        # Y_std = numpy.array(Y_std)
 
         Y = numpy.array(Y).reshape(-1, 1)
         X = numpy.array(X).reshape(-1, 1)
