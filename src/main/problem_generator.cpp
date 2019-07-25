@@ -537,5 +537,5 @@ quake::ExtendedProblem quake::ProblemGenerator::CreateExtendedProblem(std::vecto
         VLOG(1) << output.str();
     }
 
-    return {ExtendedProblem::MetaData(time_period, DEFAULT_SWITCH_DURATION), std::move(station_data)};
+    return {time_period, DEFAULT_SWITCH_DURATION, std::move(station_data)};
 }

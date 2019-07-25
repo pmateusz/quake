@@ -24,14 +24,16 @@
 #include "solution.h"
 
 quake::Solution::Solution()
-        : Solution({}, {}) {}
+        : Solution({}, {}, {}) {}
 
 quake::Solution::Solution(std::unordered_map<GroundStation, int64> final_buffers)
-        : Solution({}, std::move(final_buffers)) {}
+        : Solution({}, {}, std::move(final_buffers)) {}
 
-quake::Solution::Solution(std::unordered_map<GroundStation, std::vector<boost::posix_time::time_period> > observations,
+quake::Solution::Solution(Metadata metadata,
+                          std::unordered_map<GroundStation, std::vector<boost::posix_time::time_period> > observations,
                           std::unordered_map<GroundStation, int64> final_buffers)
-        : observations_{std::move(observations)},
+        : metadata_{std::move(metadata)},
+          observations_{std::move(observations)},
           final_buffers_{std::move(final_buffers)} {
     CHECK_LE(observations_.size(), final_buffers_.size());
 }
@@ -77,10 +79,13 @@ void quake::to_json(nlohmann::json &json, const Solution &solution) {
     nlohmann::json object;
     object["observations"] = solution.observations_;
     object["final_buffers"] = solution.final_buffers_;
+    object["metadata"] = solution.metadata_;
     json = std::move(object);
 }
 
 void quake::from_json(const nlohmann::json &json, Solution &solution) {
+    auto metadata = json.at("metadata").get<Metadata>();
+
     auto json_observations = json.at("observations").get<std::unordered_map<GroundStation, std::vector<nlohmann::json> >>();
 
     std::unordered_map<GroundStation, std::vector<boost::posix_time::time_period> > observations;
@@ -97,6 +102,6 @@ void quake::from_json(const nlohmann::json &json, Solution &solution) {
 
     auto final_buffers = json.at("final_buffers").get<std::unordered_map<GroundStation, int64>>();
 
-    Solution local_solution(std::move(observations), std::move(final_buffers));
+    Solution local_solution(std::move(metadata), std::move(observations), std::move(final_buffers));
     solution = std::move(local_solution);
 }

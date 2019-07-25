@@ -33,6 +33,7 @@
 #include <nlohmann/json.hpp>
 
 #include "ground_station.h"
+#include "metadata.h"
 
 namespace quake {
 
@@ -42,8 +43,13 @@ namespace quake {
 
         explicit Solution(std::unordered_map<GroundStation, int64> final_buffers);
 
-        Solution(std::unordered_map<GroundStation, std::vector<boost::posix_time::time_period> > observations,
+        Solution(Metadata metadata,
+                 std::unordered_map<GroundStation, std::vector<boost::posix_time::time_period> > observations,
                  std::unordered_map<GroundStation, int64> final_buffers);
+
+        inline Metadata &GetMetadata() { return metadata_; }
+
+        inline const Metadata &GetMetadata() const { return metadata_; }
 
         static Solution load_json(const boost::filesystem::path &path);
 
@@ -62,6 +68,7 @@ namespace quake {
 
         std::unordered_map<GroundStation, std::vector<boost::posix_time::time_period> > observations_;
         std::unordered_map<GroundStation, int64> final_buffers_;
+        Metadata metadata_;
     };
 
     void to_json(nlohmann::json &json, const Solution &solution);

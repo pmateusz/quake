@@ -571,7 +571,7 @@ quake::Solution quake::InferredModel::Create(std::unordered_map<quake::GroundSta
         }
     }
 
-    return {std::move(observations), std::move(station_final_buffer)};
+    return {{}, std::move(observations), std::move(station_final_buffer)};
 }
 
 int64 quake::InferredModel::GetStationIndex(const quake::GroundStation &station) const {

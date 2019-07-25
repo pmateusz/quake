@@ -1,5 +1,5 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="saa" type="CMakeRunConfiguration" factoryName="Application" PROGRAM_PARAMS="--problem=$PROJECT_DIR$/data/problem/error-replication/problem_2019-07-13.json --solution=saa_generated_solution.json --interval_step=00:00:15 --gap_limit=0.1" PASS_PARENT_ENVS_2="true" PROJECT_NAME="quake" TARGET_NAME="quake-saa" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="quake" RUN_TARGET_NAME="quake-saa">
+  <configuration default="false" name="saa" type="CMakeRunConfiguration" factoryName="Application" PROGRAM_PARAMS="--problem=$PROJECT_DIR$/cmake-build-debug/generated_problem_extended.json --solution=saa_generated_solution.json --interval_step=00:00:15 --num_scenarios=512 --gap_limit=0.1 --time_limit=00:05:00" PASS_PARENT_ENVS_2="true" PROJECT_NAME="quake" TARGET_NAME="quake-saa" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="quake" RUN_TARGET_NAME="quake-saa">
     <method v="2">
       <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
     </method>

@@ -37,6 +37,8 @@ namespace quake {
                           std::vector<Forecast> forecasts);
 
     protected:
+        Metadata CreateMetadata() override;
+
         const std::vector<GroundStation> &ObservableStations() const override;
 
         void Build(const boost::optional<Solution> &solution) override;

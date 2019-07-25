@@ -76,3 +76,12 @@ void quake::WorstCaseMipModel::Build(const boost::optional<Solution> &solution) 
     mip_model_.set(GRB_IntAttr_ModelSense, GRB_MAXIMIZE);
     mip_model_.setObjective(objective);
 }
+
+quake::Metadata quake::WorstCaseMipModel::CreateMetadata() {
+    auto metadata = BaseIntervalMipModel::CreateMetadata();
+
+    metadata.SetProperty(Metadata::Property::SolutionMethod, Metadata::SolutionMethod::Deterministic);
+    metadata.SetProperty(Metadata::Property::ScenariosNumber, 1);
+
+    return metadata;
+}

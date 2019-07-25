@@ -43,32 +43,92 @@
 #include "index/gaussian_forecast_generator.h"
 #include "executables/mip_arguments.h"
 
+#include "metadata.h"
+
+DEFINE_int32(num_scenarios, 0, "The number of scenarios to consider.");
+DEFINE_string(solution_prefix, "solution", "Output prefix appended to the solution file.");
+
+struct Arguments : public quake::MipArguments {
+
+    Arguments()
+            : MipArguments(),
+              NumScenarios{0} {}
+
+    void Fill() override {
+        MipArguments::Fill();
+
+        CHECK_GE(FLAGS_num_scenarios, 0);
+        NumScenarios = FLAGS_num_scenarios;
+
+        CHECK(!FLAGS_solution_prefix.empty());
+        SolutionPrefix = FLAGS_solution_prefix;
+    }
+
+    int NumScenarios;
+    std::string SolutionPrefix;
+};
+
+template<typename ObjectType>
+void Save(const ObjectType &object, const boost::filesystem::path &output_path) {
+    std::ofstream output_stream;
+
+    output_stream.open(output_path.string(), std::ofstream::out);
+    LOG_IF(FATAL, !output_stream.is_open()) << "Failed to save solution in " << output_path << " file.";
+
+    nlohmann::json json_object = object;
+    output_stream << json_object;
+
+    output_stream.close();
+    LOG_IF(FATAL, output_stream.is_open());
+}
+
 int main(int argc, char *argv[]) {
-    const auto arguments = quake::SetupLogsAndParseArgs<quake::MipArguments>(argc, argv);
+    const auto arguments = quake::SetupLogsAndParseArgs<Arguments>(argc, argv);
 
     const auto problem = quake::ExtendedProblem::load_json(arguments.ProblemPath);
     const auto &weather_forecast = problem.GetWeatherSample(quake::ExtendedProblem::WeatherSample::Forecast);
     const auto &weather_observed = problem.GetWeatherSample(quake::ExtendedProblem::WeatherSample::Real);
     const auto forecast_scenarios = problem.GetWeatherSamples(quake::ExtendedProblem::WeatherSample::Scenario);
+    std::vector<quake::Forecast> forecast_scenarios_to_use;
+
+    if (arguments.NumScenarios > 0) {
+        if (arguments.NumScenarios > forecast_scenarios.size()) {
+            LOG(WARNING) << "Requested more scenarios than the problem contains " << arguments.NumScenarios
+                         << " v.s. " << forecast_scenarios.size()
+                         << ". The simulation will effectively use " << forecast_scenarios.size() << " scenarios.";
+            forecast_scenarios_to_use = forecast_scenarios;
+        } else {
+            const auto scenario_begin_it = std::cbegin(forecast_scenarios);
+            const auto scenario_end_it = scenario_begin_it + arguments.NumScenarios;
+            std::copy(scenario_begin_it, scenario_end_it, std::back_inserter(forecast_scenarios_to_use));
+        }
+    }
 
     quake::IndexEvaluator evaluator{problem};
 
     // compute best achievable out of sample
     quake::WorstCaseMipModel worst_case_model(&problem, arguments.IntervalStep, {weather_observed});
-    const auto observed_solution_opt = worst_case_model.Solve(arguments.TimeLimit, arguments.GapLimit, boost::none);
+    auto observed_solution_opt = worst_case_model.Solve(arguments.TimeLimit, arguments.GapLimit, boost::none);
 
     LOG(INFO) << "Best out of sample performance: " << evaluator(*observed_solution_opt);
+
+    {
+        observed_solution_opt->GetMetadata().SetProperty(quake::Metadata::Property::SolutionType, quake::Metadata::SolutionType::Reference);
+
+        const std::string solution_file = (boost::format{"%1%_deterministic.json"} % arguments.SolutionPrefix).str();
+        Save(*observed_solution_opt, solution_file);
+    }
 
     // compute saa index over generated scenarios
     const auto target_traffic_index = evaluator(*observed_solution_opt);
     LOG(INFO) << "Computing Sample Average Approximation with the target index of " << target_traffic_index;
-    quake::SampleAverageMipModel mip_model(&problem, arguments.IntervalStep, forecast_scenarios, target_traffic_index);
+    quake::SampleAverageMipModel mip_model(&problem, arguments.IntervalStep, forecast_scenarios_to_use, target_traffic_index);
     const auto saa_solution_opt = mip_model.Solve(arguments.TimeLimit, arguments.GapLimit, boost::none);
     CHECK(saa_solution_opt) << "Failed to find the solution for Sample Average Approximation";
     LOG(INFO) << "Sample Average Approximation  In-Sample Traffic Index: " << evaluator(*saa_solution_opt, weather_forecast);
     LOG(INFO) << "Sample Average Approximation Out-of-Sample Traffic Index: " << evaluator(*saa_solution_opt, weather_observed);
 
-    quake::CVarMipModel cvar_mip_model(&problem, arguments.IntervalStep, forecast_scenarios, target_traffic_index, 0.05);
+    quake::CVarMipModel cvar_mip_model(&problem, arguments.IntervalStep, forecast_scenarios_to_use, target_traffic_index, 0.05);
     const auto cvar_solution_opt = cvar_mip_model.Solve(arguments.TimeLimit, arguments.GapLimit, boost::none);
     CHECK(cvar_solution_opt) << "Failed to find the solution using CVar optimization";
     LOG(INFO) << "Conditional Value at Risk In-Sample Traffic Index: " << evaluator(*cvar_solution_opt, weather_forecast);

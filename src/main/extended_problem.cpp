@@ -1,3 +1,7 @@
+#include <utility>
+
+#include <utility>
+
 //
 // Copyright 2018 Mateusz Polnik
 //
@@ -32,22 +36,34 @@
 #include "extended_problem.h"
 
 #include "util/math.h"
+#include "util/datetime.h"
 #include "util/json.h"
 #include "forecast.h"
+#include "metadata.h"
 
 quake::ExtendedProblem::ExtendedProblem()
-        : ExtendedProblem(MetaData{}, std::vector<StationData>{}) {}
+        : ExtendedProblem(util::DefaultPeriod(), boost::posix_time::time_duration(), std::vector<StationData>{}) {}
 
-quake::ExtendedProblem::ExtendedProblem(ExtendedProblem::MetaData metadata,
+quake::ExtendedProblem::ExtendedProblem(boost::posix_time::time_period observation_period,
+                                        boost::posix_time::time_duration switch_duration,
                                         std::vector<ExtendedProblem::StationData> station_data)
-        : ExtendedProblem(metadata, station_data, std::unordered_map<std::string, Forecast>{}) {}
+        : ExtendedProblem(observation_period, std::move(switch_duration), std::move(station_data), std::unordered_map<std::string, Forecast>{}) {}
 
-quake::ExtendedProblem::ExtendedProblem(ExtendedProblem::MetaData metadata,
+quake::ExtendedProblem::ExtendedProblem(boost::posix_time::time_period observation_period,
+                                        boost::posix_time::time_duration switch_duration,
                                         std::vector<ExtendedProblem::StationData> station_data,
                                         std::unordered_map<std::string, Forecast> forecasts)
-        : metadata_{std::move(metadata)},
-          station_data_{std::move(station_data)},
-          forecasts_{std::move(forecasts)} {
+        : ExtendedProblem(Metadata({{Metadata::Property::SwitchDuration,    switch_duration},
+                                    {Metadata::Property::ObservationPeriod, observation_period}}),
+                          std::move(station_data),
+                          std::move(forecasts)) {}
+
+quake::ExtendedProblem::ExtendedProblem(Metadata metadata,
+                                        std::vector<quake::ExtendedProblem::StationData> station_data,
+                                        std::unordered_map<std::string, quake::Forecast> forecasts)
+        : station_data_{std::move(station_data)},
+          forecasts_{std::move(forecasts)},
+          metadata_{std::move(metadata)} {
 
     std::unordered_set<GroundStation> ground_stations;
     for (const auto &local_station_data : station_data_) {
@@ -273,15 +289,6 @@ std::vector<quake::Forecast> quake::ExtendedProblem::GetWeatherSamples(quake::Ex
     }
 }
 
-void quake::to_json(nlohmann::json &json, const quake::ExtendedProblem::MetaData &metadata) {
-    nlohmann::json object;
-
-    object["observation_period"] = metadata.Period;
-    object["switch_duration"] = metadata.SwitchDuration;
-
-    json = object;
-}
-
 void quake::to_json(nlohmann::json &json, const quake::ExtendedProblem::StationData &station_data) {
     nlohmann::json object;
 
@@ -302,14 +309,6 @@ void quake::to_json(nlohmann::json &json, const quake::ExtendedProblem::Communic
     object["key_rate"] = communication_window_data.KeyRate;
 
     json = object;
-}
-
-void quake::from_json(const nlohmann::json &json, ExtendedProblem::MetaData &metadata) {
-    const auto switch_duration = json.at("switch_duration").get<boost::posix_time::time_duration>();
-    const auto observation_period = util::from_json<boost::posix_time::time_period>(json.at("observation_period"));
-
-    ExtendedProblem::MetaData metadata_object{observation_period, switch_duration};
-    metadata = metadata_object;
 }
 
 void quake::from_json(const nlohmann::json &json, ExtendedProblem::StationData &station_data) {
@@ -333,7 +332,7 @@ void quake::from_json(const nlohmann::json &json, ExtendedProblem::Communication
 }
 
 void quake::from_json(const nlohmann::json &json, quake::ExtendedProblem &problem) {
-    const auto metadata = json.at("metadata").get<ExtendedProblem::MetaData>();
+    const auto metadata = json.at("metadata").get<Metadata>();
     const auto stations = json.at("stations").get<std::vector<ExtendedProblem::StationData>>();
 
     std::unordered_map<std::string, Forecast> forecasts;

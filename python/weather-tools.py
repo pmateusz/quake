@@ -359,8 +359,9 @@ class Problem:
         self.__json_object[self.FORECASTS_KEY][name] = self.__frame_to_dict(frame)
 
     def trim_observation_period(self, new_observation_period: TimePeriod):
-        metadata = self.__json_object['metadata']
+        metadata = self.__get_metadata()
         metadata['observation_period'] = new_observation_period.to_json()
+        self.__set_metadata(metadata)
 
         updated_stations = []
         for station_dict in self.__json_object['stations']:
@@ -379,13 +380,24 @@ class Problem:
             updated_stations.append(updated_station_dict)
         self.__json_object['stations'] = updated_stations
 
+    def set_metadata(self, key, value):
+        metadata = self.__get_metadata()
+        metadata[key] = value
+        self.__set_metadata(metadata)
+
+    def __get_metadata(self):
+        return {pair[0]: pair[1] for pair in self.__json_object['metadata']}
+
+    def __set_metadata(self, metadata):
+        self.__json_object['metadata'] = [[key, value] for key, value in metadata.items()]
+
     @property
     def json_object(self):
         return self.__json_object
 
     @property
     def observation_period(self):
-        metadata = self.__json_object['metadata']
+        metadata = self.__get_metadata()
         return TimePeriod.from_json(metadata['observation_period'])
 
     @staticmethod
@@ -631,11 +643,12 @@ class HeteroscedasticAutoCorrelatedNoiseModel:
         return sample_frame
 
 
-class GenerationModelFactory:
-    PAST_ERRORS_MODEL_NAME = 'past_errors'
-    INDEPENDENT_NOISE_MODEL_NAME = 'independent_noise'
-    CORRELATED_NOISE_MODEL_NAME = 'correlated_noise'
+class ScenarioGeneratorFactory:
+    PAST_ERRORS_MODEL_NAME = 'past_error_replication'
+    INDEPENDENT_NOISE_MODEL_NAME = 'independent_error_simulation'
+    CORRELATED_NOISE_MODEL_NAME = 'correlated_error_simulation'
     COREGIONALIZATION_MODEL_NAME = 'coregionalization'
+
     MODEL_NAMES = [PAST_ERRORS_MODEL_NAME, INDEPENDENT_NOISE_MODEL_NAME, CORRELATED_NOISE_MODEL_NAME, COREGIONALIZATION_MODEL_NAME]
 
     def create_model(self, model_name, weather_cache, forecast_frame):
@@ -650,7 +663,7 @@ class GenerationModelFactory:
             observation_frame \
                 = weather_cache.get_observation_frame(forecast_frame.index.min() - default_observation_length, default_observation_length)
             return CoregionalizationModel(observation_frame, forecast_frame)
-        assert False, 'Model name "{0}" is invalid' % model_name
+        assert False, 'Model name \"{0}\" is invalid' % model_name
 
 
 def parse_args():
@@ -669,14 +682,14 @@ def parse_args():
     extend_parser.add_argument('problem_file')
     extend_parser.add_argument('--output')
     extend_parser.add_argument('--num-scenarios', default=0, type=int)
-    extend_parser.add_argument('--method', choices=GenerationModelFactory.MODEL_NAMES)
+    extend_parser.add_argument('--scenario-generator', choices=ScenarioGeneratorFactory.MODEL_NAMES, required=True)
 
     generate_parser = sub_parsers.add_parser(GENERATE_COMMAND)
     generate_parser.add_argument('--from', action=ParseDateAction)
     generate_parser.add_argument('--to', action=ParseDateAction)
     generate_parser.add_argument('--problem-prefix')
     generate_parser.add_argument('--num-scenarios', default=0, type=int)
-    generate_parser.add_argument('--method', choices=GenerationModelFactory.MODEL_NAMES)
+    generate_parser.add_argument('--scenario-generator', choices=ScenarioGeneratorFactory.MODEL_NAMES, required=True)
 
     plot_forecast_parser = sub_parsers.add_parser(PLOT_FORECAST_COMMAND)
     plot_forecast_parser.add_argument('--from', action=ParseDateAction)
@@ -839,7 +852,7 @@ def extend_problem_definition(args):
     problem_file = getattr(args, 'problem_file')
     output_file = getattr(args, 'output')
     num_scenarios = getattr(args, 'num_scenarios')
-    generation_model_name = getattr(args, 'method')
+    scenario_generator_name = getattr(args, 'scenario_generator')
 
     with open(problem_file, 'r') as input_stream:
         json_object = json.load(input_stream)
@@ -875,8 +888,8 @@ def extend_problem_definition(args):
 
     scenario_frames = []
     if num_scenarios > 0:
-        model_factory = GenerationModelFactory()
-        generation_model = model_factory.create_model(generation_model_name, weather_cache, forecast_frame)
+        model_factory = ScenarioGeneratorFactory()
+        generation_model = model_factory.create_model(scenario_generator_name, weather_cache, forecast_frame)
         generation_model.optimize()
 
         sample_frames = generation_model.samples(num_scenarios)
@@ -896,6 +909,9 @@ def extend_problem_definition(args):
     for scenario_index, scenario_frame in enumerate(scenario_frames):
         updated_problem.add_forecast('scenario_{0}'.format(scenario_index), trim_to_time_interval(scenario_frame))
 
+    updated_problem.set_metadata('scenarios_number', len(scenario_frames))
+    updated_problem.set_metadata('scenario_generator', scenario_generator_name)
+
     with open(output_file, 'w') as output_file:
         json.dump(updated_problem.json_object, output_file)
 
@@ -907,7 +923,7 @@ def generate_command(args):
     from_date_arg = getattr(args, 'from')
     to_date_arg = getattr(args, 'to')
     num_scenarios = getattr(args, 'num_scenarios')
-    generation_model_name = getattr(args, 'method')
+    generation_model_name = getattr(args, 'scenario_generator')
 
     configurations = []
     current_date = from_date_arg
@@ -932,7 +948,7 @@ def generate_command(args):
             raise Exception('Failed to generate problem {0}'.format(temp_problem))
 
         args = argparse.Namespace(**{'problem_file': temp_problem, 'output': problem,
-                                     'num_scenarios': num_scenarios, 'method': generation_model_name})
+                                     'num_scenarios': num_scenarios, 'scenario_generator': generation_model_name})
         extend_problem_definition(args)
 
         if not os.path.exists(problem):

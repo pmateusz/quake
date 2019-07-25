@@ -43,7 +43,6 @@ namespace boost {
         void to_json(nlohmann::json &json, const time_period &value);
 
         void from_json(const nlohmann::json &json, time_period &value);
-
     }
 }
 
@@ -53,7 +52,12 @@ namespace quake {
     namespace util {
 
         template<typename ValueType>
-        ValueType from_json(const nlohmann::json &json);
+        ValueType from_json(const nlohmann::json &json) {
+            return json.get<ValueType>();
+        }
+
+        template<>
+        boost::posix_time::time_period from_json(const nlohmann::json &json);
     }
 }
 

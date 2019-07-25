@@ -117,7 +117,9 @@ namespace quake {
                 final_buffers.emplace(station, station_initial_buffer + keys_received - total_key_consumption);
             }
 
-            Solution solution{std::move(observations), std::move(final_buffers)};
+            auto metadata = CreateMetadata();
+
+            Solution solution{std::move(metadata), std::move(observations), std::move(final_buffers)};
 
             Validator validator{*problem_};
             validator.Validate(solution);
@@ -136,6 +138,24 @@ namespace quake {
         inline double InitialBuffer(const GroundStation &station) const { return problem_->InitialBuffer(station); }
 
     protected:
+        virtual Metadata CreateMetadata() {
+            static const std::vector<Metadata::Property> PROPERTIES_TO_COPY{
+                    Metadata::Property::SwitchDuration,
+                    Metadata::Property::ObservationPeriod,
+                    Metadata::Property::ScenarioGenerator
+            };
+
+            const auto &problem_metadata = problem_->GetMetadata();
+
+            Metadata metadata;
+            for (const auto property: PROPERTIES_TO_COPY) {
+                auto json_object_opt = problem_metadata.GetProperty<nlohmann::json>(property);
+                if (json_object_opt) {
+                    metadata.SetProperty(property, *json_object_opt);
+                }
+            }
+            return metadata;
+        }
 
         virtual void Build(const boost::optional<Solution> &initial_solution) = 0;
 
