@@ -44,10 +44,6 @@ import quake.city
 import tabulate
 import tqdm
 
-# TODO: read how others forecast weather
-# TODO: study gaussian process, multi-output gaussian process, non-parametric gaussian regression
-# TODO: compute series of errors in all locations
-
 BUILD_CACHE_COMMAND = 'build-cache'
 PLOT_COMMAND = 'plot-cloud-cover'
 COVARIANCE_COMMAND = 'compute-covariance'
@@ -57,7 +53,6 @@ PLOT_GENERATED_SCENARIOS_COMMAND = 'plot-generated-scenarios'
 VAR_COMMAND = 'compute-var'
 EXTEND_COMMAND = 'extend'
 GENERATE_COMMAND = 'generate'
-TRAIN_GP_COMMAND = 'train-gp'
 
 BBOX_STYLE = {'boxstyle': 'square,pad=0.0', 'lw': 0, 'fc': 'w', 'alpha': 0.8}
 
@@ -185,35 +180,6 @@ class WeatherCache:
 
         data_frame = filter_frame[filter_frame['ForecastDateTime'] == forecast_date_time].copy()
         return self.__pivot_transform(data_frame)
-
-    # def get_error_frames(self):
-    #     forecast_time_points = {datetime.datetime.combine(pandas.to_datetime(time_point).date(), datetime.time())
-    #                             for time_point in self.forecast_frame['DateTime']}
-    #     filtered_time_points = list(forecast_time_points)
-    #     filtered_time_points.sort()
-    #
-    #     num_values = int(self.forecast_length.total_seconds() / self.__forecast_frequency.total_seconds()) + 1
-    #     max_filled_values = int(0.05 * num_values)
-    #
-    #     error_frames = []
-    #     for time_point in filtered_time_points:
-    #         forecast_frame, forecast_filled = self.get_forecast_frame(time_point, self.forecast_length, fill_missing=True)
-    #
-    #         if len(forecast_filled) > max_filled_values or len(forecast_frame) != num_values:
-    #             continue
-    #
-    #         observation_frame, observation_filled = self.get_observation_frame(time_point, self.forecast_length, fill_missing=True)
-    #
-    #         if len(observation_filled) > max_filled_values or len(observation_frame) != num_values:
-    #             continue
-    #
-    #         error_frame = forecast_frame - observation_frame
-    #
-    #         # error frame has no missing values
-    #         assert error_frame.isna().sum().max() == 0
-    #
-    #         error_frames.append(error_frame)
-    #     return error_frames
 
     def get_forecast_time_points(self):
         filter_frame = self.__forecast_frame.loc[pandas.IndexSlice[:, self.ZERO_TIME_DELTA], :]
@@ -483,13 +449,13 @@ class CoregionalizationModel:
 
         # plot output data
         matrix_rank = len(cities)
-        kernel_1 = GPy.kern.RBF(1, lengthscale=6, ARD=True) + GPy.kern.Linear(1, 1, active_dims=[0], ARD=True) \
-                   + GPy.kern.White(1, variance=81) + GPy.kern.Bias(1)
+        kernel_1 = GPy.kern.RBF(1, lengthscale=6, ARD=True) + GPy.kern.Linear(1, active_dims=[0], ARD=True) \
+                   + GPy.kern.White(1) + GPy.kern.Bias(1)
         kernel_2 = GPy.kern.Coregionalize(1, output_dim=len(cities), rank=matrix_rank)
 
         X_Gpy = self.__X[:, [1, 2]]
         self.__model = GPy.models.GPRegression(X_Gpy, self.__Y, kernel_1 ** kernel_2)
-        self.__model.optimize(messages=True, max_iters=32)
+        self.__model.optimize(messages=True)
 
         mean, variance = self.__model.predict(X_Gpy, full_cov=True)
         quantiles = self.__model.predict_quantiles(X_Gpy)
@@ -764,6 +730,7 @@ def covariance_command(args):
             save_matrix(temporal_covariance, '{0}_temporal_covariance'.format(city.name))
 
 
+# developing multi-output VAR model
 def compute_vector_auto_regression(args):
     weather_cache = WeatherCache()
     weather_cache.load()
@@ -814,90 +781,6 @@ def compute_vector_auto_regression(args):
     result = model.fit()
     print(result.summary())
 
-    # start_date_time = datetime.datetime(2019, 6, 20)
-    # for days in range(10):
-    #     date_time = start_date_time + datetime.timedelta(days=days)
-    #     local_forecast_sample = forecast_sample(forecast_frame, date_time)
-    #     local_observation_sample = observation_sample(forecast_frame, date_time)
-    #
-    #     errors = local_forecast_sample['London'] - local_observation_sample['London']
-    #     errors.fillna(value=0, inplace=True)
-
-    # fig, ax = matplotlib.pyplot.subplots()
-    # ax.plot(local_forecast_sample['London'], label='forecast')
-    # ax.plot(local_observation_sample['London'], label='observation')
-    # ax.legend()
-    # fig.tight_layout()
-    # matplotlib.pyplot.savefig('London_{0}.png'.format(date_time.strftime('%Y-%m-%d')))
-    # matplotlib.pyplot.close(fig)
-    #
-    # fig, ax = matplotlib.pyplot.subplots()
-    # ax.plot(local_observation_sample['London'] - local_forecast_sample['London'], label='diff')
-    # ax.legend()
-    # fig.tight_layout()
-    # matplotlib.pyplot.savefig('diff_London_{0}.png'.format(date_time.strftime('%Y-%m-%d')))
-    # matplotlib.pyplot.close(fig)
-
-    # long_term_frame = forecast_frame[
-    #     (forecast_frame['Delay'] == datetime.timedelta(days=2)) & (forecast_frame['DateTime'] > datetime.datetime(2019, 6, 20))]
-    #
-    # long_term_frame = pivot_transform(long_term_frame)
-    # observation_frame = pivot_transform(observation_frame)
-    #
-    # long_term_frame['London'].plot()
-    # observation_frame['London'].plot()
-    # (long_term_frame['London'] - observation_frame['London']).plot()
-
-    # three_hour_frame['DateTime'] = three_hour_frame['DateTime'] + three_hour_frame['Delay']
-
-    # observation_frame = pivot_transform(observation_frame)
-    # three_hour_frame = pivot_transform(three_hour_frame)
-    #
-    # observation_frame['Glasgow'].plot()
-    # three_hour_frame['Glasgow'].plot()
-
-    # matplotlib.pyplot.show()
-    #
-    # print('here')
-
-    # blue_print = weather_cache.observation_frame.tail()
-    # local_frame = weather_cache.observation_frame[['city_name', 'date_time', 'clouds_all']].copy()
-    # pivot_frame = pandas.pivot_table(local_frame, columns=['city_name'], index=['date_time'], values=['clouds_all'])
-    # pivot_frame.columns = pivot_frame.columns.droplevel()
-    # pivot_frame.drop_duplicates(inplace=True)
-    # pivot_frame.sort_index(inplace=True)
-    # model = statsmodels.tsa.api.VAR(pivot_frame)
-    # model_result = model.fit()
-    # print(model_result.summary())
-    # forecast_frame = weather_cache.forecast_frame.copy()
-    # forecast_frame = forecast_frame[forecast_frame['DateTime'] > datetime.datetime(2019, 6, 1)]
-
-    # observations are about to pass unit root test
-    # long-term forecasts pass unit root test without question
-    # observation_frame = pivot_transform(.copy())
-    # long_term_forecast_frame = pivot_transform(forecast_frame[forecast_frame['Delay'] == datetime.timedelta(days=4, hours=21)].copy())
-    # local_forecast_frame = pivot_transform(
-    # )
-
-    # five_day_forecast = forecast_frame[forecast_frame['DateTime'] == datetime.datetime(2019, 6, 30, 0, 0)].copy()
-    # five_day_forecast['DateTime'] = five_day_forecast['DateTime'] + five_day_forecast['Delay']
-    #
-    # observation_frame = forecast_frame[(forecast_frame['Delay'] == datetime.timedelta(seconds=0))
-    #                                    & (forecast_frame['DateTime'] <= five_day_forecast['DateTime'].max())
-    #                                    & (forecast_frame['DateTime'] >=five_day_forecast['DateTime'].min())].copy()
-    #
-    # five_day_frame = pivot_transform(five_day_forecast)
-    # observation_frame = pivot_transform(observation_frame)
-    #
-    #
-    # observation_frame.plot()
-    #
-    # matplotlib.pyplot.show()
-
-    pass
-
-    # local_data_frame = pivot_transform(local_data_frame)
-
     # def test_for_unit_root(frame):
     #     for column in frame.columns:
     #         pass
@@ -917,12 +800,6 @@ def compute_vector_auto_regression(args):
     #
     # print(results.is_stable())
     # print(results.summary())
-
-    # long_term_forecast_frame['London'].plot()
-    # matplotlib.pyplot.show()
-
-    # TODO: build var forecast for a weather forecast
-    pass
 
 
 def extend_problem_definition(args):
@@ -1026,7 +903,6 @@ def generate_command(args):
         os.remove(temp_problem)
 
 
-# TODO: plug in
 def plot_generated_scenarios(args):
     forecast_time = getattr(args, 'from')
     num_samples = getattr(args, 'num_scenarios')
@@ -1076,11 +952,11 @@ def plot_generated_scenarios(args):
             forecast_handle = local_ax.plot(forecast_frame[city].index.values, forecast_frame[city].values, c='black')[0]
 
             local_ax.annotate(model_labels[model_index],
-                        xy=(0.0, 0.0),
-                        xycoords='axes fraction',
-                        horizontalalignment='left',
-                        verticalalignment='bottom',
-                        bbox=BBOX_STYLE.copy())
+                              xy=(0.0, 0.0),
+                              xycoords='axes fraction',
+                              horizontalalignment='left',
+                              verticalalignment='bottom',
+                              bbox=BBOX_STYLE.copy())
 
         ax[int(len(models) / 2)].set_ylabel('Cloud Cover [%]')
         ax[-1].legend((model_handles[0], forecast_handle, real_handle), ('Generated Scenario', 'Forecast Scenario', 'Real Scenario'),
@@ -1092,192 +968,6 @@ def plot_generated_scenarios(args):
 
         matplotlib.pyplot.savefig('{0}_{1}_{2}.png'.format(output_prefix, city, forecast_time.date()))
         matplotlib.pyplot.close(fig)
-
-
-def example():
-    import numpy as np
-    import matplotlib.pyplot as pb
-
-    # This functions generate data corresponding to two outputs
-    f_output1 = lambda x: 4. * np.cos(x / 5.) - .4 * x - 35. + np.random.rand(x.size)[:, None] * 2.
-    f_output2 = lambda x: 6. * np.cos(x / 5.) + .2 * x + 35. + np.random.rand(x.size)[:, None] * 8.
-
-    # {X,Y} training set for each output
-    X1 = np.random.rand(100)[:, None];
-    X1 = X1 * 75
-    X2 = np.random.rand(100)[:, None];
-    X2 = X2 * 70 + 30
-    Y1 = f_output1(X1)
-    Y2 = f_output2(X2)
-    # {X,Y} test set for each output
-    Xt1 = np.random.rand(100)[:, None] * 100
-    Xt2 = np.random.rand(100)[:, None] * 100
-    Yt1 = f_output1(Xt1)
-    Yt2 = f_output2(Xt2)
-
-    xlim = (0, 100);
-    ylim = (0, 50)
-    fig = pb.figure(figsize=(12, 8))
-    ax1 = fig.add_subplot(211)
-    ax1.set_xlim(xlim)
-    ax1.set_title('Output 1')
-    ax1.plot(X1[:, :1], Y1, 'kx', mew=1.5, label='Train set')
-    ax1.plot(Xt1[:, :1], Yt1, 'rx', mew=1.5, label='Test set')
-    ax1.legend()
-    ax2 = fig.add_subplot(212)
-    ax2.set_xlim(xlim)
-    ax2.set_title('Output 2')
-    ax2.plot(X2[:, :1], Y2, 'kx', mew=1.5, label='Train set')
-    ax2.plot(Xt2[:, :1], Yt2, 'rx', mew=1.5, label='Test set')
-    ax2.legend()
-
-    matplotlib.pyplot.show()
-
-    def plot_2outputs(m, xlim, ylim):
-        fig = pb.figure(figsize=(12, 8))
-        # Output 1
-        ax1 = fig.add_subplot(211)
-        ax1.set_xlim(xlim)
-        ax1.set_title('Output 1')
-        m.plot(plot_limits=xlim, fixed_inputs=[(1, 0)], which_data_rows=slice(0, 100), ax=ax1)
-        ax1.plot(Xt1[:, :1], Yt1, 'rx', mew=1.5)
-        # Output 2
-        ax2 = fig.add_subplot(212)
-        ax2.set_xlim(xlim)
-        ax2.set_title('Output 2')
-        m.plot(plot_limits=xlim, fixed_inputs=[(1, 1)], which_data_rows=slice(100, 200), ax=ax2)
-        ax2.plot(Xt2[:, :1], Yt2, 'rx', mew=1.5)
-
-    import GPy
-    K = GPy.kern.RBF(1)
-    B = GPy.kern.Coregionalize(input_dim=1, output_dim=2)
-    multkernel = K.prod(B, name='B.K')
-    print(multkernel)
-
-    # Components of B
-    print('W matrix\n', B.W)
-    print('\nkappa vector\n', B.kappa)
-    print('\nB matrix\n', B.B)
-
-    K = GPy.kern.Matern32(1)
-    icm = GPy.util.multioutput.ICM(input_dim=1, num_outputs=2, kernel=K)
-
-    m = GPy.models.GPCoregionalizedRegression([X1, X2], [Y1, Y2], kernel=icm)
-    m['.*Mat32.var'].constrain_fixed(1.)  # For this kernel, B.kappa encodes the variance now.
-    m.optimize()
-    print(m)
-    plot_2outputs(m, xlim=(0, 100), ylim=(-20, 60))
-
-    matplotlib.pyplot.show()
-
-    print('here')
-
-    icm = GPy.util.multioutput.ICM(input_dim=1, num_outputs=2, kernel=GPy.kern.RBF(1))
-    print(icm)
-
-    K = GPy.kern.Matern32(1)
-
-    m1 = GPy.models.GPRegression(X1, Y1, kernel=K.copy())
-    m1.optimize()
-    m2 = GPy.models.GPRegression(X2, Y2, kernel=K.copy())
-    m2.optimize()
-    fig = pb.figure(figsize=(12, 8))
-    # Output 1
-    ax1 = fig.add_subplot(211)
-    m1.plot(plot_limits=xlim, ax=ax1)
-    ax1.plot(Xt1[:, :1], Yt1, 'rx', mew=1.5)
-    ax1.set_title('Output 1')
-    # Output 2
-    ax2 = fig.add_subplot(212)
-    m2.plot(plot_limits=xlim, ax=ax2)
-    ax2.plot(Xt2[:, :1], Yt2, 'rx', mew=1.5)
-    ax2.set_title('Output 2')
-
-
-def train_gp_command(args):
-    # example()
-
-    import numpy.random
-    import matplotlib.pyplot as pb
-
-    # #build a design matrix with a column of integers indicating the output
-    # X1 = np.random.rand(50, 1) * 8
-    # X2 = np.random.rand(30, 1) * 5
-    #
-    # #build a suitable set of observed variables
-    # Y1 = np.sin(X1) + np.random.randn(*X1.shape) * 0.05
-    # Y2 = np.sin(X2) + np.random.randn(*X2.shape) * 0.05 + 2.
-    #
-    # m = GPy.models.SparseGPCoregionalizedRegression(X_list=[X1,X2], Y_list=[Y1,Y2])
-    # m.optimize('bfgs', max_iters=100)
-    #
-    # slices = GPy.util.multioutput.get_slices([X1,X2])
-    # m.plot(fixed_inputs=[(1,0)],which_data_rows=slices[0],Y_metadata={'output_index':0})
-    # m.plot(fixed_inputs=[(1,1)],which_data_rows=slices[1],Y_metadata={'output_index':1},ax=pb.gca())
-    # pb.ylim(-3,)
-    # matplotlib.pyplot.show()
-
-    weather_cache = WeatherCache()
-    weather_cache.load()
-
-    forecast = weather_cache.get_forecast_frame(datetime.datetime(2019, 7, 1), datetime.timedelta(days=5))
-    cities = [quake.city.LONDON, quake.city.IPSWICH]  # , quake.city.BIRMINGHAM, quake.city.BRISTOL, quake.city.CAMBRIDGE]
-
-    X = numpy.expand_dims(numpy.arange(len(forecast)), axis=1)
-    Y1 = numpy.expand_dims(forecast[quake.city.LONDON].values.astype(float), axis=1)
-    Y2 = numpy.expand_dims(forecast[quake.city.IPSWICH].values.astype(float), axis=1)
-
-    import matplotlib.pyplot as pb
-
-    fig = pb.figure(figsize=(12, 8))
-    ax1 = fig.add_subplot(211)
-    ax1.set_title('Output 1')
-    ax1.plot(X, Y1, 'kx', mew=1.5, label='Train set')
-    ax1.legend()
-    ax2 = fig.add_subplot(212)
-    ax2.set_title('Output 2')
-    ax2.plot(X, Y2, 'kx', mew=1.5, label='Train set')
-    ax2.legend()
-
-    matplotlib.pyplot.show(block=True)
-
-    def plot_2outputs(m):
-        fig = pb.figure(figsize=(12, 8))
-        # Output 1
-        ax1 = fig.add_subplot(211)
-        ax1.set_title('Output 1')
-        m.plot(fixed_inputs=[(1, 0)], which_data_rows=slice(0, 100), ax=ax1)
-        ax1.plot(X, Y1, 'rx', mew=1.5)
-        # Output 2
-        ax2 = fig.add_subplot(212)
-        ax2.set_title('Output 2')
-        m.plot(fixed_inputs=[(1, 1)], which_data_rows=slice(100, 200), ax=ax2)
-        ax2.plot(X, Y2, 'rx', mew=1.5)
-
-    #
-    import GPy
-    K = GPy.kern.RBF(1)
-    B = GPy.kern.Coregionalize(input_dim=1, output_dim=2)
-    multkernel = K.prod(B, name='B.K')
-    print(multkernel)
-
-    # Components of B
-    print('W matrix\n', B.W)
-    print('\nkappa vector\n', B.kappa)
-    print('\nB matrix\n', B.B)
-
-    K = GPy.kern.Matern32(1)
-    icm = GPy.util.multioutput.ICM(input_dim=1, num_outputs=2, kernel=K)
-
-    m = GPy.models.GPCoregionalizedRegression([X, X], [Y1, Y2], kernel=icm)
-    m['.*Mat32.var'].constrain_fixed(1.)  # For this kernel, B.kappa encodes the variance now.
-    m.optimize()
-    print(m)
-    plot_2outputs(m)
-    #
-    matplotlib.pyplot.show(block=True)
-
-    print('test')
 
 
 def save_figure(fig, file_name):
@@ -1521,8 +1211,6 @@ if __name__ == '__main__':
         extend_problem_definition(args)
     elif command == GENERATE_COMMAND:
         generate_command(args)
-    elif command == TRAIN_GP_COMMAND:
-        train_gp_command(args)
     elif command == PLOT_FORECAST_COMMAND:
         plot_forecast_command(args)
     elif command == PLOT_COREGIONALIZATION_COMMAND:
@@ -1563,180 +1251,47 @@ if __name__ == '__main__':
         statsmodels.graphics.tsaplots.plot_pacf(error_frame[quake.city.LONDON].values.transpose())
         matplotlib.pyplot.show(block=True)
 
-        # def test_multiout_regression_md():
-        #     import GPy
-        #     import numpy as np
-        #
-        #     np.random.seed(0)
-        #
-        #     N = 20
-        #     N_train = 5
-        #     D = 8
-        #     noise_var = 0.3
-        #
-        #     k = GPy.kern.RBF(1, lengthscale=0.1)
-        #     x_raw = np.random.rand(N * D, 1)
-        #
-        #     # dimension assignment
-        #     D_list = []
-        #     for i in range(2):
-        #         while True:
-        #             D_sub_list = []
-        #             ratios = []
-        #             r_p = 0.
-        #             for j in range(3):
-        #                 ratios.append(np.random.rand() * (1 - r_p) + r_p)
-        #                 D_sub_list.append(int((ratios[-1] - r_p) * 4 * N_train))
-        #                 r_p = ratios[-1]
-        #             D_sub_list.append(4 * N_train - np.sum(D_sub_list))
-        #             if (np.array(D_sub_list) != 0).all():
-        #                 D_list.extend([a + N - N_train for a in D_sub_list])
-        #                 break
-        #
-        #     cov = k.K(x_raw)
-        #
-        #     k_r = GPy.kern.RBF(2, lengthscale=.4)
-        #     x_r = np.random.rand(D, 2)
-        #     cov_r = k_r.K(x_r)
-        #
-        #     cov_all = np.repeat(np.repeat(cov_r, D_list, axis=0), D_list, axis=1) * cov
-        #     L = GPy.util.linalg.jitchol(cov_all)
-        #
-        #     y_latent = L.dot(np.random.randn(N * D))
-        #
-        #     x = np.zeros((D * N_train,))
-        #     y = np.zeros((D * N_train,))
-        #     x_test = np.zeros((D * (N - N_train),))
-        #     y_test = np.zeros((D * (N - N_train),))
-        #     indexD = np.zeros((D * N_train), dtype=np.int)
-        #     indexD_test = np.zeros((D * (N - N_train)), dtype=np.int)
-        #
-        #     offset_all = 0
-        #     offset_train = 0
-        #     offset_test = 0
-        #     for i in range(D):
-        #         D_test = N - N_train
-        #         D_train = D_list[i] - N + N_train
-        #         y[offset_train:offset_train + D_train] = y_latent[offset_all:offset_all + D_train]
-        #         x[offset_train:offset_train + D_train] = x_raw[offset_all:offset_all + D_train, 0]
-        #         y_test[offset_test:offset_test + D_test] = y_latent[offset_all + D_train:offset_all + D_train + D_test]
-        #         x_test[offset_test:offset_test + D_test] = x_raw[offset_all + D_train:offset_all + D_train + D_test, 0]
-        #         indexD[offset_train:offset_train + D_train] = i
-        #         indexD_test[offset_test:offset_test + D_test] = i
-        #         offset_train += D_train
-        #         offset_test += D_test
-        #         offset_all += D_train + D_test
-        #
-        #     y_noisefree = y.copy()
-        #     y += np.random.randn(*y.shape) * np.sqrt(noise_var)
-        #     x_flat = x.flatten()[:, None]
-        #     y_flat = y.flatten()[:, None]
-        #
-        #     Mr, Mc, Qr, Qc = 4, 3, 2, 1
-        #
-        #     m = GPy.models.GPMultioutRegressionMD(x_flat, y_flat, indexD, Xr_dim=Qr, kernel_row=GPy.kern.RBF(Qr, ARD=False), num_inducing=(Mc, Mr))
-        #     m.optimize_auto(max_iters=1)
-        #     m.randomize()
-        #     assert m.checkgrad()
-        #
-        #     m = GPy.models.GPMultioutRegressionMD(x_flat, y_flat, indexD, Xr_dim=Qr, kernel_row=GPy.kern.RBF(Qr, ARD=False), num_inducing=(Mc, Mr),
-        #                                           init='rand')
-        #     m.optimize_auto(max_iters=1)
-        #     m.randomize()
-        #     assert m.checkgrad()
-        #
-        #
-        # def test_multiout_regression():
-        #     import numpy as np
-        #
-        #     np.random.seed(0)
-        #     import GPy
-        #
-        #     N = 10
-        #     N_train = 5
-        #     D = 4
-        #     noise_var = .3
-        #
-        #     k = GPy.kern.RBF(1, lengthscale=0.1)
-        #     x = np.random.rand(N, 2)
-        #     cov = k.K(x)
-        #
-        #     k_r = GPy.kern.RBF(2, lengthscale=.4)
-        #     x_r = np.random.rand(D, 2)
-        #     cov_r = k_r.K(x_r)
-        #
-        #     cov_all = np.kron(cov_r, cov)
-        #     L = GPy.util.linalg.jitchol(cov_all)
-        #
-        #     y_latent = L.dot(np.random.randn(N * D)).reshape(D, N).T
-        #
-        #     x_test = x[N_train:]
-        #     y_test = y_latent[N_train:]
-        #     x = x[:N_train]
-        #     y = y_latent[:N_train] + np.random.randn(N_train, D) * np.sqrt(noise_var)
-        #
-        #     Mr = D
-        #     Mc = x.shape[0]
-        #     Qr = 5
-        #     Qc = x.shape[1]
-        #
-        #     m_mr = GPy.models.GPMultioutRegression(x, y, Xr_dim=Qr, kernel_row=GPy.kern.RBF(Qr, ARD=True), num_inducing=(Mc, Mr), init='GP')
-        #     m_mr.optimize_auto(max_iters=1)
-        #     m_mr.randomize()
-        #     assert m_mr.checkgrad()
-        #
-        #     m_mr = GPy.models.GPMultioutRegression(x, y, Xr_dim=Qr, kernel_row=GPy.kern.RBF(Qr, ARD=True), num_inducing=(Mc, Mr), init='rand')
-        #     m_mr.optimize_auto(max_iters=1)
-        #     m_mr.randomize()
-        #     assert m_mr.checkgrad()
-        #
-        #     mean, variance = m_mr.predict(x)
-        #     quantiles = m_mr.predict_quantiles(x)
-        #
-        #     print('here')
-        #
-        #
-        # def my_test_regression_with_missing_values():
-        #     weather_cache = WeatherCache()
-        #     weather_cache.load()
-        #
-        #     forecasts = [weather_cache.get_observation_frame(datetime.datetime(2019, 6, 20), weather_cache.forecast_length),
-        #                  weather_cache.get_observation_frame(datetime.datetime(2019, 6, 25), weather_cache.forecast_length),
-        #                  weather_cache.get_observation_frame(datetime.datetime(2019, 7, 1), weather_cache.forecast_length),
-        #                  weather_cache.get_observation_frame(datetime.datetime(2019, 7, 5), weather_cache.forecast_length),
-        #                  weather_cache.get_observation_frame(datetime.datetime(2019, 7, 10), weather_cache.forecast_length),
-        #                  weather_cache.get_observation_frame(datetime.datetime(2019, 7, 15), weather_cache.forecast_length)]
-        #
-        #     restricted_cities = forecasts[0].columns
-        #
-        #     X = []
-        #     Y = []
-        #     D_index = []
-        #     for forecast_index, forecast in enumerate(forecasts):
-        #         min_start_time = forecast.index.min()
-        #         for city_index, city in enumerate(restricted_cities):
-        #             for time_index, cloud_cover in forecast[city].items():
-        #                 X.append([city_index, int((time_index - min_start_time).total_seconds() // 3600)])
-        #                 Y.append([cloud_cover])
-        #                 D_index.append(forecast_index)
-        #     X = numpy.array(X)
-        #     Y = numpy.array(Y)
-        #     D_index = numpy.array(D_index)
-        #
-        #     Mr = len(forecasts)
-        #     Mc = len(forecasts[0]) * len(restricted_cities)
-        #     Qr = len(forecasts)
-        #     Qc = 2
-        #
-        #     m = GPy.models.GPMultioutRegressionMD(X, Y, D_index, Xr_dim=Qr, kernel_row=GPy.kern.RBF(Qr, ARD=False), num_inducing=(Mc, Mr), init='GP')
-        #     m.optimize_auto(max_iters=1)
-        #     m.randomize()
-        #     assert m.checkgrad()
-        #
-        #
 
+    # def my_test_regression_with_missing_values():
+    #     weather_cache = WeatherCache()
+    #     weather_cache.load()
+    #
+    #     forecasts = [weather_cache.get_observation_frame(datetime.datetime(2019, 6, 20), weather_cache.forecast_length),
+    #                  weather_cache.get_observation_frame(datetime.datetime(2019, 6, 25), weather_cache.forecast_length),
+    #                  weather_cache.get_observation_frame(datetime.datetime(2019, 7, 1), weather_cache.forecast_length),
+    #                  weather_cache.get_observation_frame(datetime.datetime(2019, 7, 5), weather_cache.forecast_length),
+    #                  weather_cache.get_observation_frame(datetime.datetime(2019, 7, 10), weather_cache.forecast_length),
+    #                  weather_cache.get_observation_frame(datetime.datetime(2019, 7, 15), weather_cache.forecast_length)]
+    #
+    #     restricted_cities = forecasts[0].columns
+    #
+    #     X = []
+    #     Y = []
+    #     D_index = []
+    #     for forecast_index, forecast in enumerate(forecasts):
+    #         min_start_time = forecast.index.min()
+    #         for city_index, city in enumerate(restricted_cities):
+    #             for time_index, cloud_cover in forecast[city].items():
+    #                 X.append([city_index, int((time_index - min_start_time).total_seconds() // 3600)])
+    #                 Y.append([cloud_cover])
+    #                 D_index.append(forecast_index)
+    #     X = numpy.array(X)
+    #     Y = numpy.array(Y)
+    #     D_index = numpy.array(D_index)
+    #
+    #     Mr = len(forecasts)
+    #     Mc = len(forecasts[0]) * len(restricted_cities)
+    #     Qr = len(forecasts)
+    #     Qc = 2
+    #
+    #     m = GPy.models.GPMultioutRegressionMD(X, Y, D_index, Xr_dim=Qr, kernel_row=GPy.kern.RBF(Qr, ARD=False), num_inducing=(Mc, Mr), init='GP')
+    #     m.optimize_auto(max_iters=1)
+    #     m.randomize()
+    #     assert m.checkgrad()
+    #
+    #
 
-    # def my_test_error_regression_md():
+    # def test_error_regression_md():
     #     weather_cache = WeatherCache()
     #     weather_cache.load()
     #
@@ -1793,28 +1348,6 @@ if __name__ == '__main__':
     #
     #     model.plot_f()
     #     matplotlib.pyplot.show(block=True)
-
-    # mean, variance = model.predict(X)
-    # quantiles = model.predict_quantiles(X)
-
-    # m_mr.randomize()
-    # assert m_mr.checkgrad()
-
-    # sample from posterior - print examples
-    # samples = model.posterior_samples_f(X, size=10)
-
-    #
-    #
-    # test_multiout_regression()
-
-    # my_test_error_regression_md()
-
-    # test_multiout_regression_md()
-    # test_multiout_regression_md()
-
-    # test_multiout_regression()
-
-    # my_test_error_regression_md()
 
     def heteroscedastatic_example():
         import GPy.likelihoods
