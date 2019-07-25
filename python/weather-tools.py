@@ -270,10 +270,10 @@ class WeatherCache:
                 missing_values.append(current_index)
             current_index += inferred_feq
 
-        percentage_missing_values = float(len(missing_values)) / frame.shape[0] + len(missing_values)
+        percentage_missing_values = float(len(missing_values)) / (frame.shape[0] + len(missing_values))
         if percentage_missing_values > WeatherCache.PERCENTAGE_MISSING_VALUES_THRESHOLD:
-            warnings.warn('Filling missing values constitute {0}% of all values in the frame which exceeds {1}% threshold'
-                          .format(percentage_missing_values, WeatherCache.PERCENTAGE_MISSING_VALUES_THRESHOLD))
+            warnings.warn('Missing values constitute {0:.2f}% of all values in the frame which exceeds {1}% threshold'
+                          .format(percentage_missing_values * 100.0, WeatherCache.PERCENTAGE_MISSING_VALUES_THRESHOLD * 100.0))
 
         data = numpy.full((len(missing_values), len(frame.columns)), numpy.NaN)
         missing_values_frame = pandas.DataFrame(index=missing_values, data=data, columns=frame.columns)
@@ -420,7 +420,8 @@ class ParseDateAction(argparse.Action):
 class CoregionalizationModel:
 
     def __init__(self, observation_frame, forecast_frame):
-        assert observation_frame.index.max() <= forecast_frame.index.min()
+        assert observation_frame.empty or observation_frame.index.max() <= forecast_frame.index.min()
+        assert not forecast_frame.empty
 
         self.__observation_frame = observation_frame
         self.__forecast_frame = forecast_frame
@@ -431,16 +432,17 @@ class CoregionalizationModel:
     def optimize(self):
         # prepare input
         X, Y = [], []
-        observation_start_time = self.__observation_frame.index.min()
+        observation_start_time = self.__observation_frame.index.min() if not self.__observation_frame.empty else self.__forecast_frame.index.min()
 
         def elapsed_hours(date_time):
             return int((date_time - observation_start_time).total_seconds() / 3600)
 
         cities = self.__forecast_frame.columns
         for city_index, city in enumerate(cities):
-            for time, cloud_cover in self.__observation_frame[city].items():
-                X.append([time, elapsed_hours(time), city_index])
-                Y.append([cloud_cover])
+            if not self.__observation_frame.empty:
+                for time, cloud_cover in self.__observation_frame[city].items():
+                    X.append([time, elapsed_hours(time), city_index])
+                    Y.append([cloud_cover])
 
             for time, cloud_cover in self.__forecast_frame[city].items():
                 X.append([time, elapsed_hours(time), city_index])
@@ -452,8 +454,10 @@ class CoregionalizationModel:
 
         # plot output data
         matrix_rank = len(cities)
-        kernel_1 = GPy.kern.RBF(1, lengthscale=6, ARD=True) + GPy.kern.Linear(1, active_dims=[0], ARD=True) \
-                   + GPy.kern.White(1) + GPy.kern.Bias(1)
+        kernel_1 = GPy.kern.RBF(1, lengthscale=6, ARD=True) \
+                   + GPy.kern.Linear(1, active_dims=[0], ARD=True) \
+                   + GPy.kern.White(1) \
+                   + GPy.kern.Bias(1)
         kernel_2 = GPy.kern.Coregionalize(1, output_dim=len(cities), rank=matrix_rank)
 
         X_Gpy = self.__X[:, [1, 2]]
@@ -627,6 +631,28 @@ class HeteroscedasticAutoCorrelatedNoiseModel:
         return sample_frame
 
 
+class GenerationModelFactory:
+    PAST_ERRORS_MODEL_NAME = 'past_errors'
+    INDEPENDENT_NOISE_MODEL_NAME = 'independent_noise'
+    CORRELATED_NOISE_MODEL_NAME = 'correlated_noise'
+    COREGIONALIZATION_MODEL_NAME = 'coregionalization'
+    MODEL_NAMES = [PAST_ERRORS_MODEL_NAME, INDEPENDENT_NOISE_MODEL_NAME, CORRELATED_NOISE_MODEL_NAME, COREGIONALIZATION_MODEL_NAME]
+
+    def create_model(self, model_name, weather_cache, forecast_frame):
+        if model_name == self.PAST_ERRORS_MODEL_NAME:
+            return PastErrorsModel(weather_cache, forecast_frame)
+        elif model_name == self.INDEPENDENT_NOISE_MODEL_NAME:
+            return HeteroscedasticIndependentNoiseModel(weather_cache, forecast_frame)
+        elif model_name == self.CORRELATED_NOISE_MODEL_NAME:
+            return HeteroscedasticAutoCorrelatedNoiseModel(weather_cache, forecast_frame)
+        elif model_name == self.COREGIONALIZATION_MODEL_NAME:
+            default_observation_length = datetime.timedelta(days=14)
+            observation_frame \
+                = weather_cache.get_observation_frame(forecast_frame.index.min() - default_observation_length, default_observation_length)
+            return CoregionalizationModel(observation_frame, forecast_frame)
+        assert False, 'Model name "{0}" is invalid' % model_name
+
+
 def parse_args():
     parser = argparse.ArgumentParser()
 
@@ -643,12 +669,14 @@ def parse_args():
     extend_parser.add_argument('problem_file')
     extend_parser.add_argument('--output')
     extend_parser.add_argument('--num-scenarios', default=0, type=int)
+    extend_parser.add_argument('--method', choices=GenerationModelFactory.MODEL_NAMES)
 
     generate_parser = sub_parsers.add_parser(GENERATE_COMMAND)
     generate_parser.add_argument('--from', action=ParseDateAction)
     generate_parser.add_argument('--to', action=ParseDateAction)
     generate_parser.add_argument('--problem-prefix')
     generate_parser.add_argument('--num-scenarios', default=0, type=int)
+    generate_parser.add_argument('--method', choices=GenerationModelFactory.MODEL_NAMES)
 
     plot_forecast_parser = sub_parsers.add_parser(PLOT_FORECAST_COMMAND)
     plot_forecast_parser.add_argument('--from', action=ParseDateAction)
@@ -811,6 +839,7 @@ def extend_problem_definition(args):
     problem_file = getattr(args, 'problem_file')
     output_file = getattr(args, 'output')
     num_scenarios = getattr(args, 'num_scenarios')
+    generation_model_name = getattr(args, 'method')
 
     with open(problem_file, 'r') as input_stream:
         json_object = json.load(input_stream)
@@ -846,16 +875,11 @@ def extend_problem_definition(args):
 
     scenario_frames = []
     if num_scenarios > 0:
-        # # coregionalization model
-        # observation_length = datetime.timedelta(days=14)
-        # observation_frame = weather_cache.get_observation_frame(forecast_frame.index.min() - observation_length, observation_length)
-        # model = CoregionalizationModel(observation_frame, forecast_frame)
+        model_factory = GenerationModelFactory()
+        generation_model = model_factory.create_model(generation_model_name, weather_cache, forecast_frame)
+        generation_model.optimize()
 
-        # error model
-        model = HeteroscedasticAutoCorrelatedNoiseModel(weather_cache, forecast_frame)
-        model.optimize()
-
-        sample_frames = model.samples(num_scenarios)
+        sample_frames = generation_model.samples(num_scenarios)
         for sample_frame in sample_frames:
             scenario_frame = sample_frame.pivot_table(index='DateTime', columns='City', values='y')
             scenario_frame = enforce_cloud_cover_limits(scenario_frame)
@@ -883,6 +907,7 @@ def generate_command(args):
     from_date_arg = getattr(args, 'from')
     to_date_arg = getattr(args, 'to')
     num_scenarios = getattr(args, 'num_scenarios')
+    generation_model_name = getattr(args, 'method')
 
     configurations = []
     current_date = from_date_arg
@@ -906,7 +931,8 @@ def generate_command(args):
         if not os.path.exists(temp_problem):
             raise Exception('Failed to generate problem {0}'.format(temp_problem))
 
-        args = argparse.Namespace(**{'problem_file': temp_problem, 'output': problem, 'num_scenarios': num_scenarios})
+        args = argparse.Namespace(**{'problem_file': temp_problem, 'output': problem,
+                                     'num_scenarios': num_scenarios, 'method': generation_model_name})
         extend_problem_definition(args)
 
         if not os.path.exists(problem):
@@ -941,8 +967,6 @@ def plot_generated_scenarios(args):
 
     autocorrelated_noise_error_model = HeteroscedasticAutoCorrelatedNoiseModel(weather_cache, forecast_frame)
     autocorrelated_noise_error_model.optimize()
-
-
 
     def domain_filter(values):
         return [max(0, min(100, value)) for value in values]
@@ -1128,9 +1152,11 @@ def plot_coregionalization(args):
     weather_cache = WeatherCache()
     weather_cache.load()
 
-    forecast_duration = datetime.timedelta(days=5)
     observation_duration = forecast_start_time - observation_start_time
-    forecast_frame = weather_cache.get_forecast_frame(forecast_start_time, forecast_duration)
+    forecast_frame = weather_cache.get_closest_forecast_frame(forecast_start_time, weather_cache.forecast_length)
+
+    assert not forecast_frame.empty, 'Forecast frame is empty'
+
     observation_frame = weather_cache.get_observation_frame(observation_start_time, observation_duration)
     cities = forecast_frame.columns
 
@@ -1143,7 +1169,9 @@ def plot_coregionalization(args):
     fig, ax = matplotlib.pyplot.subplots(len(cities), 1, sharex=True, figsize=(10, 8))
     observation_handle, forecast_handle = None, None
     for city_index, city in enumerate(cities):
-        observation_handle = ax[city_index].scatter(observation_frame[city].index, observation_frame[city], marker='s', s=1, color=OBSERVATION_COLOR)
+        if not observation_frame.empty:
+            observation_handle = ax[city_index].scatter(observation_frame[city].index, observation_frame[city], marker='s', s=1,
+                                                        color=OBSERVATION_COLOR)
         forecast_handle = ax[city_index].scatter(forecast_frame[city].index, forecast_frame[city], marker='s', s=1, color=FORECAST_COLOR)
         ax[city_index].set_ylim(-25, 125)
 
@@ -1155,8 +1183,14 @@ def plot_coregionalization(args):
     ax[int(len(cities) / 2)].set_ylabel('Cloud Cover [%]')
     ax[-1].set_xlabel('Date')
 
-    legend_artist = ax[-1].legend([observation_handle, forecast_handle], ['Observation', 'Forecast'],
-                                  ncol=2, loc='center', bbox_to_anchor=(0.5, -2))
+    if observation_handle:
+        handles = [observation_handle, forecast_handle]
+        handle_labels = ['Observation', 'Forecast']
+    else:
+        handles = [forecast_handle]
+        handle_labels = ['Forecast']
+
+    legend_artist = ax[-1].legend(handles, handle_labels, ncol=2, loc='center', bbox_to_anchor=(0.5, -2))
     ax[-1].add_artist(legend_artist)
 
     fig.tight_layout()
@@ -1190,20 +1224,29 @@ def plot_coregionalization(args):
         ax[city_index].add_artist(at)
         ax[city_index].set_ylim(-25, 125)
 
-        observation_city_series = observation_frame[city]
+        if not observation_frame.empty:
+            observation_city_series = observation_frame[city]
+            observation_handle = ax[city_index].scatter(observation_city_series.index, observation_city_series.values,
+                                                        marker='s', s=1.0, color=OBSERVATION_COLOR)
+
         forecast_city_series = forecast_frame[city]
-        observation_handle = ax[city_index].scatter(observation_city_series.index, observation_city_series.values,
-                                                    marker='s', s=1.0, color=OBSERVATION_COLOR)
         forecast_handle = ax[city_index].scatter(forecast_city_series.index, forecast_city_series.values,
                                                  marker='s', s=1.0, color=FORECAST_COLOR)
     for tick in ax[-1].get_xticklabels():
         tick.set_rotation(90)
     ax[int(len(cities) / 2)].set_ylabel('Cloud Cover [%]')
     ax[-1].set_xlabel('Date')
-    legend_artist = ax[-1].legend([mean_handle, confidence_handle, observation_handle, forecast_handle,
-                                   sample_handles[0], sample_handles[1], sample_handles[2], sample_handles[3]],
-                                  ['Mean', 'Confidence', 'Observation', 'Forecast', 'Sample 1', 'Sample 2', 'Sample 3', 'Sample 4'],
-                                  ncol=4, loc='center', bbox_to_anchor=(0.5, -2.1))
+
+    if not observation_frame.empty:
+        handles = [mean_handle, confidence_handle, observation_handle, forecast_handle,
+                   sample_handles[0], sample_handles[1], sample_handles[2], sample_handles[3]]
+        labels = ['Mean', 'Confidence', 'Observation', 'Forecast', 'Sample 1', 'Sample 2', 'Sample 3', 'Sample 4']
+    else:
+        handles = [mean_handle, confidence_handle, forecast_handle,
+                   sample_handles[0], sample_handles[1], sample_handles[2], sample_handles[3]]
+        labels = ['Mean', 'Confidence', 'Forecast', 'Sample 1', 'Sample 2', 'Sample 3', 'Sample 4']
+
+    legend_artist = ax[-1].legend(handles, labels, ncol=4, loc='center', bbox_to_anchor=(0.5, -2.1))
     ax[-1].add_artist(legend_artist)
     fig.tight_layout()
     fig.subplots_adjust(bottom=0.2, hspace=0.10)
