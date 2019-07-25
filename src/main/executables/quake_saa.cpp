@@ -120,13 +120,13 @@ int main(int argc, char *argv[]) {
     }
 
     // compute saa index over generated scenarios
-    const auto target_traffic_index = evaluator(*observed_solution_opt);
-    LOG(INFO) << "Computing Sample Average Approximation with the target index of " << target_traffic_index;
-    quake::SampleAverageMipModel mip_model(&problem, arguments.IntervalStep, forecast_scenarios_to_use, target_traffic_index);
-    const auto saa_solution_opt = mip_model.Solve(arguments.TimeLimit, arguments.GapLimit, boost::none);
-    CHECK(saa_solution_opt) << "Failed to find the solution for Sample Average Approximation";
-    LOG(INFO) << "Sample Average Approximation  In-Sample Traffic Index: " << evaluator(*saa_solution_opt, weather_forecast);
-    LOG(INFO) << "Sample Average Approximation Out-of-Sample Traffic Index: " << evaluator(*saa_solution_opt, weather_observed);
+    const auto target_traffic_index = evaluator(*observed_solution_opt) * 0.15;
+//    LOG(INFO) << "Computing Sample Average Approximation with the target index of " << target_traffic_index;
+//    quake::SampleAverageMipModel mip_model(&problem, arguments.IntervalStep, forecast_scenarios_to_use, target_traffic_index);
+//    const auto saa_solution_opt = mip_model.Solve(arguments.TimeLimit, arguments.GapLimit, boost::none);
+//    CHECK(saa_solution_opt) << "Failed to find the solution for Sample Average Approximation";
+//    LOG(INFO) << "Sample Average Approximation  In-Sample Traffic Index: " << evaluator(*saa_solution_opt, weather_forecast);
+//    LOG(INFO) << "Sample Average Approximation Out-of-Sample Traffic Index: " << evaluator(*saa_solution_opt, weather_observed);
 
     quake::CVarMipModel cvar_mip_model(&problem, arguments.IntervalStep, forecast_scenarios_to_use, target_traffic_index, 0.05);
     const auto cvar_solution_opt = cvar_mip_model.Solve(arguments.TimeLimit, arguments.GapLimit, boost::none);

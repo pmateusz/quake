@@ -40,9 +40,13 @@ import matplotlib.pyplot
 import matplotlib.ticker
 import numpy
 import pandas
-import quake.city
 import tabulate
 import tqdm
+
+import quake.city
+import quake.weather.problem
+import quake.weather.solution
+import quake.weather.time_period
 
 BUILD_CACHE_COMMAND = 'build-cache'
 PLOT_COMMAND = 'plot-cloud-cover'
@@ -312,109 +316,9 @@ class WeatherCache:
         return self.__observation_frame
 
 
-class TimePeriod:
-    DATETIME_FORMAT: str = '%Y-%b-%d %H:%M:%S'
-
-    def __init__(self, begin_time, end_time):
-        self.__begin_time = begin_time
-        self.__end_time = end_time
-
-    def is_before(self, other):
-        return self.end < other.begin
-
-    def is_after(self, other):
-        return self.begin >= other.end
-
-    @property
-    def begin(self):
-        return self.__begin_time
-
-    @property
-    def end(self):
-        return self.__end_time
-
-    @property
-    def length(self):
-        return self.__end_time - self.__begin_time
-
-    @staticmethod
-    def from_json(json_object):
-        begin_datetime = datetime.datetime.strptime(json_object['begin'], TimePeriod.DATETIME_FORMAT)
-        end_datetime = datetime.datetime.strptime(json_object['end'], TimePeriod.DATETIME_FORMAT)
-        return TimePeriod(begin_datetime, end_datetime)
-
-    def to_json(self):
-        return {'begin': self.__begin_time.strftime(self.DATETIME_FORMAT), 'end': self.__end_time.strftime(self.DATETIME_FORMAT)}
-
-
-class Problem:
-    FORECASTS_KEY = 'forecasts'
-
-    def __init__(self, json_object):
-        self.__json_object = json_object
-
-    def add_forecast(self, name, frame):
-        if self.FORECASTS_KEY not in self.__json_object:
-            self.__json_object[self.FORECASTS_KEY] = {}
-        self.__json_object[self.FORECASTS_KEY][name] = self.__frame_to_dict(frame)
-
-    def trim_observation_period(self, new_observation_period: TimePeriod):
-        metadata = self.__get_metadata()
-        metadata['observation_period'] = new_observation_period.to_json()
-        self.__set_metadata(metadata)
-
-        updated_stations = []
-        for station_dict in self.__json_object['stations']:
-            updated_communication_windows = []
-            for communication_window in station_dict['communication_windows']:
-                window_period = TimePeriod.from_json(communication_window['period'])
-                if window_period.is_after(new_observation_period) or window_period.is_before(new_observation_period):
-                    continue
-                updated_communication_windows.append(copy.deepcopy(communication_window))
-            updated_station_dict = dict()
-            updated_station_dict['communication_windows'] = updated_communication_windows
-            for key in station_dict:
-                if key == 'communication_windows':
-                    continue
-                updated_station_dict[key] = copy.deepcopy(station_dict[key])
-            updated_stations.append(updated_station_dict)
-        self.__json_object['stations'] = updated_stations
-
-    def set_metadata(self, key, value):
-        metadata = self.__get_metadata()
-        metadata[key] = value
-        self.__set_metadata(metadata)
-
-    def __get_metadata(self):
-        return {pair[0]: pair[1] for pair in self.__json_object['metadata']}
-
-    def __set_metadata(self, metadata):
-        self.__json_object['metadata'] = [[key, value] for key, value in metadata.items()]
-
-    @property
-    def json_object(self):
-        return self.__json_object
-
-    @property
-    def observation_period(self):
-        metadata = self.__get_metadata()
-        return TimePeriod.from_json(metadata['observation_period'])
-
-    @staticmethod
-    def __frame_to_dict(frame):
-        station_data = []
-        cities = frame.columns.values
-        for city in cities:
-            cloud_cover_data = frame[city].values.tolist()
-            station_data.append({'station': city.name, 'cloud_cover': cloud_cover_data})
-
-        index_values = [value.strftime(TimePeriod.DATETIME_FORMAT) for value in frame.index]
-        return {'index': index_values, 'stations': station_data}
-
-
 class JSONEncoder(json.JSONEncoder):
     def default(self, obj):
-        if isinstance(obj, Problem):
+        if isinstance(obj, quake.weather.problem.Problem):
             return obj.json_object
         if isinstance(obj, quake.city.City):
             return obj.name
@@ -856,7 +760,7 @@ def extend_problem_definition(args):
 
     with open(problem_file, 'r') as input_stream:
         json_object = json.load(input_stream)
-        problem = Problem(json_object)
+        problem = quake.weather.problem.Problem(json_object)
 
     weather_cache = WeatherCache()
     weather_cache.load()
@@ -902,7 +806,7 @@ def extend_problem_definition(args):
         return frame[(frame.index >= min_time) & (frame.index <= max_time)]
 
     updated_problem = copy.deepcopy(problem)
-    updated_problem.trim_observation_period(TimePeriod(min_time, max_time))
+    updated_problem.trim_observation_period(quake.weather.time_period.TimePeriod(min_time, max_time))
     updated_problem.add_forecast('forecast', trim_to_time_interval(forecast_frame))
     updated_problem.add_forecast('real', trim_to_time_interval(real_frame))
 
@@ -1550,3 +1454,22 @@ if __name__ == '__main__':
 
         matplotlib.pyplot.show(block=True)
         print('here')
+
+
+    # load problem
+    with open('/home/pmateusz/dev/quake/python/problem_past_error_replication_2019-06-18.json', 'r') as input_stream:
+        json_object = json.load(input_stream)
+        problem = quake.weather.problem.Problem(json_object)
+
+    # load solution
+    with open('/home/pmateusz/dev/quake/cmake-build-debug/saa_deterministic.json', 'r') as input_stream:
+        json_object = json.load(input_stream)
+        solution = quake.weather.solution.Solution(json_object)
+
+    for station in solution.Stations:
+        print(solution.Observations(station))
+    print('here')
+
+    # TODO: print stations
+    # TODO: print observation windows
+    # TODO: calculate the number of keys transferred using actual scenario

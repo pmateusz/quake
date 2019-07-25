@@ -88,8 +88,12 @@ namespace quake {
             CHECK_NE(solver_status, SolverStatus::Infeasible);
             ReportResults(solver_status);
 
-            auto observations = GetObservations();
+            const auto num_solutions = mip_model_.get(GRB_IntAttr_SolCount);
+            if (num_solutions < 1) {
+                return boost::none;
+            }
 
+            auto observations = GetObservations();
             std::unordered_map<quake::GroundStation, int64> final_buffers;
             for (const auto &station: Stations()) {
                 if (station == GroundStation::None) {
