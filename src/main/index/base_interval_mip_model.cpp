@@ -267,3 +267,9 @@ quake::IntervalVar quake::BaseIntervalMipModel::CreateInterval(std::size_t stati
     label << "s" << station_index << "_" << period;
     return {station_index, period, mip_model_.addVar(0, 1, 0, GRB_BINARY, label.str())};
 }
+
+void quake::BaseIntervalMipModel::AppendMetadata(quake::Metadata &metadata) {
+    BaseMipModel::AppendMetadata(metadata);
+
+    metadata.SetProperty(Metadata::Property::IntervalStep, interval_step_);
+}

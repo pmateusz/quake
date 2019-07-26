@@ -51,6 +51,18 @@ std::ostream &operator<<(std::ostream &out, quake::Metadata::Property property) 
         case quake::Metadata::Property::SolutionType:
             out << "solution_type";
             break;
+        case quake::Metadata::Property::Gap:
+            out << "gap";
+            break;
+        case quake::Metadata::Property::GapLimit:
+            out << "gap_limit";
+            break;
+        case quake::Metadata::Property::TimeLimit:
+            out << "time_limit";
+            break;
+        case quake::Metadata::Property::IntervalStep:
+            out << "interval_step";
+            break;
         default:
             LOG(FATAL) << "Conversion to string for Property " << static_cast<std::size_t>(property) << " is not defined";
     }
@@ -161,6 +173,26 @@ void quake::from_json(const nlohmann::json &json, quake::Metadata::Property &pro
 
     if (property_name == "solution_type") {
         property = quake::Metadata::Property::SolutionType;
+        return;
+    }
+
+    if (property_name == "gap") {
+        property = quake::Metadata::Property::Gap;
+        return;
+    }
+
+    if (property_name == "gap_limit") {
+        property = quake::Metadata::Property::GapLimit;
+        return;
+    }
+
+    if (property_name == "time_limit") {
+        property = quake::Metadata::Property::TimeLimit;
+        return;
+    }
+
+    if (property_name == "interval_step") {
+        property = quake::Metadata::Property::IntervalStep;
         return;
     }
 

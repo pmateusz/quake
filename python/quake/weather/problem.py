@@ -7,6 +7,7 @@ import pandas
 import quake.city
 import quake.cloud_cover
 import quake.weather.time_period
+import quake.weather.metadata
 
 
 class Problem:
@@ -22,9 +23,7 @@ class Problem:
         self.__json_object[self.FORECASTS_KEY][name] = self.__frame_to_dict(frame)
 
     def trim_observation_period(self, new_observation_period: quake.weather.time_period.TimePeriod):
-        metadata = self.__get_metadata()
-        metadata['observation_period'] = new_observation_period.to_json()
-        self.__set_metadata(metadata)
+        self.set_metadata(quake.weather.metadata.OBSERVATION_PERIOD, new_observation_period)
 
         updated_stations = []
         for station_dict in self.__json_object['stations']:
@@ -44,15 +43,9 @@ class Problem:
         self.__json_object['stations'] = updated_stations
 
     def set_metadata(self, key, value):
-        metadata = self.__get_metadata()
+        metadata = quake.weather.metadata.from_json(self.__json_object['metadata'])
         metadata[key] = value
-        self.__set_metadata(metadata)
-
-    def __get_metadata(self):
-        return {pair[0]: pair[1] for pair in self.__json_object['metadata']}
-
-    def __set_metadata(self, metadata):
-        self.__json_object['metadata'] = [[key, value] for key, value in metadata.items()]
+        self.__json_object['metadata'] = quake.weather.metadata.to_json(metadata)
 
     def get_scenario(self, scenario_name):
         forecasts_json = self.__json_object['forecasts']
@@ -156,8 +149,13 @@ class Problem:
 
     @property
     def observation_period(self):
-        metadata = self.__get_metadata()
-        return quake.weather.time_period.TimePeriod.from_json(metadata['observation_period'])
+        metadata = quake.weather.metadata.from_json(self.__json_object['metadata'])
+        return metadata[quake.weather.metadata.OBSERVATION_PERIOD]
+
+    @property
+    def scenario_generator(self):
+        metadata = quake.weather.metadata.from_json(self.__json_object['metadata'])
+        return metadata[quake.weather.metadata.SCENARIO_GENERATOR]
 
     @staticmethod
     def __frame_to_dict(frame):

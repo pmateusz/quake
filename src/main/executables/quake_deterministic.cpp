@@ -20,27 +20,67 @@
 // SOFTWARE.
 
 #include <cstdlib>
+#include <boost/config.hpp>
+#include <boost/format.hpp>
 
 #include "extended_problem.h"
 #include "index/worst_case_mip_model.h"
 #include "index/index_evaluator.h"
 #include "mip_arguments.h"
+#include "metadata.h"
 
+DEFINE_string(solution_prefix, "solution", "Output prefix appended to the solution file.");
+
+struct Arguments : public quake::MipArguments {
+
+    Arguments()
+            : MipArguments() {}
+
+    void Fill() override {
+        MipArguments::Fill();
+
+        CHECK(!FLAGS_solution_prefix.empty());
+        SolutionPrefix = FLAGS_solution_prefix;
+    }
+
+    std::string SolutionPrefix;
+};
+
+
+void Solve(const Arguments &args,
+           const quake::ExtendedProblem &problem,
+           const quake::Forecast &forecast,
+           quake::Metadata::SolutionType solution_type,
+           const boost::filesystem::path &solution_file_path) {
+    quake::WorstCaseMipModel mip_model{&problem, args.IntervalStep, {forecast}};
+    auto solution_opt = mip_model.Solve(args.TimeLimit, args.GapLimit, boost::none);
+
+    if (solution_opt) {
+        solution_opt->GetMetadata().SetProperty(quake::Metadata::Property::SolutionType, solution_type);
+
+        quake::util::Save(*solution_opt, solution_file_path);
+    } else {
+        LOG(FATAL) << "Failed to solve the problem";
+    }
+}
 
 int main(int argc, char *argv[]) {
-    const auto arguments = quake::SetupLogsAndParseArgs<quake::MipArguments>(argc, argv);
-
+    const auto arguments = quake::SetupLogsAndParseArgs<Arguments>(argc, argv);
     const auto problem = quake::ExtendedProblem::load_json(arguments.ProblemPath);
-    const auto &weather_forecast = problem.GetWeatherSample(quake::ExtendedProblem::WeatherSample::Forecast);
-    const auto &weather_observed = problem.GetWeatherSample(quake::ExtendedProblem::WeatherSample::Real);
 
-    quake::WorstCaseMipModel mip_model{&problem, arguments.IntervalStep, std::vector<quake::Forecast>{weather_forecast}};
-    const auto solution_opt = mip_model.Solve(arguments.TimeLimit, arguments.GapLimit, boost::none);
-    CHECK(solution_opt);
+    {
+        LOG(INFO) << "Solving model with weather forecast";
+        const auto &forecast = problem.GetWeatherSample(quake::ExtendedProblem::WeatherSample::Forecast);
+        boost::filesystem::path solution_file_path = (boost::format("%1%_deterministic_forecast.json") % arguments.SolutionPrefix).str();
+        Solve(arguments, problem, forecast, quake::Metadata::SolutionType::Test, solution_file_path);
+    }
 
-    quake::IndexEvaluator evaluator{problem};
-    LOG(INFO) << "In-Sample Traffic Index: " << evaluator(*solution_opt, weather_forecast);
-    LOG(INFO) << "Out-of-Sample Traffic Index: " << evaluator(*solution_opt, weather_observed);
+    {
+        LOG(INFO) << "Solving model with weather forecast";
+        const auto &real_weather = problem.GetWeatherSample(quake::ExtendedProblem::WeatherSample::Real);
+        boost::filesystem::path solution_file_path = (boost::format("%1%_deterministic_real.json") % arguments.SolutionPrefix).str();
+        Solve(arguments, problem, real_weather, quake::Metadata::SolutionType::Reference, solution_file_path);
+    }
 
     return EXIT_SUCCESS;
 }

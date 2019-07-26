@@ -28,18 +28,15 @@ namespace quake {
     struct MipArguments {
         MipArguments()
                 : ProblemPath{},
-                  SolutionPath{},
                   IntervalStep{},
                   GapLimit{boost::none},
                   TimeLimit{boost::none} {}
 
         virtual void Fill() {
             CHECK(!FLAGS_problem.empty()) << "The problem input file is required";
-            CHECK(!FLAGS_solution.empty()) << "The solution output file is required";
             CHECK(!FLAGS_interval_step.empty()) << "The interval step is required";
 
             ProblemPath = FLAGS_problem;
-            SolutionPath = FLAGS_solution;
             IntervalStep = boost::posix_time::duration_from_string(FLAGS_interval_step);
 
             if (!FLAGS_time_limit.empty()) {
@@ -52,7 +49,6 @@ namespace quake {
         }
 
         boost::filesystem::path ProblemPath;
-        boost::filesystem::path SolutionPath;
         boost::posix_time::time_duration IntervalStep;
         boost::optional<double> GapLimit;
         boost::optional<boost::posix_time::time_duration> TimeLimit;

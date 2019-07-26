@@ -54,6 +54,8 @@ namespace quake {
         inline const std::vector<IntervalVar> &StationIntervals(const GroundStation &station) const { return intervals_.at(Index(station)); }
 
     protected:
+        void AppendMetadata(Metadata &metadata) override;
+
         void Build(const boost::optional<Solution> &solution) override;
 
         IntervalVar CreateInterval(std::size_t station_index, const boost::posix_time::time_period &period);

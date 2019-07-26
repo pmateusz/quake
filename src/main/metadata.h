@@ -44,7 +44,11 @@ namespace quake {
             TargetTrafficIndex,
             ObservationPeriod,
             SwitchDuration,
-            SolutionType
+            SolutionType,
+            GapLimit,
+            Gap,
+            TimeLimit,
+            IntervalStep
         };
 
         enum class SolutionType {
@@ -124,6 +128,6 @@ boost::optional<ValueType> quake::Metadata::GetProperty(const quake::Metadata::P
 }
 
 template<>
-boost::optional<nlohmann::json> quake::Metadata::GetProperty(const quake::Metadata::Property property) const;
+boost::optional<nlohmann::json> quake::Metadata::GetProperty(quake::Metadata::Property property) const;
 
 #endif //QUAKE_METADATA_H

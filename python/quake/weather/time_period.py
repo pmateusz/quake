@@ -20,7 +20,16 @@ class TimePeriod:
         return TimePeriod(intersect_begin, intersect_end)
 
     def __str__(self):
-        return str(self.to_json())
+        return '[{0}/{1}]'.format(self.__begin_time.strftime(self.DATETIME_FORMAT), self.__end_time.strftime(self.DATETIME_FORMAT))
+
+    def __eq__(self, other):
+        if not isinstance(other, TimePeriod):
+            return False
+
+        return self.__begin_time == other.begin and self.__end_time == other.end
+
+    def __hash__(self):
+        return hash((self.__begin_time, self.__end_time))
 
     @property
     def begin(self) -> datetime.datetime:

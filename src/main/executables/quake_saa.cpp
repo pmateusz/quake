@@ -68,20 +68,6 @@ struct Arguments : public quake::MipArguments {
     std::string SolutionPrefix;
 };
 
-template<typename ObjectType>
-void Save(const ObjectType &object, const boost::filesystem::path &output_path) {
-    std::ofstream output_stream;
-
-    output_stream.open(output_path.string(), std::ofstream::out);
-    LOG_IF(FATAL, !output_stream.is_open()) << "Failed to save solution in " << output_path << " file.";
-
-    nlohmann::json json_object = object;
-    output_stream << json_object;
-
-    output_stream.close();
-    LOG_IF(FATAL, output_stream.is_open());
-}
-
 int main(int argc, char *argv[]) {
     const auto arguments = quake::SetupLogsAndParseArgs<Arguments>(argc, argv);
 
@@ -116,7 +102,7 @@ int main(int argc, char *argv[]) {
         observed_solution_opt->GetMetadata().SetProperty(quake::Metadata::Property::SolutionType, quake::Metadata::SolutionType::Reference);
 
         const std::string solution_file = (boost::format{"%1%_deterministic.json"} % arguments.SolutionPrefix).str();
-        Save(*observed_solution_opt, solution_file);
+        quake::util::Save(*observed_solution_opt, solution_file);
     }
     return EXIT_SUCCESS;
 

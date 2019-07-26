@@ -47,6 +47,7 @@ import quake.city
 import quake.weather.problem
 import quake.weather.solution
 import quake.weather.time_period
+import quake.weather.metadata
 
 BUILD_CACHE_COMMAND = 'build-cache'
 PLOT_COMMAND = 'plot-cloud-cover'
@@ -54,6 +55,7 @@ COVARIANCE_COMMAND = 'compute-covariance'
 PLOT_FORECAST_COMMAND = 'plot-forecast'
 PLOT_COREGIONALIZATION_COMMAND = 'plot-coregionalization'
 PLOT_GENERATED_SCENARIOS_COMMAND = 'plot-generated-scenarios'
+ANALYZE_COMMAND = 'analyze'
 VAR_COMMAND = 'compute-var'
 EXTEND_COMMAND = 'extend'
 GENERATE_COMMAND = 'generate'
@@ -611,6 +613,11 @@ def parse_args():
     plot_generated_scenarios_parser.add_argument('--from', action=ParseDateAction)
     plot_generated_scenarios_parser.add_argument('--num-scenarios', default=0, type=int)
     plot_generated_scenarios_parser.add_argument('--output-prefix')
+
+    analyze_command = sub_parsers.add_parser(ANALYZE_COMMAND)
+    analyze_command.add_argument('--problem-dir', required=True)
+    analyze_command.add_argument('--solution-dir', required=True)
+    analyze_command.add_argument('--output', required=True)
 
     return parser.parse_args()
 
@@ -1175,6 +1182,76 @@ def plot_coregionalization(args):
     matplotlib.pyplot.close(fig)
 
 
+def analyze_command(args):
+    problem_dir = getattr(args, 'problem_dir')
+    solution_dir = getattr(args, 'solution_dir')
+    output_path = getattr(args, 'output')
+
+    def is_json_file(file_path):
+        if not os.path.isfile(file_path):
+            return False
+
+        _, ext = os.path.splitext(file_path)
+        return ext == '.json'
+
+    solutions = []
+    solution_files = [os.path.join(solution_dir, solution_file) for solution_file in os.listdir(solution_dir)]
+    solution_files = list(filter(is_json_file, solution_files))
+    for solution_file_path in tqdm.tqdm(solution_files, desc='Loading Solution Files', leave=False):
+        with open(solution_file_path, 'r') as input_stream:
+            solution_json = json.load(input_stream)
+            solution = quake.weather.solution.Solution(solution_json)
+            solutions.append(solution)
+
+    problems = []
+    problem_files = [os.path.join(problem_dir, problem_file) for problem_file in os.listdir(problem_dir)]
+    problem_files = list(filter(is_json_file, problem_files))
+    for problem_file_path in tqdm.tqdm(problem_files, desc='Loading Problem Files', leave=False):
+        with open(problem_file_path, 'r') as input_stream:
+            problem_json = json.load(input_stream)
+            problem = quake.weather.problem.Problem(problem_json)
+            problems.append(problem)
+
+    solution_frames = []
+    for solution_index, solution in tqdm.tqdm(enumerate(solutions), desc='Analyzing Solutions', leave=False):
+
+        source_problem = None
+        for problem in problems:
+            if problem.observation_period == solution.observation_period and problem.scenario_generator == solution.scenario_generator:
+                source_problem = problem
+                break
+
+        if not source_problem:
+            logging.warning('Failed to find a source problem for solution {0} with scenario generator {1}'.format(solution.observation_period,
+                                                                                                                  solution.scenario_generator))
+        scenario = problem.get_scenario('real')
+        data = []
+        for station in solution.stations:
+            station_keys_transferred = 0.0
+            for observation in solution.observations(station):
+                station_keys_transferred += problem.get_transferred_keys(station, observation, scenario)
+            station_transfer_share = problem.transfer_share(station)
+            data.append({'city': station,
+                         'keys_transferred': station_keys_transferred,
+                         'transfer_share': station_transfer_share,
+                         'traffic_index': station_keys_transferred / station_transfer_share})
+        solution_frame = pandas.DataFrame(data=data)
+        solution_frame[quake.weather.metadata.OBSERVATION_PERIOD] = solution.observation_period
+        solution_frame[quake.weather.metadata.SCENARIO_GENERATOR] = solution.scenario_generator
+        solution_frame[quake.weather.metadata.SOLUTION_TYPE] = solution.solution_type
+        solution_frame[quake.weather.metadata.GAP] = solution.gap
+        solution_frame[quake.weather.metadata.GAP_LIMIT] = solution.gap_limit
+        solution_frame[quake.weather.metadata.TIME_LIMIT] = solution.time_limit
+        solution_frame[quake.weather.metadata.INTERVAL_STEP] = solution.interval_step
+        solution_frame[quake.weather.metadata.SCENARIOS_NUMBER] = solution.scenarios_number
+        solution_frame[quake.weather.metadata.SOLUTION_METHOD] = solution.solution_method
+        solution_frame[quake.weather.metadata.TRAFFIC_INDEX] = solution.traffic_index
+        solution_frame['solution_id'] = solution_index
+        solution_frames.append(solution_frame)
+    master_solution_frame = pandas.concat(solution_frames)
+    master_solution_frame.to_excel(output_path)
+
+
 if __name__ == '__main__':
     args = parse_args()
     command = getattr(args, 'command')
@@ -1197,6 +1274,8 @@ if __name__ == '__main__':
         plot_coregionalization(args)
     elif command == PLOT_GENERATED_SCENARIOS_COMMAND:
         plot_generated_scenarios(args)
+    elif command == ANALYZE_COMMAND:
+        analyze_command(args)
 
 
     def plot_errors(station, begin_start_time, end_start_time):
@@ -1454,33 +1533,3 @@ if __name__ == '__main__':
 
         matplotlib.pyplot.show(block=True)
         print('here')
-
-
-    # load problem
-    with open('/home/pmateusz/dev/quake/python/problem_past_error_replication_2019-06-18.json', 'r') as input_stream:
-        json_object = json.load(input_stream)
-        problem = quake.weather.problem.Problem(json_object)
-
-    # load solution
-    with open('/home/pmateusz/dev/quake/cmake-build-debug/saa_deterministic.json', 'r') as input_stream:
-        json_object = json.load(input_stream)
-        solution = quake.weather.solution.Solution(json_object)
-
-    scenario = problem.get_scenario('real')
-
-    station = quake.city.THURSO
-    station_keys_transferred = 0
-    for observation in solution.observations(station):
-        station_keys_transferred += problem.get_transferred_keys(station, observation, scenario)
-
-    data = []
-    for station in solution.stations:
-        station_keys_transferred = 0.0
-        for observation in solution.observations(station):
-            station_keys_transferred += problem.get_transferred_keys(station, observation, scenario)
-        station_transfer_share = problem.transfer_share(station)
-        data.append({'city': station,
-                     'keys_transferred': station_keys_transferred,
-                     'transfer_share': station_transfer_share,
-                     'traffic_index': station_keys_transferred / station_transfer_share})
-    records = pandas.DataFrame(data=data)

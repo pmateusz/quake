@@ -24,7 +24,11 @@
 
 #include <nlohmann/json.hpp>
 
+#include <glog/logging.h>
+
+#include <boost/config.hpp>
 #include <boost/date_time.hpp>
+#include <boost/filesystem.hpp>
 
 #include "util/datetime.h"
 
@@ -58,6 +62,20 @@ namespace quake {
 
         template<>
         boost::posix_time::time_period from_json(const nlohmann::json &json);
+
+        template<typename ObjectType>
+        void Save(const ObjectType &object, const boost::filesystem::path &output_path) {
+            std::ofstream output_stream;
+
+            output_stream.open(output_path.string(), std::ofstream::out);
+            LOG_IF(FATAL, !output_stream.is_open()) << "Failed to save json object in " << output_path << " file.";
+
+            nlohmann::json json_object = object;
+            output_stream << json_object;
+
+            output_stream.close();
+            LOG_IF(FATAL, output_stream.is_open());
+        }
     }
 }
 

@@ -121,7 +121,37 @@ namespace quake {
                 final_buffers.emplace(station, station_initial_buffer + keys_received - total_key_consumption);
             }
 
-            auto metadata = CreateMetadata();
+            Metadata metadata;
+
+            {
+                static const std::vector<Metadata::Property> PROPERTIES_TO_COPY{
+                        Metadata::Property::SwitchDuration,
+                        Metadata::Property::ObservationPeriod,
+                        Metadata::Property::ScenarioGenerator
+                };
+
+                const auto &problem_metadata = problem_->GetMetadata();
+
+                for (const auto property: PROPERTIES_TO_COPY) {
+                    auto json_object_opt = problem_metadata.GetProperty<nlohmann::json>(property);
+                    if (json_object_opt) {
+                        metadata.SetProperty(property, *json_object_opt);
+                    }
+                }
+
+                if (gap_opt) {
+                    metadata.SetProperty(Metadata::Property::GapLimit, *gap_opt);
+                }
+
+                if (time_limit_opt) {
+                    metadata.SetProperty(Metadata::Property::TimeLimit, *time_limit_opt);
+                }
+
+                const auto gap = mip_model_.get(GRB_DoubleAttr_MIPGap);
+                metadata.SetProperty(Metadata::Property::Gap, gap);
+            }
+
+            AppendMetadata(metadata);
 
             Solution solution{std::move(metadata), std::move(observations), std::move(final_buffers)};
 
@@ -142,24 +172,7 @@ namespace quake {
         inline double InitialBuffer(const GroundStation &station) const { return problem_->InitialBuffer(station); }
 
     protected:
-        virtual Metadata CreateMetadata() {
-            static const std::vector<Metadata::Property> PROPERTIES_TO_COPY{
-                    Metadata::Property::SwitchDuration,
-                    Metadata::Property::ObservationPeriod,
-                    Metadata::Property::ScenarioGenerator
-            };
-
-            const auto &problem_metadata = problem_->GetMetadata();
-
-            Metadata metadata;
-            for (const auto property: PROPERTIES_TO_COPY) {
-                auto json_object_opt = problem_metadata.GetProperty<nlohmann::json>(property);
-                if (json_object_opt) {
-                    metadata.SetProperty(property, *json_object_opt);
-                }
-            }
-            return metadata;
-        }
+        virtual void AppendMetadata(Metadata &metadata) {}
 
         virtual void Build(const boost::optional<Solution> &initial_solution) = 0;
 
