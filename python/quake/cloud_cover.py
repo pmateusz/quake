@@ -20,7 +20,6 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import bisect
 import collections
 import csv
 import datetime
@@ -34,26 +33,47 @@ class CloudCoverIndex:
     def __init__(self, index):
         self.__index = index
 
-    def __call__(self, city, time):
+    def __call__(self, city: quake.city.City, time: datetime.datetime) -> float:
+        # implementation must be consistent with ./quake/src/main/forecast.h
         if city not in self.__index:
             return 0.0
 
         time_records, cover_records = self.__index[city]
-        right_index = bisect.bisect_left(time_records, time)
-        if right_index == 0 or right_index >= len(time_records):
+
+        if not time_records:
             return 0
 
-        left_index = right_index - 1
-        left_time, right_time = time_records[left_index], time_records[right_index]
-        assert left_time <= time <= right_time
+        if len(time_records) == 1:
+            return time_records[0]
 
-        left_delta, right_delta = time - left_time, right_time - time
-        left_cover, right_cover = cover_records[left_index], cover_records[right_index]
-        
-        if left_delta < right_delta:
-            return left_cover
-        else:
-            return right_cover
+        start_time = time_records[0]
+        update_frequency = time_records[1] - time_records[0]
+
+        time_from_start = time - start_time
+        left_index = int(time_from_start.total_seconds() / update_frequency.total_seconds())
+
+        assert 0 <= left_index
+
+        return cover_records[left_index]
+
+        # # old behaviour
+        # import bisect
+        # time_records, cover_records = self.__index[city]
+        # right_index = bisect.bisect_left(time_records, time)
+        # if right_index == 0 or right_index >= len(time_records):
+        #     return 0
+        #
+        # left_index = right_index - 1
+        # left_time, right_time = time_records[left_index], time_records[right_index]
+        # assert left_time <= time <= right_time
+        #
+        # left_delta, right_delta = time - left_time, right_time - time
+        # left_cover, right_cover = cover_records[left_index], cover_records[right_index]
+        # if left_delta < right_delta:
+        #     return left_cover
+        # else:
+        #     return right_cover
+        # return left_cover
 
     @staticmethod
     def from_csv(file_path):

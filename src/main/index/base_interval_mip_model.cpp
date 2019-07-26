@@ -217,6 +217,22 @@ std::unordered_map<quake::GroundStation, std::vector<boost::posix_time::time_per
             interval_index = next_interval_index;
         }
 
+        // self-test: ensure all intervals are included in collapsed intervals
+        for (const auto &interval : station_intervals) {
+            if (!util::IsActive(interval.Var())) {
+                continue;
+            }
+
+            bool found_aggregate = false;
+            for (const auto &aggregated_interval : observations) {
+                found_aggregate = aggregated_interval.contains(interval.Period());
+                if (found_aggregate) {
+                    break;
+                }
+            }
+            CHECK(found_aggregate);
+        }
+
         double observations_keys_received = 0;
         for (const auto &observation: observations) {
             observations_keys_received += problem_->KeyRate(station, observation, forecast);

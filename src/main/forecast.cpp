@@ -38,7 +38,7 @@ quake::Forecast::Forecast()
 quake::Forecast::Forecast(std::unordered_map<GroundStation, Series> index)
         : index_{std::move(index)} {}
 
-int quake::Forecast::GetCloudCover(const GroundStation &station, const boost::posix_time::ptime &time) const {
+quake::Forecast::SeriesValueType quake::Forecast::GetCloudCover(const GroundStation &station, const boost::posix_time::ptime &time) const {
     if (station == GroundStation::None) {
         return 0;
     }
@@ -159,7 +159,7 @@ void quake::from_json(const nlohmann::json &json, Forecast &forecast) {
     std::unordered_map<GroundStation, Forecast::Series> series;
     for (const auto &json_element : json.at("stations")) {
         auto station = json_element.at("station").get<GroundStation>();
-        auto cloud_cover = json_element.at("cloud_cover").get<std::vector<int64>>();
+        auto cloud_cover = json_element.at("cloud_cover").get<std::vector<Forecast::SeriesValueType>>();
 
         CHECK_EQ(index.size(), cloud_cover.size());
         series.emplace(station, Forecast::Series(step, period, cloud_cover));

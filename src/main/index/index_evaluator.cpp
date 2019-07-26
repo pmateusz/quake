@@ -16,13 +16,17 @@ double quake::IndexEvaluator::Evaluate(const Solution &solution,
         return 0;
     }
 
+    VLOG(1) << "Keys transferred in solution:";
     double global_traffic_index = std::numeric_limits<double>::max();
     for (const auto &station : solution.Stations()) {
         if (station == GroundStation::None) { continue; }
 
         double keys_transferred = 0;
         for (const auto &observation_window : solution.ObservationWindows(station)) {
-            keys_transferred += key_rate(station, observation_window);
+            const auto local_keys_transferred = key_rate(station, observation_window);
+            VLOG(1) << station << " " << observation_window << " " << local_keys_transferred;
+
+            keys_transferred += local_keys_transferred;
         }
 
         double local_traffic_index = keys_transferred / problem_.TransferShare(station);

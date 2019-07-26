@@ -96,7 +96,7 @@ namespace quake {
             std::vector<ValueType> values_;
         };
 
-        using SeriesValueType = int64;
+        using SeriesValueType = double;
         using Series = SparseSeries<SeriesValueType>;
 
         static Forecast load_csv(const boost::filesystem::path &input_file);
@@ -105,7 +105,7 @@ namespace quake {
 
         explicit Forecast(std::unordered_map<quake::GroundStation, Series> index);
 
-        int GetCloudCover(const quake::GroundStation &station, const boost::posix_time::ptime &time) const;
+        SeriesValueType GetCloudCover(const quake::GroundStation &station, const boost::posix_time::ptime &time) const;
 
         inline const std::unordered_map<quake::GroundStation, Series> &Index() const { return index_; }
 

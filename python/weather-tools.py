@@ -1466,10 +1466,21 @@ if __name__ == '__main__':
         json_object = json.load(input_stream)
         solution = quake.weather.solution.Solution(json_object)
 
-    for station in solution.Stations:
-        print(solution.Observations(station))
-    print('here')
+    scenario = problem.get_scenario('real')
 
-    # TODO: print stations
-    # TODO: print observation windows
-    # TODO: calculate the number of keys transferred using actual scenario
+    station = quake.city.THURSO
+    station_keys_transferred = 0
+    for observation in solution.observations(station):
+        station_keys_transferred += problem.get_transferred_keys(station, observation, scenario)
+
+    data = []
+    for station in solution.stations:
+        station_keys_transferred = 0.0
+        for observation in solution.observations(station):
+            station_keys_transferred += problem.get_transferred_keys(station, observation, scenario)
+        station_transfer_share = problem.transfer_share(station)
+        data.append({'city': station,
+                     'keys_transferred': station_keys_transferred,
+                     'transfer_share': station_transfer_share,
+                     'traffic_index': station_keys_transferred / station_transfer_share})
+    records = pandas.DataFrame(data=data)

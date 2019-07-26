@@ -7,11 +7,11 @@ venv/
 network_share
 data1
 data (copy 1)
-python/quake/__pycache__/
 python/*.csv
 python/*.hdf
 python/*.txt
 plots/
+**/__pycache__/
 
 *.out
 *.png
