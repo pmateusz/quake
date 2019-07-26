@@ -90,22 +90,6 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    quake::IndexEvaluator evaluator{problem};
-
-    // compute best achievable out of sample
-    quake::WorstCaseMipModel worst_case_model(&problem, arguments.IntervalStep, {weather_observed});
-    auto observed_solution_opt = worst_case_model.Solve(arguments.TimeLimit, arguments.GapLimit, boost::none);
-
-    LOG(INFO) << "Best out of sample performance: " << /*evaluator(*observed_solution_opt);*/ evaluator(*observed_solution_opt, weather_observed);
-
-    {
-        observed_solution_opt->GetMetadata().SetProperty(quake::Metadata::Property::SolutionType, quake::Metadata::SolutionType::Reference);
-
-        const std::string solution_file = (boost::format{"%1%_deterministic.json"} % arguments.SolutionPrefix).str();
-        quake::util::Save(*observed_solution_opt, solution_file);
-    }
-    return EXIT_SUCCESS;
-
     // compute saa index over generated scenarios
     const auto target_traffic_index = evaluator(*observed_solution_opt) * 0.15;
 //    LOG(INFO) << "Computing Sample Average Approximation with the target index of " << target_traffic_index;

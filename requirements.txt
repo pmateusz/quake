@@ -1,6 +1,7 @@
 matplotlib
 numpy
 odfpy
+openpyxl
 pandas
 pytz
 requests
@@ -8,5 +9,6 @@ statsmodels
 tables
 tabulate
 tqdm
+xlsxwriter
 
 GPy

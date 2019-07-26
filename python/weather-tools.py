@@ -1245,11 +1245,20 @@ def analyze_command(args):
         solution_frame[quake.weather.metadata.INTERVAL_STEP] = solution.interval_step
         solution_frame[quake.weather.metadata.SCENARIOS_NUMBER] = solution.scenarios_number
         solution_frame[quake.weather.metadata.SOLUTION_METHOD] = solution.solution_method
-        solution_frame[quake.weather.metadata.TRAFFIC_INDEX] = solution.traffic_index
+        solution_frame[quake.weather.metadata.TARGET_TRAFFIC_INDEX] = solution.target_traffic_index
         solution_frame['solution_id'] = solution_index
         solution_frames.append(solution_frame)
     master_solution_frame = pandas.concat(solution_frames)
-    master_solution_frame.to_excel(output_path)
+
+    worksheet_name = 'solutions'
+    with pandas.ExcelWriter(output_path, engine='xlsxwriter') as writer:
+        master_solution_frame.to_excel(writer, worksheet_name)
+        workbook = writer.book
+        worksheet = writer.sheets[worksheet_name]
+
+        time_delta_format = workbook.add_format({'num_format': 'HH:MM:SS'})
+        worksheet.set_column('K:K', None, time_delta_format)
+        writer.save()
 
 
 if __name__ == '__main__':

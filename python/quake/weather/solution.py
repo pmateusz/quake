@@ -60,8 +60,8 @@ class Solution:
         return self.__metadata.get(quake.weather.metadata.TIME_LIMIT, None)
 
     @property
-    def traffic_index(self):
-        return self.__metadata.get(quake.weather.metadata.TRAFFIC_INDEX, None)
+    def target_traffic_index(self):
+        return self.__metadata.get(quake.weather.metadata.TARGET_TRAFFIC_INDEX, None)
 
     @property
     def __metadata(self):
