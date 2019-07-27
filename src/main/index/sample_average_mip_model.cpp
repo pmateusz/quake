@@ -60,6 +60,7 @@ void quake::SampleAverageMipModel::AppendMetadata(quake::Metadata &metadata) {
 
     metadata.SetProperty(Metadata::Property::SolutionMethod, Metadata::SolutionMethod::SampleAverageApproximation);
     metadata.SetProperty(Metadata::Property::ScenariosNumber, NumScenarios());
+    metadata.SetProperty(Metadata::Property::TargetTrafficIndex, target_index_);
 }
 
 quake::SampleAverageMipModel::SampleAverageCallback::SampleAverageCallback(quake::SampleAverageMipModel &model,

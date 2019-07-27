@@ -13,6 +13,7 @@ SOLUTION_TYPE = 'solution_type'
 SWITCH_DURATION = 'switch_duration'
 TIME_LIMIT = 'time_limit'
 TARGET_TRAFFIC_INDEX = 'target_traffic_index'
+EPSILON = 'epsilon'
 
 
 def from_json(json_metadata: dict) -> dict:

@@ -48,7 +48,8 @@ namespace quake {
             GapLimit,
             Gap,
             TimeLimit,
-            IntervalStep
+            IntervalStep,
+            Epsilon
         };
 
         enum class SolutionType {

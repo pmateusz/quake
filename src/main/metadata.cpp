@@ -63,6 +63,9 @@ std::ostream &operator<<(std::ostream &out, quake::Metadata::Property property) 
         case quake::Metadata::Property::IntervalStep:
             out << "interval_step";
             break;
+        case quake::Metadata::Property::Epsilon:
+            out << "epsilon";
+            break;
         default:
             LOG(FATAL) << "Conversion to string for Property " << static_cast<std::size_t>(property) << " is not defined";
     }
@@ -193,6 +196,11 @@ void quake::from_json(const nlohmann::json &json, quake::Metadata::Property &pro
 
     if (property_name == "interval_step") {
         property = quake::Metadata::Property::IntervalStep;
+        return;
+    }
+
+    if (property_name == "epsilon") {
+        property = quake::Metadata::Property::Epsilon;
         return;
     }
 

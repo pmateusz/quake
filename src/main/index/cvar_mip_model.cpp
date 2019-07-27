@@ -75,6 +75,8 @@ void quake::CVarMipModel::AppendMetadata(quake::Metadata &metadata) {
 
     metadata.SetProperty(Metadata::Property::SolutionMethod, Metadata::SolutionMethod::ConditionalValueAtRisk);
     metadata.SetProperty(Metadata::Property::ScenariosNumber, NumScenarios());
+    metadata.SetProperty(Metadata::Property::TargetTrafficIndex, target_index_);
+    metadata.SetProperty(Metadata::Property::Epsilon, epsilon_);
 }
 
 quake::CVarMipModel::CVarCallback::CVarCallback(quake::CVarMipModel &model, double target_index, double epsilon)
@@ -136,6 +138,9 @@ void quake::CVarMipModel::CVarCallback::callback() {
                 // compute dual value
                 const auto denominator = epsilon_ * num_scenarios;
                 const auto scenarios_to_sum = static_cast<std::size_t>(std::floor(epsilon_ * num_scenarios));
+
+                CHECK_GT(scenarios_to_sum, 0);
+                CHECK_LE(scenarios_to_sum, num_scenarios);
 
                 double delay_cumulative_scenarios = 0.0;
                 for (auto scenario_pos = 0; scenario_pos < scenarios_to_sum; ++scenario_pos) {

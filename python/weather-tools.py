@@ -1237,6 +1237,7 @@ def analyze_command(args):
         solution_frame[quake.weather.metadata.SCENARIOS_NUMBER] = solution.scenarios_number
         solution_frame[quake.weather.metadata.SOLUTION_METHOD] = solution.solution_method
         solution_frame[quake.weather.metadata.TARGET_TRAFFIC_INDEX] = solution.target_traffic_index
+        solution_frame['epsilon'] = solution.epsilon
         solution_frame['solution_id'] = solution_index
         solution_frame['evaluation'] = evaluation_type
         return solution_frame

@@ -29,13 +29,32 @@
 #include "index/cvar_mip_model.h"
 #include "mip_arguments.h"
 
+DEFINE_double(epsilon, 0.5, "Epsilon for CV@R definition");
+
+struct Arguments : public quake::ScenarioIndexMipArguments {
+    Arguments()
+            : quake::ScenarioIndexMipArguments(),
+              Epsilon{0.0} {}
+
+
+    void Fill() override {
+        ScenarioIndexMipArguments::Fill();
+
+        CHECK_GT(FLAGS_epsilon, 0.0);
+        CHECK_LE(FLAGS_epsilon, 1.0);
+        Epsilon = FLAGS_epsilon;
+    }
+
+    double Epsilon;
+};
+
 
 int main(int argc, char *argv[]) {
-    const auto arguments = quake::SetupLogsAndParseArgs<quake::ScenarioIndexMipArguments>(argc, argv);
+    const auto arguments = quake::SetupLogsAndParseArgs<Arguments>(argc, argv);
     const auto problem = quake::ExtendedProblem::load_json(arguments.ProblemPath);
     const auto forecast_scenarios = problem.GetWeatherSamples(quake::ExtendedProblem::WeatherSample::Scenario, arguments.NumScenarios);
 
-    quake::CVarMipModel mip_model(&problem, arguments.IntervalStep, forecast_scenarios, arguments.TargetTrafficIndex, 0.05);
+    quake::CVarMipModel mip_model(&problem, arguments.IntervalStep, forecast_scenarios, arguments.TargetTrafficIndex, arguments.Epsilon);
     auto solution_opt = mip_model.Solve(arguments.TimeLimit, arguments.GapLimit, boost::none);
     if (solution_opt) {
         solution_opt->GetMetadata().SetProperty(quake::Metadata::Property::SolutionType, quake::Metadata::SolutionType::Reference);

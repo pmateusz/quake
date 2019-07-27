@@ -66,5 +66,9 @@ class Solution:
         return self.__metadata.get(quake.weather.metadata.TARGET_TRAFFIC_INDEX, None)
 
     @property
+    def epsilon(self) -> float:
+        return self.__metadata.get(quake.weather.metadata.EPSILON, None)
+
+    @property
     def __metadata(self) -> Dict[str, Any]:
         return quake.weather.metadata.from_json(self.__json_object['metadata'])
