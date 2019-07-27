@@ -70,6 +70,13 @@ void quake::CVarMipModel::Build(const boost::optional<quake::Solution> &solution
     mip_model_.setCallback(callback_.get());
 }
 
+void quake::CVarMipModel::AppendMetadata(quake::Metadata &metadata) {
+    BaseIntervalMipModel::AppendMetadata(metadata);
+
+    metadata.SetProperty(Metadata::Property::SolutionMethod, Metadata::SolutionMethod::ConditionalValueAtRisk);
+    metadata.SetProperty(Metadata::Property::ScenariosNumber, NumScenarios());
+}
+
 quake::CVarMipModel::CVarCallback::CVarCallback(quake::CVarMipModel &model, double target_index, double epsilon)
         : BendersCallback{model, target_index},
           epsilon_{epsilon} {}

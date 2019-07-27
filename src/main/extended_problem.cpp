@@ -289,6 +289,21 @@ std::vector<quake::Forecast> quake::ExtendedProblem::GetWeatherSamples(quake::Ex
     }
 }
 
+std::vector<quake::Forecast> quake::ExtendedProblem::GetWeatherSamples(quake::ExtendedProblem::WeatherSample sample, std::size_t size) const {
+    auto samples = GetWeatherSamples(sample);
+
+    if (size > samples.size()) {
+        LOG(WARNING) << "Requested more scenarios than the problem contains " << size
+                     << " v.s. " << samples.size()
+                     << ". The simulation will effectively use " << samples.size() << " scenarios.";
+        return samples;
+    }
+
+    samples.resize(size);
+    return samples;
+}
+
+
 void quake::to_json(nlohmann::json &json, const quake::ExtendedProblem::StationData &station_data) {
     nlohmann::json object;
 
@@ -344,4 +359,3 @@ void quake::from_json(const nlohmann::json &json, quake::ExtendedProblem &proble
     ExtendedProblem problem_object{metadata, stations, std::move(forecasts)};
     problem = problem_object;
 }
-

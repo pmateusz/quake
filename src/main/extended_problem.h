@@ -137,6 +137,8 @@ namespace quake {
 
         std::vector<Forecast> GetWeatherSamples(ExtendedProblem::WeatherSample sample) const;
 
+        std::vector<Forecast> GetWeatherSamples(ExtendedProblem::WeatherSample sample, std::size_t size) const;
+
     private:
         ExtendedProblem(Metadata metadata,
                         std::vector<StationData> station_data,

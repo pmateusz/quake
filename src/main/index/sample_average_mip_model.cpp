@@ -55,6 +55,13 @@ void quake::SampleAverageMipModel::Build(const boost::optional<Solution> &soluti
     mip_model_.setCallback(callback_.get());
 }
 
+void quake::SampleAverageMipModel::AppendMetadata(quake::Metadata &metadata) {
+    BaseIntervalMipModel::AppendMetadata(metadata);
+
+    metadata.SetProperty(Metadata::Property::SolutionMethod, Metadata::SolutionMethod::SampleAverageApproximation);
+    metadata.SetProperty(Metadata::Property::ScenariosNumber, NumScenarios());
+}
+
 quake::SampleAverageMipModel::SampleAverageCallback::SampleAverageCallback(quake::SampleAverageMipModel &model,
                                                                            double target_index,
                                                                            GRBVar target_distance_var)

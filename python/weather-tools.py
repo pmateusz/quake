@@ -44,10 +44,10 @@ import tabulate
 import tqdm
 
 import quake.city
+import quake.weather.metadata
 import quake.weather.problem
 import quake.weather.solution
 import quake.weather.time_period
-import quake.weather.metadata
 
 BUILD_CACHE_COMMAND = 'build-cache'
 PLOT_COMMAND = 'plot-cloud-cover'
@@ -1182,6 +1182,13 @@ def plot_coregionalization(args):
     matplotlib.pyplot.close(fig)
 
 
+def load_problem(file_path):
+    with open(file_path, 'r') as input_stream:
+        problem_json = json.load(input_stream)
+        problem = quake.weather.problem.Problem(problem_json)
+        return problem
+
+
 def analyze_command(args):
     problem_dir = getattr(args, 'problem_dir')
     solution_dir = getattr(args, 'solution_dir')
@@ -1193,6 +1200,46 @@ def analyze_command(args):
 
         _, ext = os.path.splitext(file_path)
         return ext == '.json'
+
+    def format_time_delta(value: datetime.timedelta) -> str:
+        remaining_sec = int(value.total_seconds())
+        hours = remaining_sec // 3600
+        remaining_sec -= 3600 * hours
+
+        minutes = remaining_sec // 60
+        remaining_sec -= 60 * minutes
+
+        return "{0:02d}:{1:02d}:{2:02d}".format(hours, minutes, remaining_sec)
+
+    def format_time(value: datetime.datetime) -> str:
+        return value.strftime('%Y-%b-%d %H:%M:%S')
+
+    def evaluate_scenario(scenario, evaluation_type):
+        data = []
+        for station in solution.stations:
+            station_keys_transferred = 0.0
+            for observation in solution.observations(station):
+                station_keys_transferred += source_problem.get_transferred_keys(station, observation, scenario)
+            station_transfer_share = source_problem.transfer_share(station)
+            data.append({'city': station,
+                         'keys_transferred': station_keys_transferred,
+                         'transfer_share': station_transfer_share,
+                         'traffic_index': station_keys_transferred / station_transfer_share})
+        solution_frame = pandas.DataFrame(data=data)
+        solution_frame['observation_start'] = format_time(solution.observation_period.begin)
+        solution_frame['observation_end'] = format_time(solution.observation_period.end)
+        solution_frame[quake.weather.metadata.SCENARIO_GENERATOR] = solution.scenario_generator
+        solution_frame[quake.weather.metadata.SOLUTION_TYPE] = solution.solution_type
+        solution_frame[quake.weather.metadata.GAP] = solution.gap
+        solution_frame[quake.weather.metadata.GAP_LIMIT] = solution.gap_limit
+        solution_frame[quake.weather.metadata.TIME_LIMIT] = solution.time_limit
+        solution_frame[quake.weather.metadata.INTERVAL_STEP] = format_time_delta(solution.interval_step)
+        solution_frame[quake.weather.metadata.SCENARIOS_NUMBER] = solution.scenarios_number
+        solution_frame[quake.weather.metadata.SOLUTION_METHOD] = solution.solution_method
+        solution_frame[quake.weather.metadata.TARGET_TRAFFIC_INDEX] = solution.target_traffic_index
+        solution_frame['solution_id'] = solution_index
+        solution_frame['evaluation'] = evaluation_type
+        return solution_frame
 
     solutions = []
     solution_files = [os.path.join(solution_dir, solution_file) for solution_file in os.listdir(solution_dir)]
@@ -1206,15 +1253,18 @@ def analyze_command(args):
     problems = []
     problem_files = [os.path.join(problem_dir, problem_file) for problem_file in os.listdir(problem_dir)]
     problem_files = list(filter(is_json_file, problem_files))
-    for problem_file_path in tqdm.tqdm(problem_files, desc='Loading Problem Files', leave=False):
-        with open(problem_file_path, 'r') as input_stream:
-            problem_json = json.load(input_stream)
-            problem = quake.weather.problem.Problem(problem_json)
-            problems.append(problem)
+    with concurrent.futures.process.ProcessPoolExecutor() as executor:
+        load_problem_futures = {executor.submit(load_problem, problem_file): problem_file for problem_file in problem_files}
+        for future in tqdm.tqdm(concurrent.futures.as_completed(load_problem_futures),
+                                total=len(load_problem_futures), desc='Loading Problem Files', leave=False):
+            try:
+                problems.append(future.result())
+            except Exception as ex:
+                problem_file_path = load_problem_futures[future]
+                logging.exception('Attempt to load the problem file %s generated error %s', problem_file_path, ex)
 
     solution_frames = []
     for solution_index, solution in tqdm.tqdm(enumerate(solutions), desc='Analyzing Solutions', leave=False):
-
         source_problem = None
         for problem in problems:
             if problem.observation_period == solution.observation_period and problem.scenario_generator == solution.scenario_generator:
@@ -1224,40 +1274,14 @@ def analyze_command(args):
         if not source_problem:
             logging.warning('Failed to find a source problem for solution {0} with scenario generator {1}'.format(solution.observation_period,
                                                                                                                   solution.scenario_generator))
-        scenario = problem.get_scenario('real')
-        data = []
-        for station in solution.stations:
-            station_keys_transferred = 0.0
-            for observation in solution.observations(station):
-                station_keys_transferred += problem.get_transferred_keys(station, observation, scenario)
-            station_transfer_share = problem.transfer_share(station)
-            data.append({'city': station,
-                         'keys_transferred': station_keys_transferred,
-                         'transfer_share': station_transfer_share,
-                         'traffic_index': station_keys_transferred / station_transfer_share})
-        solution_frame = pandas.DataFrame(data=data)
-        solution_frame[quake.weather.metadata.OBSERVATION_PERIOD] = solution.observation_period
-        solution_frame[quake.weather.metadata.SCENARIO_GENERATOR] = solution.scenario_generator
-        solution_frame[quake.weather.metadata.SOLUTION_TYPE] = solution.solution_type
-        solution_frame[quake.weather.metadata.GAP] = solution.gap
-        solution_frame[quake.weather.metadata.GAP_LIMIT] = solution.gap_limit
-        solution_frame[quake.weather.metadata.TIME_LIMIT] = solution.time_limit
-        solution_frame[quake.weather.metadata.INTERVAL_STEP] = solution.interval_step
-        solution_frame[quake.weather.metadata.SCENARIOS_NUMBER] = solution.scenarios_number
-        solution_frame[quake.weather.metadata.SOLUTION_METHOD] = solution.solution_method
-        solution_frame[quake.weather.metadata.TARGET_TRAFFIC_INDEX] = solution.target_traffic_index
-        solution_frame['solution_id'] = solution_index
-        solution_frames.append(solution_frame)
+
+        solution_frames.append(evaluate_scenario(source_problem.get_scenario('real'), 'out_of_sample'))
+        solution_frames.append(evaluate_scenario(source_problem.get_scenario('forecast'), 'in_sample'))
     master_solution_frame = pandas.concat(solution_frames)
 
     worksheet_name = 'solutions'
     with pandas.ExcelWriter(output_path, engine='xlsxwriter') as writer:
         master_solution_frame.to_excel(writer, worksheet_name)
-        workbook = writer.book
-        worksheet = writer.sheets[worksheet_name]
-
-        time_delta_format = workbook.add_format({'num_format': 'HH:MM:SS'})
-        worksheet.set_column('K:K', None, time_delta_format)
         writer.save()
 
 

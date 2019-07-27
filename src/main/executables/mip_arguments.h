@@ -12,16 +12,20 @@
 #include "util/logging.h"
 #include "util/validation.h"
 
-DEFINE_string(problem, "", "The problem file.");
-DEFINE_string(solution, "", "The solution output file.");
+DEFINE_string(problem, "", "Problem file.");
 DEFINE_string(interval_step, "00:00:15", "Interval time step.");
 DEFINE_string(time_limit, "", "Time limit for a solver.");
 DEFINE_string(gap_limit, "", "Gap between the bound and the objective");
 
+DEFINE_string(output, "solution", "Solution file.");
+DEFINE_double(target_traffic_index, 1, "Target traffic index.");
+DEFINE_int32(num_scenarios, 1, "Number of scenarios to consider.");
+
 DEFINE_validator(problem, quake::util::validate_input_file);
-DEFINE_validator(solution, quake::util::validate_output_file);
+DEFINE_validator(output, quake::util::validate_output_file);
 DEFINE_validator(time_limit, quake::util::validate_duration);
 DEFINE_validator(interval_step, quake::util::validate_duration);
+
 
 namespace quake {
 
@@ -52,6 +56,33 @@ namespace quake {
         boost::posix_time::time_duration IntervalStep;
         boost::optional<double> GapLimit;
         boost::optional<boost::posix_time::time_duration> TimeLimit;
+    };
+
+
+    struct ScenarioIndexMipArguments : public quake::MipArguments {
+
+        ScenarioIndexMipArguments()
+                : MipArguments(),
+                  TargetTrafficIndex{0.0},
+                  NumScenarios{0},
+                  SolutionFile{""} {}
+
+        void Fill() override {
+            MipArguments::Fill();
+
+            CHECK_GT(FLAGS_target_traffic_index, 0.0);
+            TargetTrafficIndex = FLAGS_target_traffic_index;
+
+            CHECK_GT(FLAGS_num_scenarios, 0);
+            NumScenarios = FLAGS_num_scenarios;
+
+            CHECK(!FLAGS_output.empty());
+            SolutionFile = FLAGS_output;
+        }
+
+        double TargetTrafficIndex;
+        int NumScenarios;
+        boost::filesystem::path SolutionFile;
     };
 
     template<typename ArgumentsType>

@@ -21,105 +21,29 @@
 
 #include <cstdlib>
 
-#include <gflags/gflags.h>
 #include <glog/logging.h>
 
-#include <boost/config.hpp>
-#include <boost/date_time.hpp>
-#include <boost/filesystem.hpp>
 #include <boost/optional.hpp>
 
-#include "util/validation.h"
-#include "util/logging.h"
-#include "index/gaussian_forecast_generator.h"
 #include "index/worst_case_mip_model.h"
-#include "index/cross_moment_mip_model.h"
 #include "index/cvar_mip_model.h"
-#include "forecast.h"
+#include "mip_arguments.h"
 
-DEFINE_string(output, "", "The output solution file.");
-DEFINE_string(input, "", "The input problem file.");
-DEFINE_string(cloud_cover, "", "Forecasts on cloud cover.");
-DEFINE_string(time_limit, "", "Time limit for a solver.");
-DEFINE_string(time_step, "00:00:15", "Time step for the discretisation scheme.");
-DEFINE_string(gap, "", "Gap between the bound and the objective");
 
-DEFINE_validator(input, quake::util::validate_input_file);
-DEFINE_validator(output, quake::util::validate_output_file);
-DEFINE_validator(cloud_cover, quake::util::validate_input_file);
-DEFINE_validator(time_limit, quake::util::validate_duration);
-DEFINE_validator(time_step, quake::util::validate_duration);
-
-struct Arguments {
-    Arguments() : TimeLimit{boost::none} {}
-
-    boost::filesystem::path ModelPath;
-    boost::filesystem::path CloudCoverPath;
-    boost::filesystem::path OutputSolutionPath;
-    boost::optional<double> Gap;
-    boost::optional<boost::posix_time::time_duration> TimeLimit;
-    boost::posix_time::time_duration TimeStep;
-};
-
-Arguments SetupLogsAndParseArgs(int argc, char *argv[]) {
-    quake::util::SetupLogging(argv[0]);
-
-    CHECK_GE(argc, 1);
-    std::stringstream output_msg;
-    output_msg << "Program launched with args: " << argv[0];
-    for (auto arg_index = 1; arg_index < argc; ++arg_index) {
-        output_msg << ' ' << argv[arg_index];
-    }
-    LOG(INFO) << output_msg.str();
-
-    gflags::ParseCommandLineFlags(&argc, &argv, true);
-
-    CHECK(!FLAGS_input.empty()) << "Input problem is required";
-    CHECK(!FLAGS_cloud_cover.empty()) << "Cloud cover is required";
-    CHECK(!FLAGS_time_step.empty()) << "Time step is required";
-    CHECK(!FLAGS_output.empty()) << "Solution's output path is required";
-
-    Arguments args;
-    args.ModelPath = FLAGS_input;
-    args.CloudCoverPath = FLAGS_cloud_cover;
-    args.OutputSolutionPath = FLAGS_output;
-
-    if (!FLAGS_time_limit.empty()) {
-        args.TimeLimit = boost::posix_time::duration_from_string(FLAGS_time_limit);
-    }
-
-    if (!FLAGS_gap.empty()) {
-        args.Gap = std::stod(FLAGS_gap);
-    }
-
-    args.TimeStep = boost::posix_time::duration_from_string(FLAGS_time_step);
-
-    return args;
-}
-
-// TODO: save solution
 int main(int argc, char *argv[]) {
-    const auto arguments = SetupLogsAndParseArgs(argc, argv);
+    const auto arguments = quake::SetupLogsAndParseArgs<quake::ScenarioIndexMipArguments>(argc, argv);
+    const auto problem = quake::ExtendedProblem::load_json(arguments.ProblemPath);
+    const auto forecast_scenarios = problem.GetWeatherSamples(quake::ExtendedProblem::WeatherSample::Scenario, arguments.NumScenarios);
 
-    auto model = quake::ExtendedProblem::load_json(arguments.ModelPath);
-    const auto primary_forecast = quake::Forecast::load_csv(arguments.CloudCoverPath);
+    quake::CVarMipModel mip_model(&problem, arguments.IntervalStep, forecast_scenarios, arguments.TargetTrafficIndex, 0.05);
+    auto solution_opt = mip_model.Solve(arguments.TimeLimit, arguments.GapLimit, boost::none);
+    if (solution_opt) {
+        solution_opt->GetMetadata().SetProperty(quake::Metadata::Property::SolutionType, quake::Metadata::SolutionType::Reference);
 
-    quake::GaussianForecastGenerator gaussian_forecast_generator{1.0};
-    auto forecast_scenarios = gaussian_forecast_generator.Generate(primary_forecast, 256);
-    forecast_scenarios.insert(forecast_scenarios.begin(), primary_forecast);
+        quake::util::Save(*solution_opt, arguments.SolutionFile);
+    } else {
+        LOG(FATAL) << "Failed to solve the problem";
+    }
 
-    quake::WorstCaseMipModel worst_case_model(&model, arguments.TimeStep, forecast_scenarios);
-    const auto worst_case_solution_opt = worst_case_model.Solve(arguments.TimeLimit,
-                                                                arguments.Gap,
-                                                                boost::none);
-    CHECK(worst_case_solution_opt) << "Failed to find the worst case solution";
-
-//    const auto target_traffic_index = worst_case_model.GetTrafficIndex(*worst_case_solution_opt);
-//    quake::CVarMipModel cvar_mip_model(&model, arguments.TimeStep, forecast_scenarios, target_traffic_index, 0.05);
-//    const auto cvar_solution_opt = cvar_mip_model.Solve(arguments.TimeLimit, arguments.Gap, boost::none);
-//    CHECK(cvar_solution_opt) << "Failed to find the solution using CVar optimization";
-
-    // obtain traffic index using best case
-//    LOG(INFO) << "CVar case: " << cvar_mip_model.GetTrafficIndex(*cvar_solution_opt);
     return EXIT_SUCCESS;
 }

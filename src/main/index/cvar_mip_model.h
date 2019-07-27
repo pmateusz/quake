@@ -38,6 +38,8 @@ namespace quake {
                      double epsilon);
 
     protected:
+        void AppendMetadata(Metadata &metadata) override;
+
         void Build(const boost::optional<Solution> &solution) override;
 
     private:

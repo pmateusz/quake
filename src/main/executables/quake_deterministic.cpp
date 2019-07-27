@@ -20,12 +20,10 @@
 // SOFTWARE.
 
 #include <cstdlib>
-#include <boost/config.hpp>
 #include <boost/format.hpp>
 
 #include "extended_problem.h"
 #include "index/worst_case_mip_model.h"
-#include "index/index_evaluator.h"
 #include "mip_arguments.h"
 #include "metadata.h"
 

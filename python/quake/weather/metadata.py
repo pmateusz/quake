@@ -18,7 +18,7 @@ TARGET_TRAFFIC_INDEX = 'target_traffic_index'
 def from_json(json_metadata: dict) -> dict:
     def __parse_timedelta(string_value):
         time = datetime.datetime.strptime(string_value, '%H:%M:%S')
-        return datetime.timedelta(time.hour, time.minute, time.second)
+        return datetime.timedelta(hours=time.hour, minutes=time.minute, seconds=time.second)
 
     metadata = {}
     for key, value in json_metadata:

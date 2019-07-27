@@ -35,6 +35,7 @@ namespace quake {
                               double target_index);
 
     protected:
+        void AppendMetadata(Metadata &metadata) override;
 
         void Build(const boost::optional<Solution> &solution) override;
 
