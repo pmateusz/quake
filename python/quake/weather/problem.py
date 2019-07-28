@@ -6,8 +6,8 @@ import pandas
 
 import quake.city
 import quake.cloud_cover
-import quake.weather.time_period
 import quake.weather.metadata
+import quake.weather.time_period
 
 
 class Problem:
@@ -46,6 +46,30 @@ class Problem:
         metadata = quake.weather.metadata.from_json(self.__json_object['metadata'])
         metadata[key] = value
         self.__json_object['metadata'] = quake.weather.metadata.to_json(metadata)
+
+    def set_var_model(self, var_model):
+        decimal_places = 3
+
+        var_model_to_use = dict()
+        for station in var_model:
+            station_object = dict()
+            for item in var_model[station].items():
+                if isinstance(item[1], dict):
+                    converted_values = []
+                    for key, value in item[1].items():
+                        if isinstance(value, float):
+                            converted_values.append([key, round(value, decimal_places)])
+                        else:
+                            converted_values.append([key, value])
+                    station_object[item[0]] = converted_values
+                else:
+                    if isinstance(item[1], list):
+                        station_object[item[0]] = [round(value, decimal_places) for value in item[1]]
+                    else:
+                        station_object[item[0]] = item[1]
+            var_model_to_use[station] = station_object
+
+        self.__json_object['var_model'] = var_model_to_use
 
     def get_scenario(self, scenario_name):
         forecasts_json = self.__json_object['forecasts']
