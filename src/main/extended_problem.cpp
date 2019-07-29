@@ -56,14 +56,17 @@ quake::ExtendedProblem::ExtendedProblem(boost::posix_time::time_period observati
         : ExtendedProblem(Metadata({{Metadata::Property::SwitchDuration,    switch_duration},
                                     {Metadata::Property::ObservationPeriod, observation_period}}),
                           std::move(station_data),
-                          std::move(forecasts)) {}
+                          std::move(forecasts),
+                          {}) {}
 
 quake::ExtendedProblem::ExtendedProblem(Metadata metadata,
                                         std::vector<quake::ExtendedProblem::StationData> station_data,
-                                        std::unordered_map<std::string, quake::Forecast> forecasts)
+                                        std::unordered_map<std::string, quake::Forecast> forecasts,
+                                        std::unordered_map<quake::GroundStation, ExtendedProblem::StationVarModel> var_model)
         : station_data_{std::move(station_data)},
           forecasts_{std::move(forecasts)},
-          metadata_{std::move(metadata)} {
+          metadata_{std::move(metadata)},
+          var_model_{std::move(var_model)} {
 
     std::unordered_set<GroundStation> ground_stations;
     for (const auto &local_station_data : station_data_) {
@@ -106,7 +109,7 @@ quake::ExtendedProblem quake::ExtendedProblem::Round(unsigned int decimal_places
                                           std::move(communication_window_data));
     }
 
-    return {metadata_, std::move(rounded_station_data), forecasts_};
+    return {metadata_, std::move(rounded_station_data), forecasts_, var_model_};
 }
 
 std::vector<boost::posix_time::time_period> quake::ExtendedProblem::TransferWindows(const GroundStation &station) const {
@@ -212,19 +215,6 @@ const quake::ExtendedProblem::StationData &quake::ExtendedProblem::GetStationDat
     LOG(FATAL) << "GroundStation not found: " << station;
 }
 
-void quake::to_json(nlohmann::json &json, const quake::ExtendedProblem &problem) {
-    nlohmann::json object;
-
-    object["metadata"] = problem.metadata_;
-    object["stations"] = problem.station_data_;
-
-    if (!problem.forecasts_.empty()) {
-        object["forecasts"] = problem.forecasts_;
-    }
-
-    json = object;
-}
-
 quake::ExtendedProblem quake::ExtendedProblem::load_json(const boost::filesystem::path &file_path) {
     std::ifstream input_stream;
     input_stream.open(file_path.string(), std::ifstream::in);
@@ -304,6 +294,23 @@ std::vector<quake::Forecast> quake::ExtendedProblem::GetWeatherSamples(quake::Ex
 }
 
 
+void quake::to_json(nlohmann::json &json, const quake::ExtendedProblem &problem) {
+    nlohmann::json object;
+
+    object["metadata"] = problem.metadata_;
+    object["stations"] = problem.station_data_;
+
+    if (!problem.forecasts_.empty()) {
+        object["forecasts"] = problem.forecasts_;
+    }
+
+    if (!problem.var_model_.empty()) {
+        LOG(FATAL) << "Serialization to json of var model is not implemented";
+    }
+
+    json = object;
+}
+
 void quake::to_json(nlohmann::json &json, const quake::ExtendedProblem::StationData &station_data) {
     nlohmann::json object;
 
@@ -325,6 +332,8 @@ void quake::to_json(nlohmann::json &json, const quake::ExtendedProblem::Communic
 
     json = object;
 }
+
+void quake::to_json(nlohmann::json &json, const quake::ExtendedProblem::StationVarModel &station_var_model) {}
 
 void quake::from_json(const nlohmann::json &json, ExtendedProblem::StationData &station_data) {
     const auto station = json.at("station").get<quake::GroundStation>();
@@ -351,11 +360,55 @@ void quake::from_json(const nlohmann::json &json, quake::ExtendedProblem &proble
     const auto stations = json.at("stations").get<std::vector<ExtendedProblem::StationData>>();
 
     std::unordered_map<std::string, Forecast> forecasts;
-    const auto find_it = json.find("forecasts");
-    if (find_it != std::end(json)) {
-        forecasts = find_it->get<std::unordered_map<std::string, Forecast>>();
+    {
+        const auto find_it = json.find("forecasts");
+        if (find_it != std::end(json)) {
+            forecasts = find_it->get<std::unordered_map<std::string, Forecast>>();
+        }
     }
 
-    ExtendedProblem problem_object{metadata, stations, std::move(forecasts)};
+    std::unordered_map<quake::GroundStation, ExtendedProblem::StationVarModel> var_model;
+    {
+        const auto find_it = json.find("var_model");
+        if (find_it != std::cend(json)) {
+            var_model = find_it->get<std::unordered_map<quake::GroundStation, ExtendedProblem::StationVarModel> >();
+        }
+    }
+
+    ExtendedProblem problem_object{metadata, stations, std::move(forecasts), std::move(var_model)};
     problem = problem_object;
+}
+
+void quake::from_json(const nlohmann::json &json, quake::ExtendedProblem::StationVarModel &station_var_model) {
+    std::unordered_map<GroundStation, ExtendedProblem::StationVarModel::Parameter> parameters;
+    std::unordered_map<GroundStation, double> correlations;
+    for (const auto &item : json.items()) {
+        auto station_or_none = GroundStation::FromNameOrNone(item.key());
+        if (station_or_none != GroundStation::None) {
+
+            const auto bundle = item.value().get<std::unordered_map<std::string, double>>();
+            parameters.emplace(station_or_none, ExtendedProblem::StationVarModel::Parameter{bundle.at("L1"), bundle.at("L1.stderr")});
+            correlations.emplace(station_or_none, bundle.at("corr"));
+        }
+    }
+
+    auto intercept = json.at("const").get<ExtendedProblem::StationVarModel::Parameter>();
+    auto residual = json.at("residual").get<ExtendedProblem::StationVarModel::Parameter>();
+    auto lower_bound = json.at("lower").get<std::vector<double> >();
+    auto upper_bound = json.at("upper").get<std::vector<double> >();
+
+    station_var_model.Intercept = intercept;
+    station_var_model.Residual = residual;
+    station_var_model.LowerBound = lower_bound;
+    station_var_model.UpperBound = upper_bound;
+    station_var_model.Parameters = parameters;
+    station_var_model.Correlations = correlations;
+}
+
+void quake::from_json(const nlohmann::json &json, quake::ExtendedProblem::StationVarModel::Parameter &parameter) {
+    const auto value = json.at("value").get<double>();
+    const auto standard_error = json.at("stderr").get<double>();
+
+    parameter.Value = value;
+    parameter.Stderr = standard_error;
 }

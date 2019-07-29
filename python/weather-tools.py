@@ -533,6 +533,7 @@ def extend_problem_definition(args):
         residuals = result.resid
 
         stderr_residuals = residuals.std()
+        corr = pivot_frame.corr()
 
         model_data = {}
         for station in params.columns:
@@ -540,16 +541,21 @@ def extend_problem_definition(args):
             station_data['residual'] = {'value': 0, 'stderr': stderr_residuals[station]}
             station_params = params[station]
             station_stderr = stderr[station]
+            station_corr = corr[station]
 
             for index_value in station_params.index:
                 terms = index_value.split('.')
                 if len(terms) == 1:
                     assert terms[0] == 'const'
-                    station_data['const'] = {'value': station_params[index_value], 'stderr': station_stderr[index_value]}
+                    station_data['const'] = {'value': station_params[index_value],
+                                             'stderr': station_stderr[index_value]}
                 elif len(terms) == 2:
                     assert terms[0] == 'L1'
-                    other_station = terms[1]
-                    station_data[other_station] = {'L1': station_params[index_value], 'L1.stderr': station_stderr[index_value]}
+                    other_station_name = terms[1]
+                    other_station = quake.city.from_name(terms[1])
+                    station_data[other_station_name] = {'L1': station_params[index_value],
+                                                        'L1.stderr': station_stderr[index_value],
+                                                        'corr': station_corr[other_station]}
                 else:
                     raise RuntimeError('Invalid number of terms')
             model_data[station.name] = station_data
@@ -617,14 +623,12 @@ def extend_problem_definition(args):
     updated_problem.set_metadata('scenarios_number', len(scenario_frames))
     updated_problem.set_metadata('scenario_generator', scenario_generator_name)
 
-    var_model = __generate_var_model(weather_cache, min_time, datetime.timedelta(days=28))
     generation_model = model_factory.create_model(ScenarioGeneratorFactory.COREGIONALIZATION_MODEL_NAME, weather_cache, forecast_frame)
+    var_model = __generate_var_model(weather_cache, min_time, datetime.timedelta(days=28))
     fitted_frame = generation_model.optimize()
-
     for station in fitted_frame['City'].unique():
         var_model[station.name]['lower'] = fitted_frame[fitted_frame['City'] == station]['yhat_lower'].apply(value_range).values.tolist()
         var_model[station.name]['upper'] = fitted_frame[fitted_frame['City'] == station]['yhat_upper'].apply(value_range).values.tolist()
-
     updated_problem.set_var_model(var_model)
 
     with open(output_file, 'w') as output_file:

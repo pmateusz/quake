@@ -2,6 +2,8 @@ import datetime
 
 import quake.weather.time_period
 
+from typing import Dict, List
+
 GAP = 'gap'
 GAP_LIMIT = 'gap_limit'
 INTERVAL_STEP = 'interval_step'
@@ -16,7 +18,7 @@ TARGET_TRAFFIC_INDEX = 'target_traffic_index'
 EPSILON = 'epsilon'
 
 
-def from_json(json_metadata: dict) -> dict:
+def from_json(json_metadata: List) -> Dict:
     def __parse_timedelta(string_value):
         time = datetime.datetime.strptime(string_value, '%H:%M:%S')
         return datetime.timedelta(hours=time.hour, minutes=time.minute, seconds=time.second)
@@ -32,7 +34,7 @@ def from_json(json_metadata: dict) -> dict:
     return metadata
 
 
-def to_json(metadata: dict) -> dict:
+def to_json(metadata: Dict) -> List:
     def __format_timedelta(value: datetime.timedelta):
         remaining_time = int(value.total_seconds())
 
@@ -45,14 +47,14 @@ def to_json(metadata: dict) -> dict:
         assert remaining_time >= 0
 
         seconds = remaining_time
-        return '{0:2d}:{1:2d}:{2:2d}'.format(hours, minutes, seconds)
+        return '{0:02d}:{1:02d}:{2:02d}'.format(hours, minutes, seconds)
 
-    metadata_json = {}
+    metadata_json = []
     for key, value in metadata.items():
         value_to_use = value
         if key == OBSERVATION_PERIOD:
             value_to_use = quake.weather.time_period.TimePeriod.to_json(value)
         elif key == SWITCH_DURATION or key == INTERVAL_STEP:
             value_to_use = __format_timedelta(value)
-        metadata[key] = value_to_use
+        metadata_json.append([key, value_to_use])
     return metadata_json

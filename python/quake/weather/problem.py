@@ -50,26 +50,27 @@ class Problem:
     def set_var_model(self, var_model):
         decimal_places = 3
 
-        var_model_to_use = dict()
+        var_model_to_use = []
         for station in var_model:
             station_object = dict()
             for item in var_model[station].items():
                 if isinstance(item[1], dict):
-                    converted_values = []
+                    converted_values = {}
                     for key, value in item[1].items():
                         if isinstance(value, float):
-                            converted_values.append([key, round(value, decimal_places)])
+                            converted_values[key] = round(value, decimal_places)
                         else:
-                            converted_values.append([key, value])
+                            converted_values[key] = value
                     station_object[item[0]] = converted_values
                 else:
                     if isinstance(item[1], list):
                         station_object[item[0]] = [round(value, decimal_places) for value in item[1]]
                     else:
                         station_object[item[0]] = item[1]
-            var_model_to_use[station] = station_object
+            var_model_to_use.append([station, station_object])
 
         self.__json_object['var_model'] = var_model_to_use
+        # self.__json_object['var_model'] = var_model
 
     def get_scenario(self, scenario_name):
         forecasts_json = self.__json_object['forecasts']

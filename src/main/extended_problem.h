@@ -88,6 +88,28 @@ namespace quake {
             std::vector<CommunicationWindowData> CommunicationWindows;
         };
 
+        struct StationVarModel {
+
+            struct Parameter {
+                Parameter()
+                        : Parameter(0.0, 0.0) {}
+
+                Parameter(double value, double standard_error)
+                        : Value{value},
+                          Stderr{standard_error} {}
+
+                double Value;
+                double Stderr;
+            };
+
+            Parameter Intercept;
+            Parameter Residual;
+            std::unordered_map<GroundStation, Parameter> Parameters;
+            std::unordered_map<GroundStation, double> Correlations;
+            std::vector<double> LowerBound;
+            std::vector<double> UpperBound;
+        };
+
         ExtendedProblem();
 
         ExtendedProblem(boost::posix_time::time_period observation_period,
@@ -142,7 +164,8 @@ namespace quake {
     private:
         ExtendedProblem(Metadata metadata,
                         std::vector<StationData> station_data,
-                        std::unordered_map<std::string, Forecast> forecasts);
+                        std::unordered_map<std::string, Forecast> forecasts,
+                        std::unordered_map<quake::GroundStation, ExtendedProblem::StationVarModel> var_model);
 
         double KeyRate(const GroundStation &station,
                        const boost::posix_time::time_period &period,
@@ -160,8 +183,8 @@ namespace quake {
         Metadata metadata_;
 
         std::vector<GroundStation> stations_;
+        std::unordered_map<quake::GroundStation, ExtendedProblem::StationVarModel> var_model_;
     };
-
 
     void from_json(const nlohmann::json &json, ExtendedProblem &problem);
 
@@ -169,11 +192,17 @@ namespace quake {
 
     void from_json(const nlohmann::json &json, ExtendedProblem::CommunicationWindowData &communication_window_data);
 
+    void from_json(const nlohmann::json &json, ExtendedProblem::StationVarModel &station_var_model);
+
+    void from_json(const nlohmann::json &json, ExtendedProblem::StationVarModel::Parameter &parameter);
+
     void to_json(nlohmann::json &json, const ExtendedProblem &problem);
 
     void to_json(nlohmann::json &json, const ExtendedProblem::StationData &station_data);
 
     void to_json(nlohmann::json &json, const ExtendedProblem::CommunicationWindowData &communication_window_data);
+
+    void to_json(nlohmann::json &json, const ExtendedProblem::StationVarModel &station_var_model);
 }
 
 
