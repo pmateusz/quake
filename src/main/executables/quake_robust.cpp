@@ -21,55 +21,34 @@
 
 #include <cstdlib>
 
-#include <gflags/gflags.h>
 #include <glog/logging.h>
 
-#include <boost/config.hpp>
-#include <boost/date_time.hpp>
-#include <boost/filesystem.hpp>
 #include <boost/optional.hpp>
 
-#include <nlohmann/json.hpp>
-#include <index/robust_average_mip_model.h>
-
-#include "util/validation.h"
-#include "util/logging.h"
 
 #include "extended_problem.h"
 #include "index/robust_index_mip_model.h"
-#include "index/worst_case_mip_model.h"
 #include "index/index_evaluator.h"
 #include "executables/mip_arguments.h"
 
 
 int main(int argc, char *argv[]) {
-    const auto arguments = quake::SetupLogsAndParseArgs<quake::MipArguments>(argc, argv);
+    const auto arguments = quake::SetupLogsAndParseArgs<quake::ScenarioIndexMipArguments>(argc, argv);
     const auto problem = quake::ExtendedProblem::load_json(arguments.ProblemPath);
-    const auto &weather_forecast = problem.GetWeatherSample(quake::ExtendedProblem::WeatherSample::Forecast);
-    const auto &weather_observed = problem.GetWeatherSample(quake::ExtendedProblem::WeatherSample::Real);
 
-    LOG(INFO) << "Computing Worst Case";
-    quake::WorstCaseMipModel worst_case_model(&problem, arguments.IntervalStep, {weather_forecast});
-    const auto worst_case_solution_opt = worst_case_model.Solve(arguments.TimeLimit, arguments.GapLimit, boost::none);
-    CHECK(worst_case_solution_opt) << "Failed to find the worst case solution";
-//
-    quake::IndexEvaluator evaluator{problem};
-    const auto worst_case_traffic_index = evaluator(*worst_case_solution_opt, weather_forecast);
-    LOG(INFO) << "Worst Case In-Sample Traffic Index: " << evaluator(*worst_case_solution_opt, weather_forecast);
-    LOG(INFO) << "Worst Cast Out-of-Sample Traffic Index: " << evaluator(*worst_case_solution_opt, weather_observed);
+    quake::RobustIndexMipModel robust_mip_model{&problem, arguments.IntervalStep, arguments.TargetTrafficIndex};
+    auto solution_opt = robust_mip_model.Solve(arguments.TimeLimit, arguments.GapLimit, boost::none);
+    if (solution_opt) {
+        solution_opt->GetMetadata().SetProperty(quake::Metadata::Property::SolutionType, quake::Metadata::SolutionType::Test);
 
-//    const auto THRESHOLD = 1.10;
-//    const auto target_traffic_index = worst_cast_traffic_index * THRESHOLD;
-//    LOG(INFO) << "Computing Distributionally Robust Essential Riskiness Index with the target index of " << target_traffic_index
-//              << " at threshold of " << THRESHOLD;
+        quake::IndexEvaluator evaluator{problem};
+        LOG(INFO) << "In Sample: " << evaluator(*solution_opt, problem.GetWeatherSample(quake::ExtendedProblem::WeatherSample::Forecast));
+        LOG(INFO) << "Out of Sample: " << evaluator(*solution_opt, problem.GetWeatherSample(quake::ExtendedProblem::WeatherSample::Real));
 
-//    const auto worst_case_traffic_index = 8519;
-    quake::RobustIndexMipModel robust_mip_model{&problem, arguments.IntervalStep, 0.5 * worst_case_traffic_index};
-//    quake::RobustAverageMipModel robust_mip_model{&problem, arguments.IntervalStep};
-    const auto solution_opt = robust_mip_model.Solve(arguments.TimeLimit, arguments.GapLimit, boost::none);
-    CHECK(solution_opt);
-    LOG(INFO) << "Distributionally Robust In-Sample Traffic Index: " << evaluator(*solution_opt, weather_forecast);
-    LOG(INFO) << "Distributionally Robust Out-of-Sample Traffic Index: " << evaluator(*solution_opt, weather_observed);
+        quake::util::Save(*solution_opt, arguments.SolutionFile);
+    } else {
+        LOG(FATAL) << "Failed to solve the problem";
+    }
 
     return EXIT_SUCCESS;
 }

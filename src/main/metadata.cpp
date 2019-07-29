@@ -111,6 +111,9 @@ std::ostream &operator<<(std::ostream &out, quake::Metadata::SolutionMethod meth
         case quake::Metadata::SolutionMethod::ConditionalValueAtRisk:
             out << "conditional_value_at_risk";
             break;
+        case quake::Metadata::SolutionMethod::UncorrelatedCrossMoment:
+            out << "uncorrelated_cross_moment";
+            break;
         default:
             LOG(FATAL) << "Conversion to string for SolutionMethod " << static_cast<std::size_t>(method) << " is not defined";
     }

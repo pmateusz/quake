@@ -64,10 +64,6 @@ GENERATE_COMMAND = 'generate'
 BBOX_STYLE = {'boxstyle': 'square,pad=0.0', 'lw': 0, 'fc': 'w', 'alpha': 0.8}
 
 
-# TODO: run VAR analysis - discover correlations
-# TODO: save correlation results in extending the solution
-# TODO: save confidence interval while extending the solution
-
 class JSONEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, quake.weather.problem.Problem):
@@ -627,8 +623,13 @@ def extend_problem_definition(args):
     var_model = __generate_var_model(weather_cache, min_time, datetime.timedelta(days=28))
     fitted_frame = generation_model.optimize()
     for station in fitted_frame['City'].unique():
-        var_model[station.name]['lower'] = fitted_frame[fitted_frame['City'] == station]['yhat_lower'].apply(value_range).values.tolist()
-        var_model[station.name]['upper'] = fitted_frame[fitted_frame['City'] == station]['yhat_upper'].apply(value_range).values.tolist()
+        city_frame = fitted_frame[fitted_frame['City'] == station].copy()
+        city_frame.set_index('DateTime', inplace=True)
+        city_frame.drop_duplicates(inplace=True)
+        var_model[station.name]['lower'] \
+            = city_frame[forecast_frame.index.min():forecast_frame.index.max()]['yhat_lower'].apply(value_range).values.tolist()
+        var_model[station.name]['upper'] \
+            = city_frame[forecast_frame.index.min():forecast_frame.index.max()]['yhat_upper'].apply(value_range).values.tolist()
     updated_problem.set_var_model(var_model)
 
     with open(output_file, 'w') as output_file:

@@ -70,7 +70,8 @@ namespace quake {
             None,
             Deterministic,
             SampleAverageApproximation,
-            ConditionalValueAtRisk
+            ConditionalValueAtRisk,
+            UncorrelatedCrossMoment
         };
 
         Metadata();

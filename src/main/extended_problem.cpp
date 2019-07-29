@@ -375,6 +375,31 @@ void quake::from_json(const nlohmann::json &json, quake::ExtendedProblem &proble
         }
     }
 
+    auto forecast_series_size = 0;
+    if (!forecasts.empty()) {
+        const auto forecast_begin_it = std::cbegin(forecasts);
+        const auto forecast_end_it = std::cend(forecasts);
+
+        const std::unordered_map<quake::GroundStation, Forecast::Series> &first_index = forecast_begin_it->second.Index();
+        const auto first_index_it = std::cbegin(first_index);
+        if (first_index_it != std::cend(first_index)) {
+            forecast_series_size = first_index_it->second.Values().size();
+        }
+
+        for (auto forecast_it = forecast_begin_it; forecast_it != forecast_end_it; ++forecast_it) {
+            for (const auto &station_entry : forecast_it->second.Index()) {
+                CHECK_EQ(station_entry.second.Values().size(), forecast_series_size);
+            }
+        }
+    }
+
+    if (!var_model.empty()) {
+        for (const auto &entry : var_model) {
+            CHECK_EQ(entry.second.LowerBound.size(), forecast_series_size);
+            CHECK_EQ(entry.second.UpperBound.size(), forecast_series_size);
+        }
+    }
+
     ExtendedProblem problem_object{metadata, stations, std::move(forecasts), std::move(var_model)};
     problem = problem_object;
 }

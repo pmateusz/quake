@@ -137,6 +137,13 @@ std::size_t quake::RobustIndexMipModel::GetCloudCoverIndex(const boost::posix_ti
     return variable_index;
 }
 
+void quake::RobustIndexMipModel::AppendMetadata(quake::Metadata &metadata) {
+    BaseIntervalMipModel::AppendMetadata(metadata);
+
+    metadata.SetProperty(Metadata::Property::SolutionMethod, Metadata::SolutionMethod::UncorrelatedCrossMoment);
+    metadata.SetProperty(Metadata::Property::TargetTrafficIndex, target_index_);
+}
+
 quake::RobustIndexMipModel::RobustIndexMipCallback::RobustIndexMipCallback(quake::RobustIndexMipModel &model)
         : model_{model} {}
 
@@ -164,7 +171,6 @@ void quake::RobustIndexMipModel::RobustIndexMipCallback::callback() {
                 double keys_transferred_value = 0;
                 for (const auto &interval : model_.StationIntervals(station)) {
                     const auto cloud_cover_index = model_.GetCloudCoverIndex(interval.Period());
-
                     const auto interval_keys_transferred = (1.0 - cloud_cover_assignment.at(cloud_cover_index))
                                                            * model_.problem_->KeyRate(station, interval.Period());
                     keys_transferred_expr += interval.Var() * interval_keys_transferred;
@@ -290,18 +296,20 @@ quake::RobustIndexMipModel::RobustIndexMipCallback::CreateCloudCoverVariables(co
         return {};
     }
 
-    static const auto max_relative_deviation = 0.3;
-    const auto step_duration = model_.cloud_cover_index_.front().length().total_seconds();
-    const auto total_duration = (model_.cloud_cover_index_.back().end() - model_.cloud_cover_index_.front().begin()).total_seconds();
+    const auto &lower_bound = model_.problem_->VarModel(station).LowerBound;
+    const auto &upper_bound = model_.problem_->VarModel(station).UpperBound;
 
-    const auto &forecast = model_.problem_->GetWeatherSample(ExtendedProblem::WeatherSample::Forecast);
     std::vector<GRBVar> cloud_cover_vars;
     cloud_cover_vars.reserve(num_variables);
     for (auto variable_index = 0; variable_index < num_variables; ++variable_index) {
-        const auto bound_deviation = step_duration * variable_index * max_relative_deviation / total_duration;
-        const auto cloud_cover = forecast.GetCloudCover(station, model_.cloud_cover_index_.at(variable_index).begin()) / 100.0;
-        const auto min_value = std::max(0.0, cloud_cover - bound_deviation);
-        const auto max_value = std::min(1.0, cloud_cover + bound_deviation);
+        const auto min_value = lower_bound.at(variable_index) / 100.0;
+        const auto max_value = upper_bound.at(variable_index) / 100.0;
+
+        CHECK_GE(min_value, 0.0);
+        CHECK_LE(min_value, 1.0);
+
+        CHECK_GE(max_value, 0.0);
+        CHECK_LE(max_value, 1.0);
 
         cloud_cover_vars.emplace_back(model.addVar(min_value, max_value, 0.0, GRB_CONTINUOUS));
     }

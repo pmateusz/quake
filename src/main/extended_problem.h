@@ -145,6 +145,8 @@ namespace quake {
 
         inline const Metadata &GetMetadata() const { return metadata_; }
 
+        inline const ExtendedProblem::StationVarModel &VarModel(const GroundStation &ground_station) const { return var_model_.at(ground_station); }
+
         double KeyRate(const GroundStation &station, const boost::posix_time::ptime &datetime, ExtendedProblem::WeatherSample sample) const;
 
         double KeyRate(const GroundStation &station, const boost::posix_time::time_period &period, ExtendedProblem::WeatherSample sample) const;

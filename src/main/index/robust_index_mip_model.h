@@ -42,6 +42,8 @@ namespace quake {
     protected:
         void Build(const boost::optional<Solution> &solution) override;
 
+        void AppendMetadata(Metadata &metadata) override;
+
         void ReportResults(util::SolverStatus solver_status) override;
 
         std::size_t GetCloudCoverIndex(const boost::posix_time::time_period &period) const;

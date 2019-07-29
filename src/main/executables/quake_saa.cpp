@@ -26,6 +26,7 @@
 #include <boost/optional.hpp>
 
 #include "executables/mip_arguments.h"
+#include "index/index_evaluator.h"
 #include "index/sample_average_mip_model.h"
 #include "metadata.h"
 
@@ -40,10 +41,13 @@ int main(int argc, char *argv[]) {
     if (solution_opt) {
         solution_opt->GetMetadata().SetProperty(quake::Metadata::Property::SolutionType, quake::Metadata::SolutionType::Reference);
 
+        quake::IndexEvaluator evaluator{problem};
+        LOG(INFO) << "In Sample: " << evaluator(*solution_opt, problem.GetWeatherSample(quake::ExtendedProblem::WeatherSample::Forecast));
+        LOG(INFO) << "Out of Sample: " << evaluator(*solution_opt, problem.GetWeatherSample(quake::ExtendedProblem::WeatherSample::Real));
         quake::util::Save(*solution_opt, arguments.SolutionFile);
     } else {
         LOG(FATAL) << "Failed to solve the problem";
     }
-    
+
     return EXIT_SUCCESS;
 }
