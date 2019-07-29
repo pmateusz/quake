@@ -19,67 +19,57 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#ifndef QUAKE_ROBUST_INDEX_MIP_MODEL_H
-#define QUAKE_ROBUST_INDEX_MIP_MODEL_H
-
-#include <boost/config.hpp>
-#include <boost/optional.hpp>
-#include <boost/date_time.hpp>
+#ifndef QUAKE_ROBUST_VAR_INDEX_MIP_MODEL_H
+#define QUAKE_ROBUST_VAR_INDEX_MIP_MODEL_H
 
 #include <gurobi_c++.h>
 
 #include "extended_problem.h"
 #include "base_interval_mip_model.h"
-#include "solution.h"
-#include "interval_var.h"
 
 namespace quake {
 
-    class RobustIndexMipModel : public BaseIntervalMipModel {
+    class RobustVarIndexMipModel : public BaseIntervalMipModel {
     public:
-        RobustIndexMipModel(ExtendedProblem const *problem, boost::posix_time::time_duration interval_step, double target_index);
+        RobustVarIndexMipModel(ExtendedProblem const *problem, boost::posix_time::time_duration interval_step, double target_index);
 
+    private:
     protected:
         void Build(const boost::optional<Solution> &solution) override;
-
-        void AppendMetadata(Metadata &metadata) override;
-
-        void ReportResults(util::SolverStatus solver_status) override;
 
         std::size_t GetCloudCoverIndex(const boost::posix_time::time_period &period) const;
 
     private:
-        class RobustIndexMipCallback : public GRBCallback {
+
+        class RobustVarIndexMipCallback : public GRBCallback {
         public:
-            explicit RobustIndexMipCallback(RobustIndexMipModel &model);
+            explicit RobustVarIndexMipCallback(RobustVarIndexMipModel &model);
 
         protected:
             void callback() override;
 
-            std::vector<double> SolveRiskinessIndexConstraint(const GroundStation &station);
-
-            std::vector<double> SolveKeysTransferredConstraint(const GroundStation &station);
-
         private:
-            std::vector<GRBVar> CreateCloudCoverVariables(const GroundStation &station, GRBModel &model) const;
+            std::vector<std::vector<GRBVar> > CreateCloudCoverVariables(GRBModel &model);
 
-            RobustIndexMipModel &model_;
+            RobustVarIndexMipModel &model_;
+            double traffic_index_upper_bound_;
         };
 
-        friend class RobustIndexMipCallback;
+        friend class RobustVarIndexMipCallback;
 
         double target_index_;
 
-        GRBVar riskiness_index_;
-
         std::vector<boost::posix_time::time_period> cloud_cover_index_;
-        std::vector<GRBVar> dual_station_;
-        std::vector<std::vector<GRBVar>> dual_cloud_cover_;
 
+        // variable r in the dual reformulation
+        GRBVar dual_intercept_;
 
-        std::unique_ptr<RobustIndexMipCallback> callback_;
+        // variables s in the dual reformulation
+        std::vector<std::vector<GRBVar>> dual_cloud_cover_by_station_;
+
+        std::unique_ptr<RobustVarIndexMipCallback> callback_;
     };
 }
 
 
-#endif //QUAKE_ROBUST_INDEX_MIP_MODEL_H
+#endif //QUAKE_ROBUST_VAR_INDEX_MIP_MODEL_H
