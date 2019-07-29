@@ -59,7 +59,10 @@ pushd /home/pmateusz/dev/quake/network_share/test/solution_dir
 #/home/pmateusz/dev/quake/cmake-build-debug/quake-cvar --problem=../problem_dir/problem_past_error_replication_2019-06-18.json --interval-step=00:01:00 --gap-limit=0.05 \
 #--target-traffic-index=4000 --num-scenarios=128 --output=solution_error_replication_2019-06-18_cvar_128_4000.json > solution_error_replication_cvar_2019-06-18_4000.log 2> solution_error_replication_cvar_2019-06-18_4000.err.log
 
+#/home/pmateusz/dev/quake/cmake-build-debug/quake-cvar --problem=../problem_dir/problem_past_error_replication_2019-06-18.json --interval-step=00:01:00 --gap-limit=0.05 \
+#--target-traffic-index=5000 --num-scenarios=128 --output=solution_error_replication_2019-06-18_cvar_128_5000.json > solution_error_replication_cvar_2019-06-18_5000.log 2> solution_error_replication_cvar_2019-06-18_5000.err.log
+
 /home/pmateusz/dev/quake/cmake-build-debug/quake-cvar --problem=../problem_dir/problem_past_error_replication_2019-06-18.json --interval-step=00:01:00 --gap-limit=0.05 \
---target-traffic-index=5000 --num-scenarios=128 --output=solution_error_replication_2019-06-18_cvar_128_5000.json > solution_error_replication_cvar_2019-06-18_5000.log 2> solution_error_replication_cvar_2019-06-18_5000.err.log
+  --target-traffic-index=12335 --epsilon=1.0 --num-scenarios=128 --output=solution_error_replication_2019-06-18_cvar_128_12335_e1.json >solution_error_replication_cvar_2019-06-18_12335e1.log 2>solution_error_replication_cvar_2019-06-18_12335e1.err.log
 
 popd
