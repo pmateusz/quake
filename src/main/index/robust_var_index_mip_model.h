@@ -65,6 +65,7 @@ namespace quake {
         GRBVar dual_intercept_;
 
         // variables s in the dual reformulation
+        std::vector<std::vector<std::size_t> > used_cloud_cover_indices_;
         std::vector<std::vector<GRBVar>> dual_cloud_cover_by_station_;
 
         std::unique_ptr<RobustVarIndexMipCallback> callback_;

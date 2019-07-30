@@ -1,0 +1,7 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="var robust" type="CMakeRunConfiguration" factoryName="Application" PROGRAM_PARAMS="--problem=$PROJECT_DIR$/cmake-build-debug/extended_problem.json --output=robust_var_solution --interval-step=00:00:15 --gap-limit=0.05 --target-traffic-index=5000 --v=1" PASS_PARENT_ENVS_2="true" PROJECT_NAME="quake" TARGET_NAME="quake-var-robust" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="quake" RUN_TARGET_NAME="quake-var-robust">
+    <method v="2">
+      <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+    </method>
+  </configuration>
+</component>

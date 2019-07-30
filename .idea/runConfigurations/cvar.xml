@@ -1,0 +1,7 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="cvar" type="CMakeRunConfiguration" factoryName="Application" PROGRAM_PARAMS="--problem=$PROJECT_DIR$/network_share/test/problem_dir/problem_past_error_replication_2019-06-18.json --interval-step=00:01:00 --target-traffic-index=12336 --epsilon=1.0 --num-scenarios=128 --output=solution_error_replication_2019-06-18_cvar_128_12336_e1.json" PASS_PARENT_ENVS_2="true" PROJECT_NAME="quake" TARGET_NAME="quake-cvar" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="quake" RUN_TARGET_NAME="quake-cvar">
+    <method v="2">
+      <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+    </method>
+  </configuration>
+</component>
