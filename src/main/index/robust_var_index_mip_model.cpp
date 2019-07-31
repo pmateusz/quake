@@ -126,7 +126,7 @@ quake::RobustVarIndexMipModel::RobustVarIndexMipCallback::RobustVarIndexMipCallb
           traffic_index_upper_bound_{model.GetTrafficIndexUpperBound()} {
 }
 
-void quake::RobustVarIndexMipModel::RobustVarIndexMipCallback::callback() {
+void quake::RobustVarIndexMipModel::RobustVarIndexMipCallback::callback_slack() {
     if (where != GRB_CB_MIPSOL) { return; }
 
     GRBModel local_model{model_.mip_environment_};
@@ -228,183 +228,182 @@ void quake::RobustVarIndexMipModel::RobustVarIndexMipCallback::callback() {
 }
 
 // optimization of the traffic index alone - best is at zero
-//void quake::RobustVarIndexMipModel::RobustVarIndexMipCallback::callback() {
-//    if (where != GRB_CB_MIPSOL) { return; }
-//
-//    GRBModel local_model{model_.mip_environment_};
-//    std::vector<std::vector<GRBVar>> cloud_cover_vars = CreateCloudCoverVariables(local_model);
-//
-//    GRBVar traffic_index = local_model.addVar(0, this->traffic_index_upper_bound_, 0, GRB_CONTINUOUS);
-//    for (const auto &station : model_.ObservableStations()) {
-//        const auto station_index = model_.Index(station);
-//        GRBLinExpr station_keys_transferred = 0.0;
-//        for (const auto &interval : model_.StationIntervals(station)) {
-//            const auto cloud_cover_index = model_.GetCloudCoverIndex(interval.Period());
-//            station_keys_transferred += getSolution(interval.Var())
-//                                        * model_.problem_->KeyRate(station, interval.Period())
-//                                        * (1.0 - cloud_cover_vars.at(station_index).at(cloud_cover_index));
-//        }
-//
-//        local_model.addConstr(model_.TransferShare(station) * traffic_index <= station_keys_transferred);
-//    }
-//
-//    GRBLinExpr objective = model_.target_index_ - traffic_index;
-//    local_model.set(GRB_IntAttr_ModelSense, GRB_MINIMIZE);
-//    local_model.setObjective(objective);
-//    local_model.set(GRB_IntParam_NumericFocus, 2);
-//    local_model.set(GRB_IntParam_OutputFlag, 1);
-//    local_model.optimize();
-//
-//    const auto solver_status = static_cast<util::SolverStatus>(local_model.get(GRB_IntAttr_Status));
-//    CHECK_EQ(solver_status, util::SolverStatus::Optimal);
-//
-//    double left_hand_side = getSolution(model_.dual_intercept_);
-//    for (const auto &other_station : model_.ObservableStations()) {
-//        const auto other_station_index = model_.Index(other_station);
-//        for (const auto cloud_cover_index: model_.used_cloud_cover_indices_.at(other_station_index)) {
-//            left_hand_side += getSolution(model_.dual_cloud_cover_by_station_.at(other_station_index).at(cloud_cover_index))
-//                              * cloud_cover_vars.at(other_station_index).at(cloud_cover_index).get(GRB_DoubleAttr_X);
-//        }
-//    }
-//
-//    VLOG(1) << local_model.get(GRB_DoubleAttr_ObjVal) << " v.s. " << left_hand_side;
-//    if (util::is_nearly_eq(left_hand_side, local_model.get(GRB_DoubleAttr_ObjVal))
-//        || util::is_surely_gt(left_hand_side, local_model.get(GRB_DoubleAttr_ObjVal))) {
-//        return;
-//    }
-//
-//    GRBLinExpr dual_left_expr = model_.dual_intercept_;
-//    for (const auto &other_station : model_.ObservableStations()) {
-//        const auto other_station_index = model_.Index(other_station);
-//        for (const auto cloud_cover_index: model_.used_cloud_cover_indices_.at(other_station_index)) {
-//            dual_left_expr += model_.dual_cloud_cover_by_station_.at(other_station_index).at(cloud_cover_index)
-//                              * cloud_cover_vars.at(other_station_index).at(cloud_cover_index).get(GRB_DoubleAttr_X);
-//        }
-//    }
-//
-//    for (const auto &other_station : model_.ObservableStations()) {
-//        const auto other_station_index = model_.Index(other_station);
-//        GRBLinExpr keys_transferred_expr = 0.0;
-//        for (const auto &interval : model_.StationIntervals(other_station)) {
-//            const auto cloud_cover_index = model_.GetCloudCoverIndex(interval.Period());
-//            keys_transferred_expr += getSolution(interval.Var())
-//                                     * model_.problem_->KeyRate(other_station, interval.Period())
-//                                     * (1.0 - cloud_cover_vars.at(other_station_index).at(cloud_cover_index));
-//        }
-//
-//        addLazy(dual_left_expr >= model_.target_index_ - keys_transferred_expr / model_.TransferShare(other_station));
-//    }
-//}
+void quake::RobustVarIndexMipModel::RobustVarIndexMipCallback::callback_best_at_zero() {
+    if (where != GRB_CB_MIPSOL) { return; }
 
-// optimization of the traffic index combined
-//void quake::RobustVarIndexMipModel::RobustVarIndexMipCallback::callback() {
-//    if (where != GRB_CB_MIPSOL) { return; }
-//
-//    double current_objective = 0;
-//    {
-//        const auto &forecast = model_.problem_->GetWeatherSample(ExtendedProblem::WeatherSample::Forecast);
-//        current_objective = getSolution(model_.dual_intercept_);
-//        for (const auto &station : model_.ObservableStations()) {
-//            const auto station_index = model_.Index(station);
-//            for (const auto cloud_cover_index : model_.used_cloud_cover_indices_.at(station_index)) {
-//                const auto &period = model_.cloud_cover_index_.at(cloud_cover_index);
-//                current_objective += getSolution(model_.dual_cloud_cover_by_station_.at(station_index).at(cloud_cover_index))
-//                                     * forecast.GetCloudCover(station, period.begin()) / 100.0;
-//            }
-//        }
-//    }
-//
-//    bool cut_generated = false;
-//    {
-//        GRBModel local_model{model_.mip_environment_};
-//        std::vector<std::vector<GRBVar>> cloud_cover_vars = CreateCloudCoverVariables(local_model);
-//
-//        // left-hand side of the dual constraint
-//        GRBLinExpr left_constraint_expr = getSolution(model_.dual_intercept_);
-//        for (const auto &other_station : model_.ObservableStations()) {
-//            const auto other_station_index = model_.Index(other_station);
-//            for (const auto cloud_cover_index: model_.used_cloud_cover_indices_.at(other_station_index)) {
-//                left_constraint_expr
-//                        += getSolution(model_.dual_cloud_cover_by_station_.at(other_station_index).at(cloud_cover_index))
-//                           * cloud_cover_vars.at(other_station_index).at(cloud_cover_index);
-//            }
-//        }
-//
-//        for (const auto &master_station : model_.ObservableStations()) {
-//            const auto master_station_index = model_.Index(master_station);
-//
-//            {
-//                GRBLinExpr keys_transferred_expr = 0.0;
-//                for (const auto &interval : model_.StationIntervals(master_station)) {
-//                    const auto cloud_cover_index = model_.GetCloudCoverIndex(interval.Period());
-//                    keys_transferred_expr += getSolution(interval.Var())
-//                                             * model_.problem_->KeyRate(master_station, interval.Period())
-//                                             * (1.0 - cloud_cover_vars.at(master_station_index).at(cloud_cover_index));
-//                }
-//
-//                // objective
-//                GRBLinExpr objective = left_constraint_expr - model_.target_index_ + keys_transferred_expr / model_.TransferShare(master_station);
-//
-//                // right-hand side of the dual constraint
-//                local_model.set(GRB_IntAttr_ModelSense, GRB_MINIMIZE);
-//                local_model.setObjective(objective);
-//                local_model.set(GRB_IntParam_NumericFocus, 2.0);
-//                local_model.set(GRB_IntParam_OutputFlag, 0);
-//                local_model.optimize();
-//            }
-//
-//            const auto solver_status = static_cast<util::SolverStatus>(local_model.get(GRB_IntAttr_Status));
-//            CHECK_EQ(solver_status, util::SolverStatus::Optimal);
-//
-//            VLOG(1) << local_model.get(GRB_DoubleAttr_ObjVal) << " v.s " << 0.0;
-//            if (util::is_surely_lt(local_model.get(GRB_DoubleAttr_ObjVal), 0.0)) {
-//                VLOG(1) << "Cuts needed. Dual constraint violated by " << local_model.get(GRB_DoubleAttr_ObjVal)
-//                        << " at " << master_station;
-//
-//                double cut_keys_transferred_value = 0.0;
-//                for (const auto &interval : model_.StationIntervals(master_station)) {
-//                    const auto cloud_cover_index = model_.GetCloudCoverIndex(interval.Period());
-//                    cut_keys_transferred_value += getSolution(interval.Var())
-//                                                  * model_.problem_->KeyRate(master_station, interval.Period())
-//                                                  * (1.0 - cloud_cover_vars.at(master_station_index).at(cloud_cover_index).get(GRB_DoubleAttr_X));
-//                }
-//
-//                // left-hand side of the dual constraint
-//                double cut_left_constraint_value = getSolution(model_.dual_intercept_);
-//                GRBLinExpr cut_left_constraint_expr = model_.dual_intercept_;
-//                for (const auto &other_station : model_.ObservableStations()) {
-//                    const auto other_station_index = model_.Index(other_station);
-//                    for (const auto cloud_cover_index : model_.used_cloud_cover_indices_.at(other_station_index)) {
-//                        cut_left_constraint_value += getSolution(model_.dual_cloud_cover_by_station_.at(other_station_index).at(cloud_cover_index))
-//                                                     * cloud_cover_vars.at(other_station_index).at(cloud_cover_index).get(GRB_DoubleAttr_X);
-//
-//                        cut_left_constraint_expr += model_.dual_cloud_cover_by_station_.at(other_station_index).at(cloud_cover_index)
-//                                                    * cloud_cover_vars.at(other_station_index).at(cloud_cover_index).get(GRB_DoubleAttr_X);
-//                    }
-//                }
-//
-//                // generate lazy constraint
-//                GRBLinExpr cut_keys_transferred_expr = 0.0;
-//                for (const auto &interval : model_.StationIntervals(master_station)) {
-//                    const auto cloud_cover_index = model_.GetCloudCoverIndex(interval.Period());
-//                    cut_keys_transferred_expr += interval.Var()
-//                                                 * model_.problem_->KeyRate(master_station, interval.Period())
-//                                                 * (1.0 - cloud_cover_vars.at(master_station_index).at(cloud_cover_index).get(GRB_DoubleAttr_X));
-//                }
-//
-//                // feasibility cuts
-//                addLazy(cut_left_constraint_expr >= model_.target_index_ - cut_keys_transferred_expr / model_.TransferShare(master_station));
-//                VLOG(1) << "Cut: " << cut_left_constraint_value
-//                        << " >= " << model_.target_index_ - cut_keys_transferred_value / model_.TransferShare(master_station);
-//                cut_generated = true;
-//            }
-//        }
-//    }
-//
-//    if (!cut_generated && current_objective <= -traffic_index_upper_bound_) {
-//        LOG(FATAL) << "Failed to generate a cut";
-//    }
-//}
+    GRBModel local_model{model_.mip_environment_};
+    std::vector<std::vector<GRBVar>> cloud_cover_vars = CreateCloudCoverVariables(local_model);
+
+    GRBVar traffic_index = local_model.addVar(0, this->traffic_index_upper_bound_, 0, GRB_CONTINUOUS);
+    for (const auto &station : model_.ObservableStations()) {
+        const auto station_index = model_.Index(station);
+        GRBLinExpr station_keys_transferred = 0.0;
+        for (const auto &interval : model_.StationIntervals(station)) {
+            const auto cloud_cover_index = model_.GetCloudCoverIndex(interval.Period());
+            station_keys_transferred += getSolution(interval.Var())
+                                        * model_.problem_->KeyRate(station, interval.Period())
+                                        * (1.0 - cloud_cover_vars.at(station_index).at(cloud_cover_index));
+        }
+
+        local_model.addConstr(model_.TransferShare(station) * traffic_index <= station_keys_transferred);
+    }
+
+    GRBLinExpr objective = model_.target_index_ - traffic_index;
+    local_model.set(GRB_IntAttr_ModelSense, GRB_MINIMIZE);
+    local_model.setObjective(objective);
+    local_model.set(GRB_IntParam_NumericFocus, 2);
+    local_model.set(GRB_IntParam_OutputFlag, 1);
+    local_model.optimize();
+
+    const auto solver_status = static_cast<util::SolverStatus>(local_model.get(GRB_IntAttr_Status));
+    CHECK_EQ(solver_status, util::SolverStatus::Optimal);
+
+    double left_hand_side = getSolution(model_.dual_intercept_);
+    for (const auto &other_station : model_.ObservableStations()) {
+        const auto other_station_index = model_.Index(other_station);
+        for (const auto cloud_cover_index: model_.used_cloud_cover_indices_.at(other_station_index)) {
+            left_hand_side += getSolution(model_.dual_cloud_cover_by_station_.at(other_station_index).at(cloud_cover_index))
+                              * cloud_cover_vars.at(other_station_index).at(cloud_cover_index).get(GRB_DoubleAttr_X);
+        }
+    }
+
+    VLOG(1) << local_model.get(GRB_DoubleAttr_ObjVal) << " v.s. " << left_hand_side;
+    if (util::is_nearly_eq(left_hand_side, local_model.get(GRB_DoubleAttr_ObjVal))
+        || util::is_surely_gt(left_hand_side, local_model.get(GRB_DoubleAttr_ObjVal))) {
+        return;
+    }
+
+    GRBLinExpr dual_left_expr = model_.dual_intercept_;
+    for (const auto &other_station : model_.ObservableStations()) {
+        const auto other_station_index = model_.Index(other_station);
+        for (const auto cloud_cover_index: model_.used_cloud_cover_indices_.at(other_station_index)) {
+            dual_left_expr += model_.dual_cloud_cover_by_station_.at(other_station_index).at(cloud_cover_index)
+                              * cloud_cover_vars.at(other_station_index).at(cloud_cover_index).get(GRB_DoubleAttr_X);
+        }
+    }
+
+    for (const auto &other_station : model_.ObservableStations()) {
+        const auto other_station_index = model_.Index(other_station);
+        GRBLinExpr keys_transferred_expr = 0.0;
+        for (const auto &interval : model_.StationIntervals(other_station)) {
+            const auto cloud_cover_index = model_.GetCloudCoverIndex(interval.Period());
+            keys_transferred_expr += interval.Var()
+                                     * model_.problem_->KeyRate(other_station, interval.Period())
+                                     * (1.0 - cloud_cover_vars.at(other_station_index).at(cloud_cover_index).get(GRB_DoubleAttr_X));
+        }
+
+        addLazy(dual_left_expr >= model_.target_index_ - keys_transferred_expr / model_.TransferShare(other_station));
+    }
+}
+
+void quake::RobustVarIndexMipModel::RobustVarIndexMipCallback::callback_combined() {
+    if (where != GRB_CB_MIPSOL) { return; }
+
+    double current_objective = 0;
+    {
+        const auto &forecast = model_.problem_->GetWeatherSample(ExtendedProblem::WeatherSample::Forecast);
+        current_objective = getSolution(model_.dual_intercept_);
+        for (const auto &station : model_.ObservableStations()) {
+            const auto station_index = model_.Index(station);
+            for (const auto cloud_cover_index : model_.used_cloud_cover_indices_.at(station_index)) {
+                const auto &period = model_.cloud_cover_index_.at(cloud_cover_index);
+                current_objective += getSolution(model_.dual_cloud_cover_by_station_.at(station_index).at(cloud_cover_index))
+                                     * forecast.GetCloudCover(station, period.begin()) / 100.0;
+            }
+        }
+    }
+
+    bool cut_generated = false;
+    {
+        GRBModel local_model{model_.mip_environment_};
+        std::vector<std::vector<GRBVar>> cloud_cover_vars = CreateCloudCoverVariables(local_model);
+
+        // left-hand side of the dual constraint
+        GRBLinExpr left_constraint_expr = getSolution(model_.dual_intercept_);
+        for (const auto &other_station : model_.ObservableStations()) {
+            const auto other_station_index = model_.Index(other_station);
+            for (const auto cloud_cover_index: model_.used_cloud_cover_indices_.at(other_station_index)) {
+                left_constraint_expr
+                        += getSolution(model_.dual_cloud_cover_by_station_.at(other_station_index).at(cloud_cover_index))
+                           * cloud_cover_vars.at(other_station_index).at(cloud_cover_index);
+            }
+        }
+
+        for (const auto &master_station : model_.ObservableStations()) {
+            const auto master_station_index = model_.Index(master_station);
+
+            {
+                GRBLinExpr keys_transferred_expr = 0.0;
+                for (const auto &interval : model_.StationIntervals(master_station)) {
+                    const auto cloud_cover_index = model_.GetCloudCoverIndex(interval.Period());
+                    keys_transferred_expr += getSolution(interval.Var())
+                                             * model_.problem_->KeyRate(master_station, interval.Period())
+                                             * (1.0 - cloud_cover_vars.at(master_station_index).at(cloud_cover_index));
+                }
+
+                // objective
+                GRBLinExpr objective = left_constraint_expr - model_.target_index_ + keys_transferred_expr / model_.TransferShare(master_station);
+
+                // right-hand side of the dual constraint
+                local_model.set(GRB_IntAttr_ModelSense, GRB_MINIMIZE);
+                local_model.setObjective(objective);
+                local_model.set(GRB_IntParam_NumericFocus, 2.0);
+                local_model.set(GRB_IntParam_OutputFlag, 0);
+                local_model.optimize();
+            }
+
+            const auto solver_status = static_cast<util::SolverStatus>(local_model.get(GRB_IntAttr_Status));
+            CHECK_EQ(solver_status, util::SolverStatus::Optimal);
+
+            VLOG(1) << local_model.get(GRB_DoubleAttr_ObjVal) << " v.s " << 0.0;
+            if (util::is_surely_lt(local_model.get(GRB_DoubleAttr_ObjVal), 0.0)) {
+                VLOG(1) << "Cuts needed. Dual constraint violated by " << local_model.get(GRB_DoubleAttr_ObjVal)
+                        << " at " << master_station;
+
+                double cut_keys_transferred_value = 0.0;
+                for (const auto &interval : model_.StationIntervals(master_station)) {
+                    const auto cloud_cover_index = model_.GetCloudCoverIndex(interval.Period());
+                    cut_keys_transferred_value += getSolution(interval.Var())
+                                                  * model_.problem_->KeyRate(master_station, interval.Period())
+                                                  * (1.0 - cloud_cover_vars.at(master_station_index).at(cloud_cover_index).get(GRB_DoubleAttr_X));
+                }
+
+                // left-hand side of the dual constraint
+                double cut_left_constraint_value = getSolution(model_.dual_intercept_);
+                GRBLinExpr cut_left_constraint_expr = model_.dual_intercept_;
+                for (const auto &other_station : model_.ObservableStations()) {
+                    const auto other_station_index = model_.Index(other_station);
+                    for (const auto cloud_cover_index : model_.used_cloud_cover_indices_.at(other_station_index)) {
+                        cut_left_constraint_value += getSolution(model_.dual_cloud_cover_by_station_.at(other_station_index).at(cloud_cover_index))
+                                                     * cloud_cover_vars.at(other_station_index).at(cloud_cover_index).get(GRB_DoubleAttr_X);
+
+                        cut_left_constraint_expr += model_.dual_cloud_cover_by_station_.at(other_station_index).at(cloud_cover_index)
+                                                    * cloud_cover_vars.at(other_station_index).at(cloud_cover_index).get(GRB_DoubleAttr_X);
+                    }
+                }
+
+                // generate lazy constraint
+                GRBLinExpr cut_keys_transferred_expr = 0.0;
+                for (const auto &interval : model_.StationIntervals(master_station)) {
+                    const auto cloud_cover_index = model_.GetCloudCoverIndex(interval.Period());
+                    cut_keys_transferred_expr += interval.Var()
+                                                 * model_.problem_->KeyRate(master_station, interval.Period())
+                                                 * (1.0 - cloud_cover_vars.at(master_station_index).at(cloud_cover_index).get(GRB_DoubleAttr_X));
+                }
+
+                // feasibility cuts
+                addLazy(cut_left_constraint_expr >= model_.target_index_ - cut_keys_transferred_expr / model_.TransferShare(master_station));
+                VLOG(1) << "Cut: " << cut_left_constraint_value
+                        << " >= " << model_.target_index_ - cut_keys_transferred_value / model_.TransferShare(master_station);
+                cut_generated = true;
+            }
+        }
+    }
+
+    if (!cut_generated && current_objective <= -traffic_index_upper_bound_) {
+        LOG(FATAL) << "Failed to generate a cut";
+    }
+}
 
 std::vector<std::vector<GRBVar> > quake::RobustVarIndexMipModel::RobustVarIndexMipCallback::CreateCloudCoverVariables(GRBModel &model) {
     std::vector<std::vector<GRBVar>> cloud_cover_variables;
@@ -455,12 +454,16 @@ std::vector<std::vector<GRBVar> > quake::RobustVarIndexMipModel::RobustVarIndexM
 
 //            model.addConstr(cloud_cover_variables.at(master_station_index).at(time_step) <= 1.0);
 //            model.addConstr(cloud_cover_variables.at(master_station_index).at(time_step) >= 0.0);
-            model.addConstr(
-                    cloud_cover_variables.at(master_station_index).at(time_step) >= next_prediction - 2 * master_var_model.Residual.Stderr / 100.0);
-            model.addConstr(
-                    cloud_cover_variables.at(master_station_index).at(time_step) <= next_prediction + 2 * master_var_model.Residual.Stderr / 100.0);
+//            model.addConstr(
+//                    cloud_cover_variables.at(master_station_index).at(time_step) >= next_prediction - 2 * master_var_model.Residual.Stderr / 100.0);
+//            model.addConstr(
+//                    cloud_cover_variables.at(master_station_index).at(time_step) <= next_prediction + 2 * master_var_model.Residual.Stderr / 100.0);
         }
     }
 
     return cloud_cover_variables;
+}
+
+void quake::RobustVarIndexMipModel::RobustVarIndexMipCallback::callback() {
+    callback_slack();
 }

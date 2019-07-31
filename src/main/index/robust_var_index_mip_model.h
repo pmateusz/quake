@@ -53,6 +53,12 @@ namespace quake {
 
             RobustVarIndexMipModel &model_;
             double traffic_index_upper_bound_;
+
+            void callback_combined();
+
+            void callback_slack();
+
+            void callback_best_at_zero();
         };
 
         friend class RobustVarIndexMipCallback;
