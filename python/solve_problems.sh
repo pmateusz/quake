@@ -5,33 +5,60 @@ solution_dir=/home/pmateusz/dev/quake/network_share/test/solution_dir
 interval_step=00:01:00
 gap_limit=0.05
 num_scenarios=128
+time_limit=00:05:00
 
 
 pushd $solution_dir || exit
 
-pattern=".*/(.*)_([0-9]{4}\-[0-9]{2}\-[0-9]{2}).json$"
-deterministic_exec=/home/pmateusz/dev/quake/cmake-build-debug/quake-det
-saa_exec=/home/pmateusz/dev/quake/cmake-build-debug/quake-saa
-
+#function run_deterministic {
+#  # args: base_file_name date
+#  output=solution\_$1\_$2
+#  output_log=$output\_deterministic
+#  /home/pmateusz/dev/quake/cmake-build-debug/quake-det --problem=../problem_dir/problem\_$1\_$2\.json --interval-step=${interval_step} \
+#--gap-limit=${gap_limit} --time-limit=${time_limit} --solution-prefix=${output} > ${output_log}\.log 2> ${output_log}\.err.log
+#}
+#
+#pattern=".*/problem_(.*)_([0-9]{4}\-[0-9]{2}\-[0-9]{2}).json$"
 #for problem_file in /home/pmateusz/dev/quake/network_share/test/problem_dir/problem_coregionalization*.json; do
-#  if [[ $problem_file =~ $pattern ]]
+#  if [[ $problem_file =~ ${pattern} ]]
 #  then
 #    base_filename_match=${BASH_REMATCH[1]}
 #    date_match=${BASH_REMATCH[2]}
 #    echo Solving deterministic $base_filename_match $date_match
-#    $deterministic_exec --problem=$problem_file --interval-step=$interval_step --gap-limit=$gap_limit \
-#    --solution-prefix=$base_filename_match\_$date_match > $base_filename_match\_$date_match\.log 2> $base_filename_match\_$date_match\.err.log
+#    run_deterministic $base_filename_match $date_match
 #  fi
 #done
 
-for index in 3000 4000 5000 6000 7000
+#function run_saa {
+#  # base_file_name date target_traffic_index
+#  output_file=solution\_$1\_$2\_$num_scenarios\_$3\_saa
+#  /home/pmateusz/dev/quake/cmake-build-debug/quake-saa --problem=../problem_dir/problem\_$1\_$2\.json --interval-step=$interval_step --gap-limit=$gap_limit --time-limit=${time_limit} \
+#--target-traffic-index=$3 --num_scenarios=$num_scenarios --output=${output_file}\.json > ${output_file}.log 2> ${output_file}.err.log
+#}
+#
+## solve single day using saa and different values of the target traffic index
+#for target_traffic_index in 3000 4000 5000 6000 7000
+#do
+#base_filename=coregionalization
+#date=2019-07-18
+#echo Solving sample average approximation ${base_filename} ${date} ${num_scenarios} ${target_traffic_index}
+#run_saa ${base_filename} ${date} ${target_traffic_index}
+#done
+
+function run_cvar {
+  # base_file_name date target_traffic_index
+  output_file=solution\_$1\_$2\_$num_scenarios\_$3\_cvar
+  /home/pmateusz/dev/quake/cmake-build-debug/quake-cvar --problem=../problem_dir/problem\_$1\_$2\.json --interval-step=${interval_step} --gap-limit=${gap_limit} --time-limit=${time_limit} \
+--target-traffic-index=$3 --num_scenarios=$num_scenarios --output=${output_file}\.json > ${output_file}.log 2> ${output_file}.err.log
+}
+
+# solve single day using saa and different values of the target traffic index
+for target_traffic_index in 3000 4000 5000 6000 7000
 do
-base_filename_match=problem_coregionalization
-target_traffic_index=$index
-date_match=2019-07-18
-output=$base_filename_match\_$date_match\_$target_traffic_index\_saa
-$saa_exec --problem=../problem_dir/$base_filename_match\_$date_match\.json --interval-step=$interval_step --gap-limit=$gap_limit \
- --target-traffic-index=$target_traffic_index --num_scenarios=$num_scenarios --output=$output > $output.log 2> $output.err.log
+base_filename=coregionalization
+date=2019-07-18
+echo Solving CV@R ${base_filename} ${date} ${num_scenarios} ${target_traffic_index}
+run_cvar ${base_filename} ${date} ${target_traffic_index}
 done
 
 #/home/pmateusz/dev/quake/cmake-build-debug/quake-det
