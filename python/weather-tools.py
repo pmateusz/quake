@@ -521,18 +521,31 @@ def extend_problem_definition(args):
         pivot_frame.columns = pivot_frame.columns.droplevel()
         pivot_frame = weather_cache.fill_missing_values(pivot_frame)
 
-        model = statsmodels.tsa.api.VAR(pivot_frame)
-        result = model.fit()
+        cities = [column for column in pivot_frame.columns if isinstance(column, quake.city.City)]
+        if len(pivot_frame) > 1:
+            model = statsmodels.tsa.api.VAR(pivot_frame)
+            result = model.fit()
+            params = result.params
+            stderr = result.stderr
+            stderr_residuals = result.resid.std()
+            corr = pivot_frame.corr()
+        else:
+            rows_index = ['const']
+            params_data = [numpy.zeros(len(cities)).tolist()]
 
-        params = result.params
-        stderr = result.stderr
-        residuals = result.resid
-
-        stderr_residuals = residuals.std()
-        corr = pivot_frame.corr()
+            for city_index, city in enumerate(cities):
+                rows_index.append('L1.{0}'.format(city.name))
+                zeros = numpy.zeros(len(cities)).tolist()
+                zeros[city_index] = 1.0
+                params_data.append(zeros)
+            params = pandas.DataFrame(data=params_data, columns=cities, index=rows_index)
+            del params_data
+            stderr = pandas.DataFrame(data=numpy.zeros((len(rows_index), len(cities))), columns=cities, index=rows_index)
+            stderr_residuals = {city: 0.0 for city in cities}
+            corr = pandas.DataFrame(data=numpy.identity(len(cities)), columns=cities, index=cities)
 
         model_data = {}
-        for station in params.columns:
+        for station in cities:
             station_data = dict()
             station_data['residual'] = {'value': 0, 'stderr': stderr_residuals[station]}
             station_params = params[station]
@@ -806,45 +819,32 @@ def plot_forecast_command(args):
     weather_cache.load()
 
     duration = to_date_time - from_date_time
-
-    def get_diff_frame(time_point):
-        forecast_frame = weather_cache.get_forecast_frame(time_point, duration)
-        weather_frame = weather_cache.get_observation_frame(time_point, duration)
-        diff_frame = forecast_frame - weather_frame
-        diff_frame.dropna(inplace=True)
-        diff_frame['Delay'] = diff_frame.index - time_point
-        return diff_frame
-
-    time_points = weather_cache.forecast_frame['DateTime'].unique()
-    time_points = list({pandas.to_datetime(date_time) for date_time in time_points})
-    time_points.sort()
-
-    diff_frames = [get_diff_frame(time_point) for time_point in time_points]
+    time_points = weather_cache.get_forecast_time_points()
+    diff_frames = weather_cache.get_error_frames(time_points)
     diff_frame = pandas.concat(diff_frames, ignore_index=True)
+    del diff_frames
+
     delay_values = list(pandas.to_timedelta(value, unit='ns') for value in diff_frame['Delay'].unique())
     delay_values.sort()
 
-    error_data = []
-    for delay_value in delay_values:
-        delay_diff_frame = diff_frame[diff_frame['Delay'] == delay_value]
+    # error_data = []
+    # for delay_value in delay_values:
+    #     delay_diff_frame = diff_frame[diff_frame['Delay'] == delay_value]
+    #
+    #     for city_column in delay_diff_frame.columns:
+    #         if not isinstance(city_column, quake.city.City):
+    #             continue
+    #         for error_value in delay_diff_frame[city_column]:
+    #             error_data.append([city_column, pandas.Timedelta(value=delay_value.total_seconds(), unit='s'), error_value])
+    # columns = ['City', 'Delay', 'Error']
+    # error_frame = pandas.DataFrame(columns=columns, data=error_data)
 
-        for city_column in delay_diff_frame.columns:
-            if not isinstance(city_column, quake.city.City):
-                continue
-            for error_value in delay_diff_frame[city_column]:
-                error_data.append([city_column, pandas.Timedelta(value=delay_value.total_seconds(), unit='s'), error_value])
-    columns = ['City', 'Delay', 'Error']
-    error_frame = pandas.DataFrame(columns=columns, data=error_data)
-
-    delay_values = error_frame['Delay'].unique()
+    # delay_values = error_frame['Delay'].unique()
     rows = []
+    cities = [column for column in diff_frame.columns if isinstance(column, quake.city.City)]
     for delay_value in delay_values:
-        row = dict()
-        filter_frame = error_frame[error_frame['Delay'] == delay_value].copy()
-        for city in filter_frame['City'].unique():
-            error_series = filter_frame[filter_frame['City'] == city]['Error']
-            aggregate = numpy.std(error_series)
-            row[city] = aggregate
+        filter_frame = diff_frame[diff_frame['Delay'] == delay_value].copy()
+        row = {city: filter_frame[city].std() for city in cities}
         rows.append(row)
     std_error_frame = pandas.DataFrame(index=delay_values, data=rows)
 
@@ -854,10 +854,7 @@ def plot_forecast_command(args):
 
     forecast_frame = weather_cache.get_forecast_frame(from_date_time, duration)
     observation_frame = weather_cache.get_observation_frame(from_date_time, duration)
-    for city in forecast_frame.columns:
-        if not isinstance(city, quake.city.City):
-            continue
-
+    for city in cities:
         figure, ax = matplotlib.pyplot.subplots()
 
         x = forecast_frame[city].index
@@ -877,7 +874,7 @@ def plot_forecast_command(args):
         ax.set_ylabel('Cloud Cover [%]')
         figure.tight_layout()
 
-        save_figure('{0}_{1}_{2}_{3}'.format(output_prefix, city.name, simple_date_str(from_date_time), simple_date_str(to_date_time)))
+        save_figure(figure, '{0}_{1}_{2}_{3}'.format(output_prefix, city.name, simple_date_str(from_date_time), simple_date_str(to_date_time)))
 
 
 def plot_coregionalization(args):

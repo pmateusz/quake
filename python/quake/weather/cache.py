@@ -204,6 +204,9 @@ class WeatherCache:
 
     @staticmethod
     def fill_missing_values(frame):
+        if len(frame) == 1:
+            return frame
+
         freq = pandas.infer_freq(frame.index)
         if freq:
             if not frame.index.freq:

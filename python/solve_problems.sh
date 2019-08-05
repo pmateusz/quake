@@ -1,9 +1,40 @@
 #!/usr/bin/env bash
 
-pushd /home/pmateusz/dev/quake/network_share/test/solution_dir
+problem_dir=/home/pmateusz/dev/quake/network_share/test/problem_dir
+solution_dir=/home/pmateusz/dev/quake/network_share/test/solution_dir
+interval_step=00:01:00
+gap_limit=0.05
+num_scenarios=128
 
-#/home/pmateusz/dev/quake/cmake-build-debug/quake-det --problem=../problem_dir/problem_past_error_replication_2019-06-18.json --interval-step=00:01:00 --gap-limit=0.05 \
-#--solution-prefix=solution_error_replication_2019-06-18 > solution_error_replication_2019-06-18.log 2> solution_error_replication_2019-06-18.err.log
+
+pushd $solution_dir || exit
+
+pattern=".*/(.*)_([0-9]{4}\-[0-9]{2}\-[0-9]{2}).json$"
+deterministic_exec=/home/pmateusz/dev/quake/cmake-build-debug/quake-det
+saa_exec=/home/pmateusz/dev/quake/cmake-build-debug/quake-saa
+
+#for problem_file in /home/pmateusz/dev/quake/network_share/test/problem_dir/problem_coregionalization*.json; do
+#  if [[ $problem_file =~ $pattern ]]
+#  then
+#    base_filename_match=${BASH_REMATCH[1]}
+#    date_match=${BASH_REMATCH[2]}
+#    echo Solving deterministic $base_filename_match $date_match
+#    $deterministic_exec --problem=$problem_file --interval-step=$interval_step --gap-limit=$gap_limit \
+#    --solution-prefix=$base_filename_match\_$date_match > $base_filename_match\_$date_match\.log 2> $base_filename_match\_$date_match\.err.log
+#  fi
+#done
+
+for index in 3000 4000 5000 6000 7000
+do
+base_filename_match=problem_coregionalization
+target_traffic_index=$index
+date_match=2019-07-18
+output=$base_filename_match\_$date_match\_$target_traffic_index\_saa
+$saa_exec --problem=../problem_dir/$base_filename_match\_$date_match\.json --interval-step=$interval_step --gap-limit=$gap_limit \
+ --target-traffic-index=$target_traffic_index --num_scenarios=$num_scenarios --output=$output > $output.log 2> $output.err.log
+done
+
+#/home/pmateusz/dev/quake/cmake-build-debug/quake-det
 
 #/home/pmateusz/dev/quake/cmake-build-debug/quake-saa --problem=../problem_dir/problem_past_error_replication_2019-06-18.json --interval-step=00:01:00 --gap-limit=0.05 \
 #--target-traffic-index=6000 --num-scenarios=128 --output=solution_error_replication_2019-06-18_saa_128_6000.json > solution_error_replication_saa_2019-06-18_6000.log 2> solution_error_replication_saa_2019-06-18_6000.err.log
@@ -62,7 +93,7 @@ pushd /home/pmateusz/dev/quake/network_share/test/solution_dir
 #/home/pmateusz/dev/quake/cmake-build-debug/quake-cvar --problem=../problem_dir/problem_past_error_replication_2019-06-18.json --interval-step=00:01:00 --gap-limit=0.05 \
 #--target-traffic-index=5000 --num-scenarios=128 --output=solution_error_replication_2019-06-18_cvar_128_5000.json > solution_error_replication_cvar_2019-06-18_5000.log 2> solution_error_replication_cvar_2019-06-18_5000.err.log
 
-/home/pmateusz/dev/quake/cmake-build-debug/quake-cvar --problem=../problem_dir/problem_past_error_replication_2019-06-18.json --interval-step=00:01:00 --gap-limit=0.05 \
-  --target-traffic-index=12335 --epsilon=1.0 --num-scenarios=128 --output=solution_error_replication_2019-06-18_cvar_128_12335_e1.json >solution_error_replication_cvar_2019-06-18_12335e1.log 2>solution_error_replication_cvar_2019-06-18_12335e1.err.log
+#/home/pmateusz/dev/quake/cmake-build-debug/quake-cvar --problem=../problem_dir/problem_past_error_replication_2019-06-18.json --interval-step=00:01:00 --gap-limit=0.05 \
+#  --target-traffic-index=12335 --epsilon=1.0 --num-scenarios=128 --output=solution_error_replication_2019-06-18_cvar_128_12335_e1.json >solution_error_replication_cvar_2019-06-18_12335e1.log 2>solution_error_replication_cvar_2019-06-18_12335e1.err.log
 
 popd

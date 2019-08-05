@@ -12,7 +12,7 @@
     <option name="ADD_CONTENT_ROOTS" value="true" />
     <option name="ADD_SOURCE_ROOTS" value="true" />
     <option name="SCRIPT_NAME" value="$PROJECT_DIR$/python/weather-tools.py" />
-    <option name="PARAMETERS" value="extend $PROJECT_DIR$/network_share/test/problem_dir/problem_past_error_replication_2019-07-18.json --output=$PROJECT_DIR$/cmake-build-debug/extended_problem.json --num-scenarios=32 --scenario-generator=past_error_replication" />
+    <option name="PARAMETERS" value="extend $PROJECT_DIR$/python/problem_coregionalization_2019-06-18.json_v0 --output=$PROJECT_DIR$/cmake-build-debug/extended_problem.json --num-scenarios=32 --scenario-generator=coregionalization" />
     <option name="SHOW_COMMAND_LINE" value="false" />
     <option name="EMULATE_TERMINAL" value="false" />
     <option name="MODULE_MODE" value="false" />

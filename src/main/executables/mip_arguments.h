@@ -17,7 +17,7 @@ DEFINE_string(interval_step, "00:00:15", "Interval time step.");
 DEFINE_string(time_limit, "", "Time limit for a solver.");
 DEFINE_string(gap_limit, "", "Gap between the bound and the objective");
 
-DEFINE_string(output, "solution", "Solution file.");
+DEFINE_string(output, "", "Solution file.");
 DEFINE_double(target_traffic_index, 1, "Target traffic index.");
 DEFINE_int32(num_scenarios, 1, "Number of scenarios to consider.");
 
