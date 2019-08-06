@@ -46,19 +46,23 @@ pushd $solution_dir || exit
 #done
 
 function run_cvar {
-  # base_file_name date target_traffic_index
-  output_file=solution\_$1\_$2\_$num_scenarios\_$3\_cvar
+  base_file_name=$1
+  date=$2
+  target_traffic_index=$3
+  epsilon=$4
+  output_file=solution\_${base_file_name}\_${date}\_$num_scenarios\_${target_traffic_index}\_${epsilon//./}\_cvar
   /home/pmateusz/dev/quake/cmake-build-debug/quake-cvar --problem=../problem_dir/problem\_$1\_$2\.json --interval-step=${interval_step} --gap-limit=${gap_limit} --time-limit=${time_limit} \
---target-traffic-index=$3 --num_scenarios=$num_scenarios --output=${output_file}\.json > ${output_file}.log 2> ${output_file}.err.log
+--target-traffic-index=$3 --num_scenarios=$num_scenarios --epsilon=${epsilon} --output=${output_file}\.json > ${output_file}.log 2> ${output_file}.err.log
 }
 
-# solve single day using saa and different values of the target traffic index
+# solve single day using cvar and different values of the target traffic index
 for target_traffic_index in 3000 4000 5000 6000 7000
 do
 base_filename=coregionalization
 date=2019-07-18
-echo Solving CV@R ${base_filename} ${date} ${num_scenarios} ${target_traffic_index}
-run_cvar ${base_filename} ${date} ${target_traffic_index}
+epsilon=1
+echo Solving CV@R ${base_filename} ${date} ${num_scenarios} ${target_traffic_index} ${epsilon}
+run_cvar ${base_filename} ${date} ${target_traffic_index} ${epsilon}
 done
 
 #/home/pmateusz/dev/quake/cmake-build-debug/quake-det
