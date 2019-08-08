@@ -33,7 +33,6 @@ namespace quake {
     public:
         RobustVarIndexMipModel(ExtendedProblem const *problem, boost::posix_time::time_duration interval_step, double target_index);
 
-    private:
     protected:
         void Build(const boost::optional<Solution> &solution) override;
 
