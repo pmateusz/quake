@@ -273,3 +273,26 @@ void quake::BaseIntervalMipModel::AppendMetadata(quake::Metadata &metadata) {
 
     metadata.SetProperty(Metadata::Property::IntervalStep, interval_step_);
 }
+
+std::vector<quake::IntervalVar> quake::BaseIntervalMipModel::GetIntervals(const quake::GroundStation &station,
+                                                                          const boost::posix_time::time_period &time_period) const {
+    const auto &station_intervals = intervals_.at(Index(station));
+
+    std::vector<IntervalVar> result;
+    for (const auto &interval : station_intervals) {
+        const auto &interval_period = interval.Period();
+        if (time_period.contains(interval_period)) {
+            result.emplace_back(interval);
+            continue;
+        }
+
+        if (time_period.is_before(interval_period.begin())) {
+            break;
+        }
+
+        CHECK(!time_period.intersects(interval_period))
+                        << "Interval " << interval_period
+                        << " intersects with " << time_period << " but is not fully contained";
+    }
+    return result;
+}

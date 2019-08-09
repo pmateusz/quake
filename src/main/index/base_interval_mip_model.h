@@ -64,6 +64,8 @@ namespace quake {
 
         virtual const std::vector<GroundStation> &ObservableStations() const { return observable_stations_; }
 
+        std::vector<IntervalVar> GetIntervals(const GroundStation &station, const boost::posix_time::time_period &time_period) const;
+
         std::unordered_map<GroundStation, std::vector<boost::posix_time::time_period>> GetObservations() const override;
 
         inline const std::vector<Forecast> &Forecasts() const { return forecasts_; }

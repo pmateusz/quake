@@ -58,31 +58,40 @@ namespace quake {
         boost::optional<boost::posix_time::time_duration> TimeLimit;
     };
 
-
-    struct ScenarioIndexMipArguments : public quake::MipArguments {
-
-        ScenarioIndexMipArguments()
-                : MipArguments(),
-                  TargetTrafficIndex{0.0},
-                  NumScenarios{0},
-                  SolutionFile{""} {}
+    struct OutputMipArguments : public MipArguments {
+        OutputMipArguments() :
+                MipArguments(),
+                SolutionFile{""} {}
 
         void Fill() override {
             MipArguments::Fill();
+
+            CHECK(!FLAGS_output.empty());
+            SolutionFile = FLAGS_output;
+        }
+
+        boost::filesystem::path SolutionFile;
+    };
+
+    struct ScenarioIndexMipArguments : public OutputMipArguments {
+
+        ScenarioIndexMipArguments()
+                : OutputMipArguments(),
+                  TargetTrafficIndex{0.0},
+                  NumScenarios{0} {}
+
+        void Fill() override {
+            OutputMipArguments::Fill();
 
             CHECK_GT(FLAGS_target_traffic_index, 0.0);
             TargetTrafficIndex = FLAGS_target_traffic_index;
 
             CHECK_GT(FLAGS_num_scenarios, 0);
             NumScenarios = FLAGS_num_scenarios;
-
-            CHECK(!FLAGS_output.empty());
-            SolutionFile = FLAGS_output;
         }
 
         double TargetTrafficIndex;
         int NumScenarios;
-        boost::filesystem::path SolutionFile;
     };
 
     template<typename ArgumentsType>
