@@ -45,8 +45,6 @@ quake::RobustVarIndexMipModel::RobustVarIndexMipModel(const quake::ExtendedProbl
     }
 }
 
-const double MY_GRB_INFINITY = 10e30;
-
 void quake::RobustVarIndexMipModel::Build(const boost::optional<Solution> &solution) {
     // set solver configuration:
     mip_model_.set(GRB_IntParam_LazyConstraints, 1);
