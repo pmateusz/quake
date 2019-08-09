@@ -115,8 +115,10 @@ add_executable(quake-cvar ${CMAKE_SOURCE_DIR}/src/main/executables/quake_cvar.cp
 add_executable(quake-generate ${CMAKE_SOURCE_DIR}/src/main/executables/quake_generate.cpp)
 add_executable(quake-robust ${CMAKE_SOURCE_DIR}/src/main/executables/quake_robust.cpp)
 add_executable(quake-box ${CMAKE_SOURCE_DIR}/src/main/executables/quake_box_robust.cpp)
+add_executable(quake-box-mean ${CMAKE_SOURCE_DIR}/src/main/executables/quake_box_mean_robust.cpp)
 add_executable(quake-var-robust ${CMAKE_SOURCE_DIR}/src/main/executables/quake_var_robust.cpp)
 add_executable(quake-det ${CMAKE_SOURCE_DIR}/src/main/executables/quake_deterministic.cpp)
+
 target_link_libraries(quake-cp quake ${LIBRARY_DEP})
 target_link_libraries(quake-saa quake ${LIBRARY_DEP})
 target_link_libraries(quake-mip quake ${LIBRARY_DEP})
@@ -127,6 +129,7 @@ target_link_libraries(quake-robust quake ${LIBRARY_DEP})
 target_link_libraries(quake-var-robust quake ${LIBRARY_DEP})
 target_link_libraries(quake-det quake ${LIBRARY_DEP})
 target_link_libraries(quake-box quake ${LIBRARY_DEP})
+target_link_libraries(quake-box-mean quake ${LIBRARY_DEP})
 
 get_property(external_project_dependencies GLOBAL PROPERTY EXTERNAL_PROJECT_DEPENDENCIES)
 #separate_arguments(external_project_dependencies)

@@ -17,6 +17,8 @@ namespace quake {
 
         std::size_t CloudCoverIndex(const boost::posix_time::time_period &period) const;
 
+        double CloudCoverMean(const GroundStation &station, const boost::posix_time::time_period &period) const;
+
         double CloudCoverLowerBound(const GroundStation &station, const boost::posix_time::time_period &period) const;
 
         double CloudCoverUpperBound(const GroundStation &station, const boost::posix_time::time_period &period) const;

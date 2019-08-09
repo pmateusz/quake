@@ -45,25 +45,21 @@ quake::BaseRobustMipModel::BaseRobustMipModel(const quake::ExtendedProblem *prob
         observable_cloud_cover_periods.resize(Stations().size());
         for (const auto &station : ObservableStations()) {
             std::vector<boost::posix_time::time_period> observable_cloud_cover_periods_row;
-            for (const auto &slot : cloud_cover_periods_) {
-                LOG(INFO) << "Slot: " << slot;
-
+            for (const auto &cloud_cover_slot : cloud_cover_periods_) {
                 auto is_contained_in_transfer_window = false;
                 for (const auto &transfer_window : problem_->TransferWindows(station)) {
-                    LOG(INFO) << "Transfer window: " << transfer_window;
-
-                    if (transfer_window.is_after(slot.end())) {
+                    if (transfer_window.is_after(cloud_cover_slot.end())) {
                         break;
                     }
 
-                    if (transfer_window.is_before(slot.begin())) {
+                    if (transfer_window.is_before(cloud_cover_slot.begin())) {
                         continue;
                     }
 
-                    if (transfer_window.intersects(slot)) {
-                        LOG_IF(WARNING, !transfer_window.contains(slot))
-                                        << "Cloud cover measurement observation " << slot
-                                        << " is not fully contained in " << transfer_window;
+                    if (transfer_window.intersects(cloud_cover_slot)) {
+                        LOG_IF(WARNING, !cloud_cover_slot.contains(transfer_window))
+                                        << "Cloud cover measurement observation " << cloud_cover_slot
+                                        << " does not fully cover " << transfer_window;
 
                         is_contained_in_transfer_window = true;
                         break;
@@ -73,7 +69,7 @@ quake::BaseRobustMipModel::BaseRobustMipModel(const quake::ExtendedProblem *prob
                 }
 
                 if (is_contained_in_transfer_window) {
-                    observable_cloud_cover_periods_row.emplace_back(slot);
+                    observable_cloud_cover_periods_row.emplace_back(cloud_cover_slot);
                 }
             }
 
@@ -123,10 +119,20 @@ double quake::BaseRobustMipModel::CloudCoverUpperBound(const quake::GroundStatio
     return GetCloudCoverValue(problem_->VarModel(station).UpperBound, period);
 }
 
+double normalize_cloud_cover(double value) {
+    CHECK_GE(value, 0.0);
+    CHECK_LE(value, 100.0);
+    return value / 100.0;
+}
+
+double quake::BaseRobustMipModel::CloudCoverMean(const quake::GroundStation &station, const boost::posix_time::time_period &period) const {
+    const auto &forecast = Forecasts().front();
+    const auto value = forecast.GetCloudCover(station, period.begin());
+    return normalize_cloud_cover(value);
+}
+
 double quake::BaseRobustMipModel::GetCloudCoverValue(const std::vector<double> &container, const boost::posix_time::time_period &period) const {
     const auto dual_index = CloudCoverIndex(period);
-    const auto value = container.at(dual_index) / 100.0;
-    CHECK_GE(value, 0.0);
-    CHECK_LE(value, 1.0);
-    return value;
+    const auto value = container.at(dual_index);
+    return normalize_cloud_cover(value);
 }
