@@ -39,7 +39,7 @@ int main(int argc, char *argv[]) {
     quake::SampleAverageMipModel mip_model(&problem, arguments.IntervalStep, forecast_scenarios, arguments.TargetTrafficIndex);
     auto solution_opt = mip_model.Solve(arguments.TimeLimit, arguments.GapLimit, boost::none);
     if (solution_opt) {
-        solution_opt->GetMetadata().SetProperty(quake::Metadata::Property::SolutionType, quake::Metadata::SolutionType::Reference);
+        solution_opt->GetMetadata().SetProperty(quake::Metadata::Property::SolutionType, quake::Metadata::SolutionType::Test);
 
         quake::IndexEvaluator evaluator{problem};
         LOG(INFO) << "In Sample: " << evaluator(*solution_opt, problem.GetWeatherSample(quake::ExtendedProblem::WeatherSample::Forecast));

@@ -57,7 +57,7 @@ int main(int argc, char *argv[]) {
     quake::CVarMipModel mip_model(&problem, arguments.IntervalStep, forecast_scenarios, arguments.TargetTrafficIndex, arguments.Epsilon);
     auto solution_opt = mip_model.Solve(arguments.TimeLimit, arguments.GapLimit, boost::none);
     if (solution_opt) {
-        solution_opt->GetMetadata().SetProperty(quake::Metadata::Property::SolutionType, quake::Metadata::SolutionType::Reference);
+        solution_opt->GetMetadata().SetProperty(quake::Metadata::Property::SolutionType, quake::Metadata::SolutionType::Test);
 
         quake::util::Save(*solution_opt, arguments.SolutionFile);
     } else {

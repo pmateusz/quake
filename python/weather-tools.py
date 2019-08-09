@@ -1060,7 +1060,7 @@ def analyze_command(args):
     problems = []
     problem_files = [os.path.join(problem_dir, problem_file) for problem_file in os.listdir(problem_dir)]
     problem_files = list(filter(is_json_file, problem_files))
-    with concurrent.futures.process.ProcessPoolExecutor() as executor:
+    with concurrent.futures.thread.ThreadPoolExecutor() as executor:
         load_problem_futures = {executor.submit(load_problem, problem_file): problem_file for problem_file in problem_files}
         for future in tqdm.tqdm(concurrent.futures.as_completed(load_problem_futures),
                                 total=len(load_problem_futures), desc='Loading Problem Files', leave=False):

@@ -40,7 +40,7 @@ std::ostream &operator<<(std::ostream &out, quake::Metadata::Property property) 
             out << "solution_method";
             break;
         case quake::Metadata::Property::TargetTrafficIndex:
-            out << "traffic_index";
+            out << "target_traffic_index";
             break;
         case quake::Metadata::Property::ObservationPeriod:
             out << "observation_period";
@@ -162,7 +162,7 @@ void quake::from_json(const nlohmann::json &json, quake::Metadata::Property &pro
         return;
     }
 
-    if (property_name == "traffic_index") {
+    if (property_name == "target_traffic_index") {
         property = quake::Metadata::Property::TargetTrafficIndex;
         return;
     }
