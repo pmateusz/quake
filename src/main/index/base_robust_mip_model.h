@@ -13,7 +13,7 @@ namespace quake {
         BaseRobustMipModel(ExtendedProblem const *problem, boost::posix_time::time_duration interval_step, std::vector<Forecast> forecasts);
 
     protected:
-        void CreateCloudCoverDuals(std::vector<std::vector<GRBVar>> &container);
+        void CreateCloudCoverDuals(std::vector<std::vector<GRBVar>> &container); // TODO: move to utils
 
         std::size_t CloudCoverIndex(const boost::posix_time::time_period &period) const;
 
@@ -22,6 +22,8 @@ namespace quake {
         double CloudCoverLowerBound(const GroundStation &station, const boost::posix_time::time_period &period) const;
 
         double CloudCoverUpperBound(const GroundStation &station, const boost::posix_time::time_period &period) const;
+
+        const std::vector<boost::posix_time::time_period> &CloudCover(const GroundStation &station) const;
 
         const std::vector<boost::posix_time::time_period> &ObservableCloudCover(const GroundStation &station) const;
 

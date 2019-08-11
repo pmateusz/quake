@@ -1,8 +1,6 @@
 #ifndef QUAKE_ROBUST_BOX_MEAN_INDEX_MIP_MODEL_H
 #define QUAKE_ROBUST_BOX_MEAN_INDEX_MIP_MODEL_H
 
-#include <vector>
-
 #include <boost/date_time.hpp>
 
 #include "base_robust_mip_model.h"

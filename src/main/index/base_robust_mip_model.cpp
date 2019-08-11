@@ -107,6 +107,11 @@ void quake::BaseRobustMipModel::CreateCloudCoverDuals(std::vector<std::vector<GR
     }
 }
 
+const std::vector<boost::posix_time::time_period> &quake::BaseRobustMipModel::CloudCover(const quake::GroundStation &station) const {
+    return cloud_cover_periods_;
+}
+
+
 const std::vector<boost::posix_time::time_period> &quake::BaseRobustMipModel::ObservableCloudCover(const quake::GroundStation &station) const {
     return observable_cloud_cover_periods_.at(Index(station));
 }
