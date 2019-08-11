@@ -14,16 +14,25 @@ namespace quake {
     protected:
         class ReformulationSession {
         public:
-            explicit ReformulationSession(BaseBoxMeanVarMipModel &model);
+            ReformulationSession(BaseBoxMeanVarMipModel &model, std::string prefix);
 
             void FillIntercept(GRBLinExpr &expression, const GroundStation &station, const boost::posix_time::time_period &time_period) const;
 
             void FillDualConstraint(GRBLinExpr &expression, const GroundStation &station, const boost::posix_time::time_period &time_period) const;
 
-            std::vector<std::vector<GRBVar>> CreateCloudCoverDuals();
+            std::vector<std::vector<GRBVar>> CreateCloudCoverDuals(std::string prefix);
 
         private:
+            std::string CloudCoverLowerBoundLabel() const;
+
+            std::string CloudCoverUpperBoundLabel() const;
+
+            std::string VarLowerBoundLabel() const;
+
+            std::string VarUpperBoundLabel() const;
+
             BaseBoxMeanVarMipModel &model_;
+            std::string prefix_;
 
             std::vector<std::vector<GRBVar> > cc_lb_dual_;
             std::vector<std::vector<GRBVar> > cc_ub_dual_;

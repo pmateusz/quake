@@ -27,7 +27,7 @@
 
 
 #include "extended_problem.h"
-#include "index/robust_box_mean_var_mip_model.h"
+#include "index/robust_box_mean_var_index_mip_model.h"
 #include "index/index_evaluator.h"
 #include "executables/mip_arguments.h"
 
@@ -36,7 +36,7 @@ int main(int argc, char *argv[]) {
     const auto arguments = quake::SetupLogsAndParseArgs<quake::OutputMipArguments>(argc, argv);
     const auto problem = quake::ExtendedProblem::load_json(arguments.ProblemPath);
 
-    quake::RobustBoxMeanVarMipModel robust_mip_model{&problem, arguments.IntervalStep};
+    quake::RobustBoxMeanVarIndexMipModel robust_mip_model{&problem, arguments.IntervalStep};
     auto solution_opt = robust_mip_model.Solve(arguments.TimeLimit, arguments.GapLimit, boost::none);
     if (solution_opt) {
         solution_opt->GetMetadata().SetProperty(quake::Metadata::Property::SolutionType, quake::Metadata::SolutionType::Test);

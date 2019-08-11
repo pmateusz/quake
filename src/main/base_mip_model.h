@@ -83,6 +83,26 @@ namespace quake {
             CHECK_NE(solver_status, SolverStatus::Loaded);
             CHECK_NE(solver_status, SolverStatus::InProgress);
             CHECK_NE(solver_status, SolverStatus::Numeric);
+
+//            if (solver_status == SolverStatus::Unbounded) {
+//                if (mip_model_.get(GRB_IntParam_InfUnbdInfo) == 1) {
+//                    const auto num_vars = mip_model_.get(GRB_IntAttr_NumVars);
+//                    for (auto variable_index = 0; variable_index < num_vars; ++variable_index) {
+//                        try {
+//                            const auto ray_coefficient = mip_model_.getVar(variable_index).get(GRB_DoubleAttr_UnbdRay);
+//                            if (ray_coefficient != 0) {
+//                                LOG(INFO) << ray_coefficient << mip_model_.getVar(variable_index).get(GRB_StringAttr_VarName);
+//                            }
+//                        }
+//                        catch (const GRBException &ex) {
+//                            if (ex.getErrorCode() == 10005) {
+//                                continue;
+//                            }
+//                        }
+//                    }
+//                }
+//            }
+
             CHECK_NE(solver_status, SolverStatus::Unbounded);
             CHECK_NE(solver_status, SolverStatus::InfiniteOrUnbounded);
             CHECK_NE(solver_status, SolverStatus::Infeasible);

@@ -24,14 +24,15 @@ bool quake::BaseBoxMeanVarMipModel::IsLastCloudCoverPeriod(const quake::GroundSt
     return cloud_cover_periods.at(index) == period;
 }
 
-quake::BaseBoxMeanVarMipModel::ReformulationSession::ReformulationSession(quake::BaseBoxMeanVarMipModel &model)
+quake::BaseBoxMeanVarMipModel::ReformulationSession::ReformulationSession(quake::BaseBoxMeanVarMipModel &model, std::string prefix)
         : model_{model},
-          cc_lb_dual_{CreateCloudCoverDuals()},
-          cc_ub_dual_{CreateCloudCoverDuals()},
-          var_lb_dual_{CreateCloudCoverDuals()},
-          var_ub_dual_{CreateCloudCoverDuals()} {}
+          prefix_{std::move(prefix)},
+          cc_lb_dual_{CreateCloudCoverDuals(CloudCoverLowerBoundLabel())},
+          cc_ub_dual_{CreateCloudCoverDuals(CloudCoverUpperBoundLabel())},
+          var_lb_dual_{CreateCloudCoverDuals(VarLowerBoundLabel())},
+          var_ub_dual_{CreateCloudCoverDuals(VarUpperBoundLabel())} {}
 
-std::vector<std::vector<GRBVar>> quake::BaseBoxMeanVarMipModel::ReformulationSession::CreateCloudCoverDuals() {
+std::vector<std::vector<GRBVar>> quake::BaseBoxMeanVarMipModel::ReformulationSession::CreateCloudCoverDuals(std::string prefix) {
     std::vector<std::vector<GRBVar>> container;
 
     container.resize(model_.Stations().size());
@@ -42,7 +43,11 @@ std::vector<std::vector<GRBVar>> quake::BaseBoxMeanVarMipModel::ReformulationSes
         const auto &cloud_cover_periods = model_.CloudCover(station);
         container_row.reserve(cloud_cover_periods.size());
         for (const auto &period : cloud_cover_periods) {
-            container_row.emplace_back(model_.mip_model_.addVar(0, GRB_INFINITY, 0, GRB_CONTINUOUS));
+            const auto cloud_cover_index = model_.CloudCoverIndex(period);
+
+            std::stringstream label;
+            label << prefix << "_[" << station_index << "][" << cloud_cover_index << "]";
+            container_row.emplace_back(model_.mip_model_.addVar(0, GRB_INFINITY, 0, GRB_CONTINUOUS, label.str()));
         }
     }
 
@@ -58,8 +63,8 @@ void quake::BaseBoxMeanVarMipModel::ReformulationSession::FillIntercept(GRBLinEx
     const auto cloud_cover_upper_bound = model_.CloudCoverUpperBound(station, time_period);
     CHECK_LE(cloud_cover_lower_bound, cloud_cover_upper_bound);
 
-    expression -= cloud_cover_upper_bound * cc_ub_dual_.at(station_index).at(cloud_cover_index);
-    expression += cloud_cover_lower_bound * cc_lb_dual_.at(station_index).at(cloud_cover_index);
+    expression += cloud_cover_upper_bound * cc_ub_dual_.at(station_index).at(cloud_cover_index);
+    expression -= cloud_cover_lower_bound * cc_lb_dual_.at(station_index).at(cloud_cover_index);
 
     if (!model_.IsFirstCloudCoverPeriod(station, time_period)) {
         const auto &var_model = model_.problem_->VarModel(station);
@@ -95,4 +100,26 @@ void quake::BaseBoxMeanVarMipModel::ReformulationSession::FillDualConstraint(GRB
             expression += var_lb_dual_.at(other_station_index).at(next_cloud_cover_index) * other_var_model.Parameters.at(station).Value;
         }
     }
+}
+
+std::string make_label(const std::string &prefix, const std::string &suffix) {
+    std::stringstream label;
+    label << prefix << "_" << suffix;
+    return label.str();
+}
+
+std::string quake::BaseBoxMeanVarMipModel::ReformulationSession::CloudCoverLowerBoundLabel() const {
+    return make_label(prefix_, "cc_lb_dual");
+}
+
+std::string quake::BaseBoxMeanVarMipModel::ReformulationSession::CloudCoverUpperBoundLabel() const {
+    return make_label(prefix_, "cc_ub_dual");
+}
+
+std::string quake::BaseBoxMeanVarMipModel::ReformulationSession::VarLowerBoundLabel() const {
+    return make_label(prefix_, "var_lb_dual");
+}
+
+std::string quake::BaseBoxMeanVarMipModel::ReformulationSession::VarUpperBoundLabel() const {
+    return make_label(prefix_, "var_ub_dual");
 }
