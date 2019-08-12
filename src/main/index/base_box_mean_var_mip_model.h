@@ -16,15 +16,23 @@ namespace quake {
         public:
             ReformulationSession(BaseBoxMeanVarMipModel &model, std::string prefix);
 
+            ReformulationSession(BaseBoxMeanVarMipModel &model, std::string prefix, double error_multiplier);
+
+            void Init();
+
             void FillIntercept(GRBLinExpr &expression, const GroundStation &station, const boost::posix_time::time_period &time_period) const;
 
             void FillDualConstraint(GRBLinExpr &expression, const GroundStation &station, const boost::posix_time::time_period &time_period) const;
 
-            std::vector<std::vector<GRBVar>> CreateCloudCoverDuals(std::string prefix);
+            std::vector<std::vector<GRBVar>> CreateDuals(double lower_bound, double upper_bound, const std::string &prefix);
 
-            bool empty() const;
+            double AdaptErrorMultiplier() const;
+
+            const boost::optional<double> &ErrorMultiplier() const { return error_multiplier_; }
 
         private:
+            ReformulationSession(BaseBoxMeanVarMipModel &model, std::string prefix, boost::optional<double> error_multiplier);
+
             std::string CloudCoverLowerBoundLabel() const;
 
             std::string CloudCoverUpperBoundLabel() const;
@@ -35,6 +43,7 @@ namespace quake {
 
             BaseBoxMeanVarMipModel &model_;
             std::string prefix_;
+            boost::optional<double> error_multiplier_;
 
             std::vector<std::vector<GRBVar> > cc_lb_dual_;
             std::vector<std::vector<GRBVar> > cc_ub_dual_;
