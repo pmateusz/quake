@@ -123,3 +123,78 @@ std::string quake::BaseBoxMeanVarMipModel::ReformulationSession::VarLowerBoundLa
 std::string quake::BaseBoxMeanVarMipModel::ReformulationSession::VarUpperBoundLabel() const {
     return make_label(prefix_, "var_ub_dual");
 }
+
+bool quake::BaseBoxMeanVarMipModel::ReformulationSession::empty() const {
+    GRBModel proof_model{model_.mip_environment_};
+
+    // define cloud cover variables
+    std::vector<std::vector<GRBVar>> cloud_cover_vars;
+    cloud_cover_vars.resize(model_.Stations().size());
+
+    for (const auto &station : model_.Stations()) {
+        if (station == GroundStation::None) {
+            continue;
+        }
+
+        const auto station_index = model_.Index(station);
+        auto &row = cloud_cover_vars.at(station_index);
+        const auto &cloud_cover_periods = model_.CloudCover(station);
+        row.reserve(cloud_cover_periods.size());
+
+        for (const auto &period : cloud_cover_periods) {
+            row.emplace_back(proof_model.addVar(model_.CloudCoverLowerBound(station, period),
+                                                model_.CloudCoverUpperBound(station, period),
+                                                0,
+                                                GRB_CONTINUOUS));
+        }
+    }
+
+    static const auto NORMALIZATION_CONST = 100.0;
+    GRBVar error_contrib = proof_model.addVar(0, GRB_INFINITY, 0, GRB_CONTINUOUS);
+
+    // define constraints for each station
+    for (const auto &output_station : model_.Stations()) {
+        if (output_station == GroundStation::None) {
+            continue;
+        }
+
+        const auto output_station_index = model_.Index(output_station);
+        const auto &var_model = model_.problem_->VarModel(output_station);
+        const auto &cloud_cover_periods = model_.CloudCover(output_station);
+
+        for (std::size_t output_index = 1; output_index < cloud_cover_vars.at(output_station_index).size(); ++output_index) {
+            auto prev_index = output_index - 1;
+
+            // left hand-side of var model
+            GRBLinExpr lower_series_expr = var_model.Intercept.Value; // - error_contrib * var_model.Intercept.Stderr;
+            GRBLinExpr upper_series_expr = var_model.Intercept.Value; // + error_contrib * var_model.Intercept.Stderr;
+            for (const auto &other_station: model_.Stations()) {
+                if (other_station == GroundStation::None) {
+                    continue;
+                }
+
+                const auto other_station_index = model_.Index(other_station);
+                const auto other_station_param = var_model.Parameters.at(other_station);
+                lower_series_expr +=
+                        NORMALIZATION_CONST * (other_station_param.Value /*- error_contrib * other_station_param.Stderr*/)
+                        * cloud_cover_vars.at(other_station_index).at(prev_index);
+                upper_series_expr +=
+                        NORMALIZATION_CONST * (other_station_param.Value /*+ error_contrib * other_station_param.Stderr*/)
+                        * cloud_cover_vars.at(other_station_index).at(prev_index);
+            }
+
+            proof_model.addConstr(lower_series_expr - error_contrib * (var_model.Residual.Value + var_model.Residual.Stderr)
+                                   <= NORMALIZATION_CONST * cloud_cover_vars.at(output_station_index).at(output_index));
+            proof_model.addConstr(upper_series_expr + error_contrib * (var_model.Residual.Value + var_model.Residual.Stderr)
+                                   >= NORMALIZATION_CONST * cloud_cover_vars.at(output_station_index).at(output_index));
+        }
+    }
+
+    GRBLinExpr obj = error_contrib;
+    proof_model.setObjective(obj);
+    proof_model.set(GRB_IntAttr_ModelSense, GRB_MINIMIZE);
+    proof_model.optimize();
+    const auto status_code = proof_model.get(GRB_IntAttr_Status);
+    const auto solver_status = static_cast<util::SolverStatus>(status_code);
+    return solver_status == util::SolverStatus::Optimal;
+}

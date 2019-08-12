@@ -28,6 +28,7 @@ void quake::RobustBoxMeanVarMipModel::DecomposeTrafficIndexConstraint(const quak
     std::stringstream session_label;
     session_label << "traffic_index_" << master_station_index;
     ReformulationSession session = ReformulationSession(*this, session_label.str());
+    CHECK(!session.empty());
 
     GRBLinExpr traffic_index_expr = TransferShare(master_station) * traffic_index_var_;
     for (const auto &local_station : Stations()) {

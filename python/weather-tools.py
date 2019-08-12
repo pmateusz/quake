@@ -528,6 +528,7 @@ def extend_problem_definition(args):
             params = result.params
             stderr = result.stderr
             stderr_residuals = result.resid.std()
+            stderr_mean = result.resid.mean()
             corr = pivot_frame.corr()
         else:
             rows_index = ['const']
@@ -542,12 +543,13 @@ def extend_problem_definition(args):
             del params_data
             stderr = pandas.DataFrame(data=numpy.zeros((len(rows_index), len(cities))), columns=cities, index=rows_index)
             stderr_residuals = {city: 0.0 for city in cities}
+            stderr_mean = {city: 0.0 for city in cities}
             corr = pandas.DataFrame(data=numpy.identity(len(cities)), columns=cities, index=cities)
 
         model_data = {}
         for station in cities:
             station_data = dict()
-            station_data['residual'] = {'value': 0, 'stderr': stderr_residuals[station]}
+            station_data['residual'] = {'value': stderr_mean[station], 'stderr': stderr_residuals[station]}
             station_params = params[station]
             station_stderr = stderr[station]
             station_corr = corr[station]

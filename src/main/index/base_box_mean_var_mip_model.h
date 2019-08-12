@@ -22,6 +22,8 @@ namespace quake {
 
             std::vector<std::vector<GRBVar>> CreateCloudCoverDuals(std::string prefix);
 
+            bool empty() const;
+
         private:
             std::string CloudCoverLowerBoundLabel() const;
 
