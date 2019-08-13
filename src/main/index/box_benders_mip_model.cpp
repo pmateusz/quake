@@ -35,9 +35,9 @@ void quake::BoxBendersMipModel::Build(const boost::optional<Solution> &solution)
     for (const auto &station: ObservableStations()) {
         GRBLinExpr keys_transferred = 0;
         for (const auto &interval : StationIntervals(station)) {
-            const auto mean_keys_transferred
-                    = problem_->KeyRate(station, interval.Period()) * (1.0 - CloudCoverUpperBound(station, interval.Period()));
-            keys_transferred += mean_keys_transferred * interval.Var();
+//            const auto mean_keys_transferred
+//                    = problem_->KeyRate(station, interval.Period()) * (1.0 - CloudCoverLowerBound(station, interval.Period()));
+            keys_transferred += problem_->KeyRate(station, interval.Period()) * interval.Var();
         }
         mip_model_.addConstr(TransferShare(station) * traffic_index <= keys_transferred);
     }
