@@ -58,6 +58,14 @@ namespace quake {
         bool IsActive(double value);
 
         std::ostream &operator<<(std::ostream &out, SolverStatus status);
+
+        std::vector<GRBVar> CreateVarVector(GRBModel &model,
+                                            std::size_t size,
+                                            double lower_bound, double upper_bound, const std::string &prefix);
+
+        std::vector<std::vector<GRBVar>> CreateVarMatrix(GRBModel &model,
+                                                         std::size_t rows, std::size_t columns,
+                                                         double lower_bound, double upper_bound, const std::string &prefix);
     }
 }
 

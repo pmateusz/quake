@@ -82,3 +82,29 @@ bool quake::util::IsActive(double value) {
     CHECK(value <= ZERO_THRESHOLD || value >= ONE_THRESHOLD);
     return value >= ONE_THRESHOLD;
 }
+
+std::vector<GRBVar> quake::util::CreateVarVector(GRBModel &model,
+                                                 std::size_t size,
+                                                 double lower_bound, double upper_bound, const std::string &prefix) {
+    std::vector<GRBVar> container;
+    container.reserve(size);
+    for (std::size_t index = 0; index < size; ++index) {
+        std::stringstream label;
+        label << prefix << "[" << index << "]";
+        container.emplace_back(model.addVar(lower_bound, upper_bound, 0, GRB_CONTINUOUS, label.str()));
+    }
+    return container;
+}
+
+std::vector<std::vector<GRBVar>> quake::util::CreateVarMatrix(GRBModel &model,
+                                                              std::size_t rows, std::size_t columns,
+                                                              double lower_bound, double upper_bound, const std::string &prefix) {
+    std::vector<std::vector<GRBVar>> container;
+    container.resize(rows);
+    for (std::size_t row = 0; row < rows; ++row) {
+        std::stringstream label;
+        label << prefix << "[" << row << "]";
+        container.at(row) = std::move(quake::util::CreateVarVector(model, columns, lower_bound, upper_bound, label.str()));
+    }
+    return container;
+}

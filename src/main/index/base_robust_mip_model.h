@@ -27,6 +27,8 @@ namespace quake {
 
         const std::vector<boost::posix_time::time_period> &ObservableCloudCover(const GroundStation &station) const;
 
+        std::vector<std::vector<GRBVar>> CreateDuals(double lower_bound, double upper_bound, const std::string &prefix) const;
+
     private:
         double GetCloudCoverValue(const std::vector<double> &container, const boost::posix_time::time_period &period) const;
 
