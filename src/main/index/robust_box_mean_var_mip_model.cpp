@@ -16,11 +16,11 @@ void quake::RobustBoxMeanVarMipModel::Build(const boost::optional<Solution> &sol
         DecomposeTrafficIndexConstraint(station);
     }
 
-//    GRBLinExpr objective = traffic_index_var_;
-//    mip_model_.setObjective(objective);
-//    mip_model_.set(GRB_IntAttr_ModelSense, GRB_MAXIMIZE);
+    GRBLinExpr objective = traffic_index_var_;
+    mip_model_.setObjective(objective);
+    mip_model_.set(GRB_IntAttr_ModelSense, GRB_MAXIMIZE);
 
-    DecomposeExpectationConstraint();
+//    DecomposeExpectationConstraint();
 }
 
 void quake::RobustBoxMeanVarMipModel::DecomposeTrafficIndexConstraint(const quake::GroundStation &master_station) {
