@@ -19,6 +19,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include "util/math.h"
 #include "box_benders_mip_model.h"
 
 quake::BoxBendersMipModel::BoxBendersMipModel(const quake::ExtendedProblem *problem, boost::posix_time::time_duration interval_step)
