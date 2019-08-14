@@ -32,11 +32,10 @@ void quake::BoxBendersMipModel::Build(const boost::optional<Solution> &solution)
     BaseIntervalMipModel::Build(solution);
 
     GRBVar traffic_index = mip_model_.addVar(0, GRB_INFINITY, 0, GRB_CONTINUOUS);
+    // constraints for relaxed master problem
     for (const auto &station: ObservableStations()) {
         GRBLinExpr keys_transferred = 0;
         for (const auto &interval : StationIntervals(station)) {
-//            const auto mean_keys_transferred
-//                    = problem_->KeyRate(station, interval.Period()) * (1.0 - CloudCoverLowerBound(station, interval.Period()));
             keys_transferred += problem_->KeyRate(station, interval.Period()) * interval.Var();
         }
         mip_model_.addConstr(TransferShare(station) * traffic_index <= keys_transferred);
@@ -108,40 +107,70 @@ void quake::BoxBendersMipModel::Callback::callback() {
     CHECK_NE(solver_status, util::SolverStatus::Infeasible);
 
     if (solver_status == util::SolverStatus::InfiniteOrUnbounded) {
-        LOG(FATAL) << "Feasibility cut needed";
+        for (const auto &station : model_.ObservableStations()) {
+            const auto station_index = model_.Index(station);
+            for (const auto &period : model_.ObservableCloudCover(station)) {
+                const auto period_index = model_.CloudCoverIndex(period);
+
+                double keys_transferred = 0.0;
+                for (const auto &interval : model_.GetIntervals(station, period)) {
+                    keys_transferred += getSolution(interval.Var()) * model_.problem_->KeyRate(station, interval.Period());
+                }
+
+                if (keys_transferred <= 0.0) {
+                    continue;
+                }
+
+                const auto coefficient = -traffic_index_duals.at(station_index).get(GRB_DoubleAttr_X)
+                                         + cloud_cover_duals.at(station_index).at(period_index).get(GRB_DoubleAttr_X);
+                if (coefficient > 0) {
+                    LOG(WARNING) << "Identified negative coefficient: " << coefficient << " " << station_index << " " << period_index;
+                }
+            }
+        }
+
+        LOG(FATAL) << "Feasibility cuts not implemented";
     } else if (solver_status == util::SolverStatus::Optimal) {
         const auto sub_problem_value = callback_model.get(GRB_DoubleAttr_ObjVal);
-        const auto master_problem_value = getSolution(model_.upper_bound_);
-        if (sub_problem_value != master_problem_value) {
-            if (sub_problem_value > master_problem_value) {
-                VLOG(1) << "Adding cut: " << master_problem_value << " >= " << sub_problem_value;
+        const auto sub_problem_upper_bound_value = getSolution(model_.upper_bound_);
+        if (sub_problem_value != sub_problem_upper_bound_value) {
+            if (sub_problem_value > sub_problem_upper_bound_value) {
+
 
                 // the master problem should act as an upper bound
+                double sub_problem_computed_value = 0;
                 GRBLinExpr sub_problem_expr = 0;
                 for (const auto &station : model_.ObservableStations()) {
                     const auto station_index = model_.Index(station);
                     for (const auto &period: model_.ObservableCloudCover(station)) {
                         const auto period_index = model_.CloudCoverIndex(period);
 
-                        GRBLinExpr keys_transferred = 0.0;
+                        double keys_transferred_value = 0.0;
+                        GRBLinExpr keys_transferred_expr = 0.0;
                         for (const auto &interval : model_.GetIntervals(station, period)) {
-                            keys_transferred += interval.Var() * model_.problem_->KeyRate(station, interval.Period());
+                            keys_transferred_value += getSolution(interval.Var()) * model_.problem_->KeyRate(station, interval.Period());
+                            keys_transferred_expr += interval.Var() * model_.problem_->KeyRate(station, interval.Period());
                         }
 
                         const auto coefficient = -traffic_index_duals.at(station_index).get(GRB_DoubleAttr_X)
                                                  + cloud_cover_duals.at(station_index).at(period_index).get(GRB_DoubleAttr_X);
-                        sub_problem_expr += coefficient * keys_transferred;
+                        sub_problem_computed_value += coefficient * keys_transferred_value;
+                        sub_problem_expr += coefficient * keys_transferred_expr;
                     }
                 }
-
-                addLazy(sub_problem_expr >= sub_problem_value);
+                util::check_near(sub_problem_computed_value, sub_problem_value);
+                VLOG(1) << "Adding cut: " << sub_problem_upper_bound_value << " >= " << sub_problem_value;
+                addLazy(model_.upper_bound_ >= sub_problem_expr);
             } else {
-                VLOG(1) << "Approximation has a small gap. " << sub_problem_value
-                        << " (sub-problem) v.s. " << master_problem_value
-                        << " (master problem)";
+                const auto gap = sub_problem_upper_bound_value - sub_problem_value;
+                CHECK_GT(gap, 0.0);
+                VLOG(1) << "Approximation has a small gap: " << gap
+                        << " (" << sub_problem_value
+                        << " <= " << sub_problem_upper_bound_value
+                        << ")";
             }
         } else {
-            VLOG(1) << "No more cuts needed. Master problem and sub-problem values agree.";
+            VLOG(1) << "No more cuts needed. Upper bound and sub-problem values match.";
         }
     }
 }
