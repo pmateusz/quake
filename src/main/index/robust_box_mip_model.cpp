@@ -12,11 +12,10 @@ void quake::RobustBoxMipModel::Build(const boost::optional<Solution> &solution) 
     const auto traffic_index_ub = GetTrafficIndexUpperBound();
     auto traffic_index_var = mip_model_.addVar(0, traffic_index_ub, 0, GRB_CONTINUOUS);
 
-    std::vector<std::vector<GRBVar> > cloud_cover_lower_bound_dual;
-    std::vector<std::vector<GRBVar> > cloud_cover_upper_bound_dual;
-
-    CreateCloudCoverDuals(cloud_cover_lower_bound_dual);
-    CreateCloudCoverDuals(cloud_cover_upper_bound_dual);
+    std::vector<std::vector<GRBVar> > cloud_cover_lower_bound_dual
+            = util::CreateVarMatrix(mip_model_, NumStations(), NumCloudCoverPeriods(), 0, GRB_INFINITY, "cc_lb");
+    std::vector<std::vector<GRBVar> > cloud_cover_upper_bound_dual
+            = util::CreateVarMatrix(mip_model_, NumStations(), NumCloudCoverPeriods(), 0, GRB_INFINITY, "cc_ub");
 
     // build constraints for each ground station
     for (const auto &station : ObservableStations()) {

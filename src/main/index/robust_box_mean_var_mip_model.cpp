@@ -16,11 +16,11 @@ void quake::RobustBoxMeanVarMipModel::Build(const boost::optional<Solution> &sol
         DecomposeTrafficIndexConstraint(station);
     }
 
-    GRBLinExpr objective = traffic_index_var_;
-    mip_model_.setObjective(objective);
-    mip_model_.set(GRB_IntAttr_ModelSense, GRB_MAXIMIZE);
+//    GRBLinExpr objective = traffic_index_var_;
+//    mip_model_.setObjective(objective);
+//    mip_model_.set(GRB_IntAttr_ModelSense, GRB_MAXIMIZE);
 
-//    DecomposeExpectationConstraint();
+    DecomposeExpectationConstraint();
 }
 
 void quake::RobustBoxMeanVarMipModel::DecomposeTrafficIndexConstraint(const quake::GroundStation &master_station) {
@@ -55,7 +55,7 @@ void quake::RobustBoxMeanVarMipModel::DecomposeTrafficIndexConstraint(const quak
 
             session.FillIntercept(traffic_index_expr, local_station, cloud_cover_period);
             session.FillDualConstraint(local_dual_expr, local_station, cloud_cover_period);
-            mip_model_.addConstr(local_dual_expr == 0);
+            mip_model_.addConstr(local_dual_expr <= 0);
         }
     }
 
@@ -94,7 +94,7 @@ void quake::RobustBoxMeanVarMipModel::DecomposeExpectationConstraint() {
             session.FillIntercept(intercept_lower_bound_expr, station, cloud_cover_period);
             GRBLinExpr dual_constraint_expr = -mean_dual.at(station_index).at(cloud_cover_index);
             session.FillDualConstraint(dual_constraint_expr, station, cloud_cover_period);
-            mip_model_.addConstr(dual_constraint_expr == 0);
+            mip_model_.addConstr(dual_constraint_expr <= 0);
         }
     }
 

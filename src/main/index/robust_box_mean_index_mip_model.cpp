@@ -14,13 +14,12 @@ void quake::RobustBoxMeanIndexMipModel::Build(const boost::optional<Solution> &s
     // key rate should be taken from problem because it is scenario independent
     const auto traffic_index_ub = GetTrafficIndexUpperBound();
     auto traffic_index_var = mip_model_.addVar(0, traffic_index_ub, 0, GRB_CONTINUOUS);
-
     {
         // build traffic index constraints for each ground station
-        std::vector<std::vector<GRBVar> > traffic_cc_lower_bound_dual;
-        std::vector<std::vector<GRBVar> > traffic_cc_upper_bound_dual;
-        CreateCloudCoverDuals(traffic_cc_lower_bound_dual);
-        CreateCloudCoverDuals(traffic_cc_upper_bound_dual);
+        std::vector<std::vector<GRBVar> > traffic_cc_lower_bound_dual
+                = util::CreateVarMatrix(mip_model_, NumStations(), NumCloudCoverPeriods(), 0, GRB_INFINITY, "traffic_cc_lb");
+        std::vector<std::vector<GRBVar> > traffic_cc_upper_bound_dual
+                = util::CreateVarMatrix(mip_model_, NumStations(), NumCloudCoverPeriods(), 0, GRB_INFINITY, "traffic_cc_ub");
 
         for (const auto &station : ObservableStations()) {
             const auto station_index = Index(station);
@@ -56,16 +55,14 @@ void quake::RobustBoxMeanIndexMipModel::Build(const boost::optional<Solution> &s
     }
 
     GRBVar mean_cc_intercept_dual = mip_model_.addVar(-GRB_INFINITY, GRB_INFINITY, 0, GRB_CONTINUOUS);
-    std::vector<std::vector<GRBVar> > mean_cc_dual;
-    CreateCloudCoverDuals(mean_cc_dual);
-
+    std::vector<std::vector<GRBVar> > mean_cc_dual
+            = util::CreateVarMatrix(mip_model_, NumStations(), NumCloudCoverPeriods(), -GRB_INFINITY, GRB_INFINITY, "mean_cc");
     {
         // build mean constraint
-        std::vector<std::vector<GRBVar> > mean_cc_lower_bound_dual;
-        std::vector<std::vector<GRBVar> > mean_cc_upper_bound_dual;
-
-        CreateCloudCoverDuals(mean_cc_lower_bound_dual);
-        CreateCloudCoverDuals(mean_cc_upper_bound_dual);
+        std::vector<std::vector<GRBVar> > mean_cc_lower_bound_dual
+                = util::CreateVarMatrix(mip_model_, NumStations(), NumCloudCoverPeriods(), 0, GRB_INFINITY, "mean_traffic_cc_lb");
+        std::vector<std::vector<GRBVar> > mean_cc_upper_bound_dual
+                = util::CreateVarMatrix(mip_model_, NumStations(), NumCloudCoverPeriods(), 0, GRB_INFINITY, "mean_traffic_cc_ub");
 
         GRBLinExpr mean_upper_bound_expr = mean_cc_intercept_dual;
         GRBLinExpr intercept_lower_bound_expr = target_index_ - traffic_index_var;
@@ -95,11 +92,10 @@ void quake::RobustBoxMeanIndexMipModel::Build(const boost::optional<Solution> &s
 
     {
         // build index constraint and objective
-        std::vector<std::vector<GRBVar> > mean_cc_lower_bound_dual;
-        std::vector<std::vector<GRBVar> > mean_cc_upper_bound_dual;
-
-        CreateCloudCoverDuals(mean_cc_lower_bound_dual);
-        CreateCloudCoverDuals(mean_cc_upper_bound_dual);
+        std::vector<std::vector<GRBVar> > mean_cc_lower_bound_dual
+                = util::CreateVarMatrix(mip_model_, NumStations(), NumCloudCoverPeriods(), 0, GRB_INFINITY, "mean_risk_cc_lb");
+        std::vector<std::vector<GRBVar> > mean_cc_upper_bound_dual
+                = util::CreateVarMatrix(mip_model_, NumStations(), NumCloudCoverPeriods(), 0, GRB_INFINITY, "mean_risk_cc_lb");
 
         GRBVar riskiness_index = mip_model_.addVar(0, GRB_INFINITY, 0, GRB_CONTINUOUS);
 

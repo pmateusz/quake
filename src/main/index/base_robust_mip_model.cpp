@@ -92,21 +92,6 @@ std::size_t quake::BaseRobustMipModel::CloudCoverIndex(const boost::posix_time::
     return 0;
 }
 
-void quake::BaseRobustMipModel::CreateCloudCoverDuals(std::vector<std::vector<GRBVar>> &container) {
-    CHECK(container.empty());
-
-    container.resize(Stations().size());
-    for (const auto &station : ObservableStations()) {
-        const auto station_index = Index(station);
-
-        auto &container_row = container.at(station_index);
-        container_row.reserve(cloud_cover_periods_.size());
-        for (const auto &period : cloud_cover_periods_) {
-            container_row.emplace_back(mip_model_.addVar(0, GRB_INFINITY, 0, GRB_CONTINUOUS));
-        }
-    }
-}
-
 const std::vector<boost::posix_time::time_period> &quake::BaseRobustMipModel::CloudCover(const quake::GroundStation &station) const {
     return cloud_cover_periods_;
 }
@@ -140,4 +125,12 @@ double quake::BaseRobustMipModel::GetCloudCoverValue(const std::vector<double> &
     const auto dual_index = CloudCoverIndex(period);
     const auto value = container.at(dual_index);
     return normalize_cloud_cover(value);
+}
+
+GRBLinExpr quake::BaseRobustMipModel::GetKeysTransferredExpr(const GroundStation &station, const boost::posix_time::time_period &period) {
+    GRBLinExpr transferred_keys = 0;
+    for (const auto &interval : GetIntervals(station, period)) {
+        transferred_keys += interval.Var() * problem_->KeyRate(station, interval.Period());
+    }
+    return transferred_keys;
 }
