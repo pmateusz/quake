@@ -421,11 +421,13 @@ void quake::from_json(const nlohmann::json &json, quake::ExtendedProblem::Statio
     auto residual = json.at("residual").get<ExtendedProblem::StationVarModel::Parameter>();
     auto lower_bound = json.at("lower").get<std::vector<double> >();
     auto upper_bound = json.at("upper").get<std::vector<double> >();
+    auto standard_error = json.at("stderr").get<std::vector<double> >();
 
     station_var_model.Intercept = intercept;
     station_var_model.Residual = residual;
     station_var_model.LowerBound = lower_bound;
     station_var_model.UpperBound = upper_bound;
+    station_var_model.StandardDeviation = standard_error;
     station_var_model.Parameters = parameters;
     station_var_model.Correlations = correlations;
 }

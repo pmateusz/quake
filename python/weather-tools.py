@@ -599,8 +599,8 @@ def extend_problem_definition(args):
                                                                                                        max_time))
 
     std_frame = weather_cache.get_std_frame()
-    assert len(std_frame) <= len(forecast_frame)
-    if len(forecast_frame) > len(std_frame):
+    assert len(std_frame) >= len(forecast_frame)
+    if len(std_frame) > len(forecast_frame):
         std_frame = std_frame.iloc[:len(forecast_frame)]
 
     model_factory = ScenarioGeneratorFactory()

@@ -83,29 +83,3 @@ void quake::WorstCaseMipModel::AppendMetadata(quake::Metadata &metadata) {
     metadata.SetProperty(Metadata::Property::SolutionMethod, Metadata::SolutionMethod::Deterministic);
     metadata.SetProperty(Metadata::Property::ScenariosNumber, 1);
 }
-
-void quake::WorstCaseMipModel::BuildPrimal() {
-    BaseIntervalMipModel::Build(boost::none);
-
-    // variable: traffic index
-    const auto traffic_index_ub = GetTrafficIndexUpperBound();
-    auto traffic_index = mip_model_.addVar(0.0, traffic_index_ub, 0.0, GRB_CONTINUOUS, "traffic_index");
-
-    // constraint: for each station and each scenario traffic index is satisfied
-    const auto num_scenarios = NumScenarios();
-    for (const auto &station :ObservableStations()) {
-        const auto &station_intervals = StationIntervals(station);
-        for (auto scenario_index = 0; scenario_index < num_scenarios; ++scenario_index) {
-            GRBLinExpr keys_transferred = 0;
-            for (const auto &interval : station_intervals) {
-                keys_transferred += KeyRate(scenario_index, station, interval.Period()) * interval.Var();
-            }
-            mip_model_.addConstr(TransferShare(station) * traffic_index <= keys_transferred);
-        }
-    }
-
-    // objective:
-    GRBLinExpr objective = traffic_index;
-    mip_model_.set(GRB_IntAttr_ModelSense, GRB_MAXIMIZE);
-    mip_model_.setObjective(objective);
-}

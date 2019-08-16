@@ -109,7 +109,7 @@ double quake::BaseRobustMipModel::CloudCoverUpperBound(const quake::GroundStatio
     return GetCloudCoverValue(problem_->VarModel(station).UpperBound, period);
 }
 
-double normalize_cloud_cover(double value) {
+double normalize_cloud_cover_value(double value) {
     CHECK_GE(value, 0.0);
     CHECK_LE(value, 100.0);
     return value / 100.0;
@@ -118,16 +118,57 @@ double normalize_cloud_cover(double value) {
 double quake::BaseRobustMipModel::CloudCoverMean(const quake::GroundStation &station, const boost::posix_time::time_period &period) const {
     const auto &forecast = Forecasts().front();
     const auto value = forecast.GetCloudCover(station, period.begin());
-    return normalize_cloud_cover(value);
+    return normalize_cloud_cover_value(value);
 }
+
+double cloud_cover_std_to_variance(double std) {
+    static const double MIN_VARIANCE_LOWER_BOUND = 0.0001;
+    CHECK_GE(std, 0.0);
+    return std::max(std::pow(std, 2.0) / 10000.0, MIN_VARIANCE_LOWER_BOUND);
+}
+
+double quake::BaseRobustMipModel::CloudCoverVariance(const quake::GroundStation &station, const boost::posix_time::time_period &period) const {
+    const auto index = CloudCoverIndex(period);
+    const auto standard_deviation = problem_->VarModel(station).StandardDeviation.at(index);
+
+    if (index == 0) {
+        CHECK_GE(standard_deviation, 0.0);
+    } else {
+        CHECK_GT(standard_deviation, 0.0);
+    }
+
+    return cloud_cover_std_to_variance(standard_deviation);
+}
+
+double quake::BaseRobustMipModel::CloudCoverVarianceLowerBound() const {
+    auto variance_lower_bound = std::numeric_limits<double>::max();
+    for (const auto &station : Stations()) {
+        if (station == GroundStation::None) { continue; }
+
+        for (const auto standard_deviation : problem_->VarModel(station).StandardDeviation) {
+            variance_lower_bound = std::min(cloud_cover_std_to_variance(standard_deviation), variance_lower_bound);
+        }
+    }
+
+    return variance_lower_bound;
+}
+
 
 double quake::BaseRobustMipModel::GetCloudCoverValue(const std::vector<double> &container, const boost::posix_time::time_period &period) const {
     const auto dual_index = CloudCoverIndex(period);
     const auto value = container.at(dual_index);
-    return normalize_cloud_cover(value);
+    return normalize_cloud_cover_value(value);
 }
 
-GRBLinExpr quake::BaseRobustMipModel::GetKeysTransferredExpr(const GroundStation &station, const boost::posix_time::time_period &period) {
+GRBLinExpr quake::BaseRobustMipModel::GetMaxKeysTransferredExpr(const GroundStation &station) {
+    GRBLinExpr transferred_keys = 0;
+    for (const auto &interval : StationIntervals(station)) {
+        transferred_keys += interval.Var() * problem_->KeyRate(station, interval.Period());
+    }
+    return transferred_keys;
+}
+
+GRBLinExpr quake::BaseRobustMipModel::GetMaxKeysTransferredExpr(const GroundStation &station, const boost::posix_time::time_period &period) {
     GRBLinExpr transferred_keys = 0;
     for (const auto &interval : GetIntervals(station, period)) {
         transferred_keys += interval.Var() * problem_->KeyRate(station, interval.Period());

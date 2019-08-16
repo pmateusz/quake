@@ -108,6 +108,8 @@ namespace quake {
             std::unordered_map<GroundStation, double> Correlations;
             std::vector<double> LowerBound;
             std::vector<double> UpperBound;
+            // sample standard deviation
+            std::vector<double> StandardDeviation;
         };
 
         ExtendedProblem();
