@@ -598,6 +598,11 @@ def extend_problem_definition(args):
                                                                                                        min_time,
                                                                                                        max_time))
 
+    std_frame = weather_cache.get_std_frame()
+    assert len(std_frame) <= len(forecast_frame)
+    if len(forecast_frame) > len(std_frame):
+        std_frame = std_frame.iloc[:len(forecast_frame)]
+
     model_factory = ScenarioGeneratorFactory()
 
     def value_range(value):
@@ -645,6 +650,7 @@ def extend_problem_definition(args):
             = city_frame[forecast_frame.index.min():forecast_frame.index.max()]['yhat_lower'].apply(value_range).values.tolist()
         var_model[station.name]['upper'] \
             = city_frame[forecast_frame.index.min():forecast_frame.index.max()]['yhat_upper'].apply(value_range).values.tolist()
+        var_model[station.name]['stderr'] = std_frame[station].values.tolist()
     updated_problem.set_var_model(var_model)
 
     with open(output_file, 'w') as output_file:
@@ -821,34 +827,7 @@ def plot_forecast_command(args):
     weather_cache.load()
 
     duration = to_date_time - from_date_time
-    time_points = weather_cache.get_forecast_time_points()
-    diff_frames = weather_cache.get_error_frames(time_points)
-    diff_frame = pandas.concat(diff_frames, ignore_index=True)
-    del diff_frames
-
-    delay_values = list(pandas.to_timedelta(value, unit='ns') for value in diff_frame['Delay'].unique())
-    delay_values.sort()
-
-    # error_data = []
-    # for delay_value in delay_values:
-    #     delay_diff_frame = diff_frame[diff_frame['Delay'] == delay_value]
-    #
-    #     for city_column in delay_diff_frame.columns:
-    #         if not isinstance(city_column, quake.city.City):
-    #             continue
-    #         for error_value in delay_diff_frame[city_column]:
-    #             error_data.append([city_column, pandas.Timedelta(value=delay_value.total_seconds(), unit='s'), error_value])
-    # columns = ['City', 'Delay', 'Error']
-    # error_frame = pandas.DataFrame(columns=columns, data=error_data)
-
-    # delay_values = error_frame['Delay'].unique()
-    rows = []
-    cities = [column for column in diff_frame.columns if isinstance(column, quake.city.City)]
-    for delay_value in delay_values:
-        filter_frame = diff_frame[diff_frame['Delay'] == delay_value].copy()
-        row = {city: filter_frame[city].std() for city in cities}
-        rows.append(row)
-    std_error_frame = pandas.DataFrame(index=delay_values, data=rows)
+    std_error_frame = weather_cache.get_std_frame()
 
     def date_axis_formatter(x, pos):
         date_time = pandas.Timestamp.fromordinal(x.astype(numpy.int64))
@@ -856,6 +835,7 @@ def plot_forecast_command(args):
 
     forecast_frame = weather_cache.get_forecast_frame(from_date_time, duration)
     observation_frame = weather_cache.get_observation_frame(from_date_time, duration)
+    cities = [column for column in std_error_frame.columns if isinstance(column, quake.city.City)]
     for city in cities:
         figure, ax = matplotlib.pyplot.subplots()
 

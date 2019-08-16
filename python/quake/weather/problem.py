@@ -70,7 +70,6 @@ class Problem:
             var_model_to_use.append([station, station_object])
 
         self.__json_object['var_model'] = var_model_to_use
-        # self.__json_object['var_model'] = var_model
 
     def get_scenario(self, scenario_name):
         forecasts_json = self.__json_object['forecasts']

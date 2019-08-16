@@ -163,6 +163,23 @@ class WeatherCache:
             result.append(error_frame)
         return result
 
+    def get_std_frame(self):
+        time_points = self.get_forecast_time_points()
+        diff_frames = self.get_error_frames(time_points)
+        diff_frame = pandas.concat(diff_frames, ignore_index=True)
+        del diff_frames
+
+        delay_values = list(pandas.to_timedelta(value, unit='ns') for value in diff_frame['Delay'].unique())
+        delay_values.sort()
+
+        rows = []
+        cities = [column for column in diff_frame.columns if isinstance(column, quake.city.City)]
+        for delay_value in delay_values:
+            filter_frame = diff_frame[diff_frame['Delay'] == delay_value].copy()
+            row = {city: filter_frame[city].std() for city in cities}
+            rows.append(row)
+        return pandas.DataFrame(index=delay_values, data=rows)
+
     def get_forecast_error_variance(self, error_frames=None):
         if not error_frames:
             error_frames = self.get_error_frames(self.get_forecast_time_points())
