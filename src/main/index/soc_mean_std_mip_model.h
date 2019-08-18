@@ -30,13 +30,12 @@ namespace quake {
 
             void ResetLocalModel();
 
-            bool SolveUncertainty();
+            void SolveUncertainty();
 
             SocMeanStdMipModel &remote_model_;
 
             GRBModel local_model_;
 
-            GRBVar traffic_index_ub_;
             GRBVar probability_dual_;
             std::vector<std::vector<GRBVar> > mean_dual_;
             std::vector<std::vector<GRBVar> > variance_dual_;
@@ -48,6 +47,10 @@ namespace quake {
         void Build(const boost::optional<Solution> &solution) override;
 
     private:
+        GRBVar probability_dual_;
+        std::vector<std::vector<GRBVar> > mean_dual_;
+        std::vector<std::vector<GRBVar> > variance_dual_;
+
         std::unique_ptr<MasterCallback> callback_;
     };
 }

@@ -52,8 +52,12 @@ namespace quake {
             CHECK_NEAR(left, right, BINARY_PRECISION);
         }
 
+        inline bool is_nearly_eq(double left, double right, double precision) {
+            return abs(left - right) < precision;
+        }
+
         inline bool is_nearly_eq(double left, double right) {
-            return abs(left - right) < BINARY_PRECISION;
+            return is_nearly_eq(left, right, BINARY_PRECISION);
         }
 
         inline bool is_surely_gt(double left, double right) {
