@@ -220,7 +220,7 @@ double quake::BaseBoxMeanVarMipModel::ReformulationSession::AdaptErrorMultiplier
     CHECK_EQ(solver_status, util::SolverStatus::Optimal);
 
     const auto error_multiplier = proof_model.get(GRB_DoubleAttr_ObjVal);
-    static const auto MIN_ERROR_MULTIPLIER = 5.0;
+    static const auto MIN_ERROR_MULTIPLIER = 1.0;
     if (error_multiplier > MIN_ERROR_MULTIPLIER) {
         LOG(WARNING) << "Error multiplier " << error_multiplier << " exceeds the safety margin ("
                      << MIN_ERROR_MULTIPLIER << ")";

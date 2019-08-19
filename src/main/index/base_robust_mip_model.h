@@ -21,9 +21,9 @@ namespace quake {
 
         double CloudCoverVariance(const GroundStation &station, const boost::posix_time::time_period &period) const;
 
-        double CloudCoverLowerBound(const GroundStation &station, const boost::posix_time::time_period &period) const;
+        virtual double CloudCoverLowerBound(const GroundStation &station, const boost::posix_time::time_period &period) const;
 
-        double CloudCoverUpperBound(const GroundStation &station, const boost::posix_time::time_period &period) const;
+        virtual double CloudCoverUpperBound(const GroundStation &station, const boost::posix_time::time_period &period) const;
 
         const std::vector<boost::posix_time::time_period> &CloudCover(const GroundStation &station) const;
 

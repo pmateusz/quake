@@ -10,9 +10,7 @@ namespace quake {
 
     class SocMeanStdMipModel : public BaseRobustMipModel {
     public:
-        SocMeanStdMipModel(ExtendedProblem const *problem, boost::posix_time::time_duration interval_step);
-
-        class MasterCallback;
+        SocMeanStdMipModel(ExtendedProblem const *problem, boost::posix_time::time_duration interval_step, double confidence_radius);
 
         class MasterCallback : public GRBCallback {
         public:
@@ -26,19 +24,18 @@ namespace quake {
             void callback() override;
 
         private:
-            void SetupLocalModel();
+            void SetupModel();
 
-            void ResetLocalModel();
+            void ResetModel();
 
             void SolveUncertainty();
 
             SocMeanStdMipModel &remote_model_;
 
-            GRBModel local_model_;
+            GRBModel uncertain_model_;
 
-            GRBVar probability_dual_;
-            std::vector<std::vector<GRBVar> > mean_dual_;
-            std::vector<std::vector<GRBVar> > variance_dual_;
+            std::vector<std::vector<GRBVar> > un_cloud_cover_;
+            std::vector<std::vector<GRBVar> > un_variance_;
         };
 
         friend class MasterCallback;
@@ -46,7 +43,13 @@ namespace quake {
     protected:
         void Build(const boost::optional<Solution> &solution) override;
 
+        double CloudCoverLowerBound(const GroundStation &station, const boost::posix_time::time_period &period) const override;
+
+        double CloudCoverUpperBound(const GroundStation &station, const boost::posix_time::time_period &period) const override;
+
     private:
+        double confidence_radius_;
+
         GRBVar probability_dual_;
         std::vector<std::vector<GRBVar> > mean_dual_;
         std::vector<std::vector<GRBVar> > variance_dual_;

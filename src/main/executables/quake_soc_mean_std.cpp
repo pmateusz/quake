@@ -31,12 +31,14 @@
 #include "index/index_evaluator.h"
 #include "executables/mip_arguments.h"
 
+// TODO: print all solutions in the solution pool
+// TODO: include VAR
 
 int main(int argc, char *argv[]) {
     const auto arguments = quake::SetupLogsAndParseArgs<quake::ScenarioIndexMipArguments>(argc, argv);
     const auto problem = quake::ExtendedProblem::load_json(arguments.ProblemPath);
 
-    quake::SocMeanStdMipModel robust_mip_model{&problem, arguments.IntervalStep};
+    quake::SocMeanStdMipModel robust_mip_model{&problem, arguments.IntervalStep, 1.97};
     auto solution_opt = robust_mip_model.Solve(arguments.TimeLimit, arguments.GapLimit, boost::none);
     if (solution_opt) {
         solution_opt->GetMetadata().SetProperty(quake::Metadata::Property::SolutionType, quake::Metadata::SolutionType::Test);
