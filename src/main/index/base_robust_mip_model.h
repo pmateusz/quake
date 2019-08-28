@@ -12,6 +12,14 @@ namespace quake {
     public:
         BaseRobustMipModel(ExtendedProblem const *problem, boost::posix_time::time_duration interval_step, std::vector<Forecast> forecasts);
 
+        const std::vector<boost::posix_time::time_period> &CloudCover(const GroundStation &station) const;
+
+        const std::vector<boost::posix_time::time_period> &ObservableCloudCover(const GroundStation &station) const;
+
+        std::size_t NumStations() const { return Stations().size(); }
+
+        std::size_t NumCloudCoverPeriods() const { return cloud_cover_periods_.size(); }
+
     protected:
         double CloudCoverVarianceLowerBound() const;
 
@@ -24,14 +32,6 @@ namespace quake {
         virtual double CloudCoverLowerBound(const GroundStation &station, const boost::posix_time::time_period &period) const;
 
         virtual double CloudCoverUpperBound(const GroundStation &station, const boost::posix_time::time_period &period) const;
-
-        const std::vector<boost::posix_time::time_period> &CloudCover(const GroundStation &station) const;
-
-        const std::vector<boost::posix_time::time_period> &ObservableCloudCover(const GroundStation &station) const;
-
-        std::size_t NumStations() const { return Stations().size(); }
-
-        std::size_t NumCloudCoverPeriods() const { return cloud_cover_periods_.size(); }
 
         GRBLinExpr GetMaxKeysTransferredExpr(const GroundStation &station);
 

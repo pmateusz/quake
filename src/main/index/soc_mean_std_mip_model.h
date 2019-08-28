@@ -28,14 +28,23 @@ namespace quake {
 
             void ResetModel();
 
+            void GenerateCut(const GroundStation &master_station);
+
             void SolveUncertainty();
 
             SocMeanStdMipModel &remote_model_;
 
             GRBModel uncertain_model_;
 
+            GRBVar probability_dual_;
+            std::vector<std::vector<GRBVar> > mean_dual_;
+            std::vector<std::vector<GRBVar> > variance_dual_;
+
             std::vector<std::vector<GRBVar> > un_cloud_cover_;
             std::vector<std::vector<GRBVar> > un_variance_;
+
+            std::size_t cuts_added_;
+            bool generate_all_cuts_;
         };
 
         friend class MasterCallback;

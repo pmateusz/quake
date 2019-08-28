@@ -53,6 +53,10 @@ namespace quake {
 
         inline const std::vector<IntervalVar> &StationIntervals(const GroundStation &station) const { return intervals_.at(Index(station)); }
 
+        virtual const std::vector<GroundStation> &ObservableStations() const { return observable_stations_; }
+
+        inline const ExtendedProblem::StationVarModel &VarModel(const GroundStation &station) const { return problem_->VarModel(station); }
+
     protected:
         void AppendMetadata(Metadata &metadata) override;
 
@@ -61,8 +65,6 @@ namespace quake {
         IntervalVar CreateInterval(std::size_t station_index, const boost::posix_time::time_period &period);
 
         virtual double GetTrafficIndexUpperBound() const;
-
-        virtual const std::vector<GroundStation> &ObservableStations() const { return observable_stations_; }
 
         std::vector<IntervalVar> GetIntervals(const GroundStation &station, const boost::posix_time::time_period &time_period) const;
 
