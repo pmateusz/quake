@@ -108,9 +108,10 @@ class WeatherCache:
     def save(self):
         self.__forecast_frame.to_hdf(self.FORECAST_CACHE_FILE, self.HDF_FILE_TABLE, mode=self.HDF_FILE_MODE, format=self.HDF_FORMAT)
 
-        observation_frame = self.__observation_frame.copy()
-        observation_frame['city_name'] = observation_frame['city_name'].astype(str)
-        observation_frame.to_hdf(self.OBSERVATION_CACHE_FILE, self.HDF_FILE_TABLE, mode=self.HDF_FILE_MODE, format=self.HDF_FORMAT)
+        if self.__load_historical_observations:
+            observation_frame = self.__observation_frame.copy()
+            observation_frame['city_name'] = observation_frame['city_name'].astype(str)
+            observation_frame.to_hdf(self.OBSERVATION_CACHE_FILE, self.HDF_FILE_TABLE, mode=self.HDF_FILE_MODE, format=self.HDF_FORMAT)
 
     def get_forecast_frame(self, start_time, duration):
         end_time = start_time + duration
@@ -141,13 +142,15 @@ class WeatherCache:
         return self.__pivot_transform(forecast_date_time)
 
     def get_forecast_time_points(self):
-        filter_frame = self.__forecast_frame.loc[pandas.IndexSlice[:, self.ZERO_TIME_DELTA], :]
+        filter_frame = self.__forecast_frame.loc[pandas.IndexSlice[:, self.ZERO_TIME_DELTA, quake.city.LONDON], :]
         time_points = list(filter_frame.index.get_level_values('DateTime').unique().to_pydatetime())
-        return time_points
-        # forecast_time_points = {datetime.datetime.combine(pandas.to_datetime(time_point).date(), datetime.time()) for time_point in time_points}
-        # filtered_time_points = list(forecast_time_points)
-        # filtered_time_points.sort()
-        # return filtered_time_points
+        time_points.sort()
+
+        def is_midnight_or_noon(time_point: datetime.datetime) -> bool:
+            return time_point.hour % 12 == 0
+
+        filter_time_points = [time_point for time_point in time_points if is_midnight_or_noon(time_point)]
+        return filter_time_points
 
     def get_error_frames(self, time_points):
         result = []
