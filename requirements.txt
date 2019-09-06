@@ -9,6 +9,7 @@ statsmodels
 tables
 tabulate
 tqdm
+sklearn
 xlsxwriter
-
+prince
 GPy

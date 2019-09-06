@@ -25,12 +25,15 @@ import concurrent.futures
 import concurrent.futures.process
 import copy
 import datetime
+import pickle
 import json
 import logging
 import os
+import random
 import subprocess
 import warnings
 
+import scipy.stats
 import matplotlib.colors
 import matplotlib.dates
 import matplotlib.offsetbox
@@ -97,14 +100,16 @@ def parse_args():
     extend_parser.add_argument('problem_file')
     extend_parser.add_argument('--output')
     extend_parser.add_argument('--num-scenarios', default=0, type=int)
-    extend_parser.add_argument('--scenario-generator', choices=quake.weather.scenarios.ScenarioGeneratorFactory.MODEL_NAMES, required=True)
+    extend_parser.add_argument('--scenario-generator',
+                               choices=quake.weather.scenarios.ScenarioGeneratorFactory.MODEL_NAMES, required=True)
 
     generate_parser = sub_parsers.add_parser(GENERATE_COMMAND)
     generate_parser.add_argument('--from', action=ParseDateAction)
     generate_parser.add_argument('--to', action=ParseDateAction)
     generate_parser.add_argument('--problem-prefix')
     generate_parser.add_argument('--num-scenarios', default=0, type=int)
-    generate_parser.add_argument('--scenario-generator', choices=quake.weather.scenarios.ScenarioGeneratorFactory.MODEL_NAMES, required=True)
+    generate_parser.add_argument('--scenario-generator',
+                                 choices=quake.weather.scenarios.ScenarioGeneratorFactory.MODEL_NAMES, required=True)
 
     plot_forecast_parser = sub_parsers.add_parser(PLOT_FORECAST_COMMAND)
     plot_forecast_parser.add_argument('--from', action=ParseDateAction)
@@ -223,8 +228,10 @@ def compute_vector_auto_regression(args):
     forecast_frame = weather_cache.forecast_frame.copy()
 
     time_points = [pandas.to_datetime(value)
-                   for value in forecast_frame[(forecast_frame['Delay'] == datetime.timedelta(seconds=0))]['DateTime'].sort_values().unique()]
-    locations = forecast_frame[(forecast_frame['Delay'] == datetime.timedelta(seconds=0))]['City'].sort_values().unique()
+                   for value in forecast_frame[(forecast_frame['Delay'] == datetime.timedelta(seconds=0))][
+                       'DateTime'].sort_values().unique()]
+    locations = forecast_frame[(forecast_frame['Delay'] == datetime.timedelta(seconds=0))][
+        'City'].sort_values().unique()
 
     for time_point in time_points:
         local_forecast_sample = forecast_sample(forecast_frame, time_point)
@@ -277,7 +284,8 @@ def extend_problem_definition(args):
     def __generate_var_model(weather_cache, forecast_start, look_behind):
         sample_end = forecast_start
         sample_start = forecast_start - look_behind
-        forecast_frame = weather_cache.forecast_frame.loc[pandas.IndexSlice[sample_start:sample_end, weather_cache.ZERO_TIME_DELTA], :].copy()
+        forecast_frame = weather_cache.forecast_frame.loc[
+                         pandas.IndexSlice[sample_start:sample_end, weather_cache.ZERO_TIME_DELTA], :].copy()
         forecast_frame.reset_index(inplace=True)
         forecast_frame.drop(columns=['Delay', 'Description'], inplace=True)
         pivot_frame = forecast_frame.pivot_table(columns=['City'], values=['CloudCover'], index=['DateTime'])
@@ -304,7 +312,8 @@ def extend_problem_definition(args):
                 params_data.append(zeros)
             params = pandas.DataFrame(data=params_data, columns=cities, index=rows_index)
             del params_data
-            stderr = pandas.DataFrame(data=numpy.zeros((len(rows_index), len(cities))), columns=cities, index=rows_index)
+            stderr = pandas.DataFrame(data=numpy.zeros((len(rows_index), len(cities))), columns=cities,
+                                      index=rows_index)
             stderr_residuals = {city: 0.0 for city in cities}
             stderr_mean = {city: 0.0 for city in cities}
             corr = pandas.DataFrame(data=numpy.identity(len(cities)), columns=cities, index=cities)
@@ -342,8 +351,10 @@ def extend_problem_definition(args):
     weather_cache = quake.weather.cache.WeatherCache()
     weather_cache.load()
 
-    forecast_frame = weather_cache.get_closest_forecast_frame(problem.observation_period.begin, problem.observation_period.length)
-    real_frame = weather_cache.get_observation_frame(problem.observation_period.begin, problem.observation_period.length)
+    forecast_frame = weather_cache.get_closest_forecast_frame(problem.observation_period.begin,
+                                                              problem.observation_period.length)
+    real_frame = weather_cache.get_observation_frame(problem.observation_period.begin,
+                                                     problem.observation_period.length)
 
     forecast_frame = weather_cache.fill_missing_values(forecast_frame)
     real_frame = weather_cache.fill_missing_values(real_frame)
@@ -356,10 +367,11 @@ def extend_problem_definition(args):
         assert problem.observation_period.end >= max_time
         total_reduction = (min_time - problem.observation_period.begin) + (problem.observation_period.end - max_time)
         if total_reduction > datetime.timedelta(hours=3):
-            warnings.warn('Problem observation period is reduced from [{0}, {1}] to [{2}, {3}]'.format(problem.observation_period.begin,
-                                                                                                       problem.observation_period.end,
-                                                                                                       min_time,
-                                                                                                       max_time))
+            warnings.warn('Problem observation period is reduced from [{0}, {1}] to [{2}, {3}]'.format(
+                problem.observation_period.begin,
+                problem.observation_period.end,
+                min_time,
+                max_time))
 
     std_frame = weather_cache.get_std_frame()
     assert len(std_frame) >= len(forecast_frame)
@@ -402,8 +414,9 @@ def extend_problem_definition(args):
     updated_problem.set_metadata('scenarios_number', len(scenario_frames))
     updated_problem.set_metadata('scenario_generator', scenario_generator_name)
 
-    generation_model = model_factory.create_model(quake.weather.scenarios.ScenarioGeneratorFactory.COREGIONALIZATION_MODEL_NAME, weather_cache,
-                                                  forecast_frame)
+    generation_model = model_factory.create_model(
+        quake.weather.scenarios.ScenarioGeneratorFactory.COREGIONALIZATION_MODEL_NAME, weather_cache,
+        forecast_frame)
     var_model = __generate_var_model(weather_cache, min_time, datetime.timedelta(days=28))
     fitted_frame = generation_model.optimize()
     for station in fitted_frame['City'].unique():
@@ -411,9 +424,11 @@ def extend_problem_definition(args):
         city_frame.set_index('DateTime', inplace=True)
         city_frame.drop_duplicates(inplace=True)
         var_model[station.name]['lower'] \
-            = city_frame[forecast_frame.index.min():forecast_frame.index.max()]['yhat_lower'].apply(value_range).values.tolist()
+            = city_frame[forecast_frame.index.min():forecast_frame.index.max()]['yhat_lower'].apply(
+            value_range).values.tolist()
         var_model[station.name]['upper'] \
-            = city_frame[forecast_frame.index.min():forecast_frame.index.max()]['yhat_upper'].apply(value_range).values.tolist()
+            = city_frame[forecast_frame.index.min():forecast_frame.index.max()]['yhat_upper'].apply(
+            value_range).values.tolist()
         var_model[station.name]['stderr'] = std_frame[station].values.tolist()
     updated_problem.set_var_model(var_model)
 
@@ -473,7 +488,8 @@ def plot_generated_scenarios(args):
 
     coregionalized_observation_length = datetime.timedelta(days=14)
     coregionalized_observation_start = forecast_time - coregionalized_observation_length
-    coregionalized_observe = weather_cache.get_observation_frame(coregionalized_observation_start, coregionalized_observation_length)
+    coregionalized_observe = weather_cache.get_observation_frame(coregionalized_observation_start,
+                                                                 coregionalized_observation_length)
 
     assert not coregionalized_observe.empty, 'No historical observations are available for coregionalization model'
 
@@ -483,17 +499,20 @@ def plot_generated_scenarios(args):
     past_error_model = quake.weather.scenarios.PastErrorsModel(weather_cache, forecast_frame)
     past_error_model.optimize()
 
-    independent_noise_error_model = quake.weather.scenarios.HeteroscedasticIndependentNoiseModel(weather_cache, forecast_frame)
+    independent_noise_error_model = quake.weather.scenarios.HeteroscedasticIndependentNoiseModel(weather_cache,
+                                                                                                 forecast_frame)
     independent_noise_error_model.optimize()
 
-    autocorrelated_noise_error_model = quake.weather.scenarios.HeteroscedasticAutoCorrelatedNoiseModel(weather_cache, forecast_frame)
+    autocorrelated_noise_error_model = quake.weather.scenarios.HeteroscedasticAutoCorrelatedNoiseModel(weather_cache,
+                                                                                                       forecast_frame)
     autocorrelated_noise_error_model.optimize()
 
     def domain_filter(values):
         return [max(0, min(100, value)) for value in values]
 
     models = [past_error_model, independent_noise_error_model, autocorrelated_noise_error_model, coregionalized_model]
-    model_labels = ['Past Errors Replication', 'Independent Noise Generation', 'Autocorrelated Noise Genration', 'Coregionalization Model']
+    model_labels = ['Past Errors Replication', 'Independent Noise Generation', 'Autocorrelated Noise Genration',
+                    'Coregionalization Model']
 
     observation_frame = weather_cache.get_observation_frame(forecast_time, weather_cache.forecast_length)
 
@@ -508,10 +527,14 @@ def plot_generated_scenarios(args):
             model_handle = None
             for sample_index, sample_frame in enumerate(past_error_model.samples(num_samples)):
                 city_series = sample_frame[sample_frame['City'] == city]
-                model_handle = local_ax.plot(city_series['DateTime'], domain_filter(city_series['y'].values), c='blue', alpha=0.3)[0]
+                model_handle = \
+                    local_ax.plot(city_series['DateTime'], domain_filter(city_series['y'].values), c='blue', alpha=0.3)[
+                        0]
             model_handles.append(model_handle)
-            real_handle = local_ax.plot(observation_frame[city].index.values, observation_frame[city].values, c='red')[0]
-            forecast_handle = local_ax.plot(forecast_frame[city].index.values, forecast_frame[city].values, c='black')[0]
+            real_handle = local_ax.plot(observation_frame[city].index.values, observation_frame[city].values, c='red')[
+                0]
+            forecast_handle = local_ax.plot(forecast_frame[city].index.values, forecast_frame[city].values, c='black')[
+                0]
 
             local_ax.annotate(model_labels[model_index],
                               xy=(0.0, 0.0),
@@ -521,7 +544,8 @@ def plot_generated_scenarios(args):
                               bbox=BBOX_STYLE.copy())
 
         ax[int(len(models) / 2)].set_ylabel('Cloud Cover [%]')
-        ax[-1].legend((model_handles[0], forecast_handle, real_handle), ('Generated Scenario', 'Forecast Scenario', 'Real Scenario'),
+        ax[-1].legend((model_handles[0], forecast_handle, real_handle),
+                      ('Generated Scenario', 'Forecast Scenario', 'Real Scenario'),
                       ncol=3, loc='upper center', bbox_to_anchor=(0.5, -0.4))
         ax[-1].set_xlabel('Time')
 
@@ -620,7 +644,8 @@ def plot_forecast_command(args):
         ax.set_ylabel('Cloud Cover [%]')
         figure.tight_layout()
 
-        save_figure(figure, '{0}_{1}_{2}_{3}'.format(output_prefix, city.name, simple_date_str(from_date_time), simple_date_str(to_date_time)))
+        save_figure(figure, '{0}_{1}_{2}_{3}'.format(output_prefix, city.name, simple_date_str(from_date_time),
+                                                     simple_date_str(to_date_time)))
 
 
 def plot_coregionalization(args):
@@ -649,9 +674,11 @@ def plot_coregionalization(args):
     observation_handle, forecast_handle = None, None
     for city_index, city in enumerate(cities):
         if not observation_frame.empty:
-            observation_handle = ax[city_index].scatter(observation_frame[city].index, observation_frame[city], marker='s', s=1,
+            observation_handle = ax[city_index].scatter(observation_frame[city].index, observation_frame[city],
+                                                        marker='s', s=1,
                                                         color=OBSERVATION_COLOR)
-        forecast_handle = ax[city_index].scatter(forecast_frame[city].index, forecast_frame[city], marker='s', s=1, color=FORECAST_COLOR)
+        forecast_handle = ax[city_index].scatter(forecast_frame[city].index, forecast_frame[city], marker='s', s=1,
+                                                 color=FORECAST_COLOR)
         ax[city_index].set_ylim(-25, 125)
 
         at = matplotlib.offsetbox.AnchoredText(city.name, frameon=False, loc='lower left')
@@ -807,7 +834,8 @@ def analyze_command(args):
     problem_files = [os.path.join(problem_dir, problem_file) for problem_file in os.listdir(problem_dir)]
     problem_files = list(filter(is_json_file, problem_files))
     with concurrent.futures.thread.ThreadPoolExecutor() as executor:
-        load_problem_futures = {executor.submit(load_problem, problem_file): problem_file for problem_file in problem_files}
+        load_problem_futures = {executor.submit(load_problem, problem_file): problem_file for problem_file in
+                                problem_files}
         for future in tqdm.tqdm(concurrent.futures.as_completed(load_problem_futures),
                                 total=len(load_problem_futures), desc='Loading Problem Files', leave=False):
             try:
@@ -825,8 +853,9 @@ def analyze_command(args):
                 break
 
         if not source_problem:
-            logging.warning('Failed to find a source problem for solution {0} with scenario generator {1}'.format(solution.observation_period,
-                                                                                                                  solution.scenario_generator))
+            logging.warning('Failed to find a source problem for solution {0} with scenario generator {1}'.format(
+                solution.observation_period,
+                solution.scenario_generator))
 
         solution_frames.append(evaluate_scenario(source_problem.get_scenario('real'), 'out_of_sample'))
         solution_frames.append(evaluate_scenario(source_problem.get_scenario('forecast'), 'in_sample'))
@@ -836,6 +865,168 @@ def analyze_command(args):
     with pandas.ExcelWriter(output_path, engine='xlsxwriter') as writer:
         master_solution_frame.to_excel(writer, worksheet_name)
         writer.save()
+
+
+class SampleSpace:
+    NUM_OBSERVATIONS = 40
+
+    class CachingSampler:
+        def __init__(self, mean, covariance, pool_size=100000):
+            self.__mean = mean
+            self.__covariance = covariance
+            self.__pool_size = pool_size
+
+            self.__pool = None
+            self.__counter = 0
+
+        def __call__(self):
+            if self.__pool is None or self.__counter >= self.__pool.shape[1]:
+                self.__pool = numpy.random.multivariate_normal(self.__mean, self.__covariance, size=self.__pool_size).transpose()
+                self.__counter = 0
+            sample = self.__pool[:, self.__counter]
+            self.__counter += 1
+            return sample
+
+    def __init__(self, frames: list):
+        samples = [self.frame_to_sample(frame) for frame in frames]
+        self.__sample_matrix = numpy.column_stack(samples)
+        self.__sum_of_squares = numpy.sum(self.__sample_matrix ** 2, axis=0)
+        self.__mean = numpy.zeros(self.__sample_matrix.shape[0])
+
+        test_covariance = numpy.cov(self.__sample_matrix)
+        test_mean = numpy.mean(self.__sample_matrix, axis=1)
+        self.__test_normal = scipy.stats.multivariate_normal(test_mean, test_covariance, allow_singular=True)
+
+        variances = []
+        for row_index in range(self.__sample_matrix.shape[0]):
+            variances.append(numpy.var(self.__sample_matrix[row_index, :]))
+        self.__covariance = numpy.diag(variances)
+
+        # variances = numpy.full(self.__sample_matrix.shape[0], 4.0)
+        # self.__covariance = numpy.diag(variances)
+
+    def generate_sample(self, num_samples):
+        matrix = self.__sample_matrix
+        for _ in range(num_samples):
+            weights = numpy.random.uniform(0.0, 0.1, self.__sample_matrix.shape[1])
+            scenario = self.__sample_matrix * weights.T
+            print('here')
+
+        return []
+
+    def mgaussian_sample(self, num_samples):
+        samples = self.__test_normal.rvs(num_samples)
+        return [self.sample_to_frame(sample) for sample in samples]
+
+    def mcmc_sample(self, num_samples, burn_in_period=5000, independent_sample_step=1000):
+        generator = random.Random(0)
+        sampler = SampleSpace.CachingSampler(self.__mean, self.__covariance)
+        accept_counter = 0
+        reject_counter = 0
+
+        iterations = burn_in_period + independent_sample_step * num_samples
+        samples = []
+        current_sample = self.__sample_matrix[:, generator.randint(0, self.__sample_matrix.shape[1])]
+        current_sample_probability = self.probability(current_sample)
+        with tqdm.tqdm(range(iterations), leave=False) as iterator:
+            for _ in iterator:
+                raw_sample = sampler()
+                candidate_sample = current_sample + raw_sample
+                candidate_sample_probability = self.probability(candidate_sample)
+                probability_ratio = candidate_sample_probability / current_sample_probability
+
+                accept_threshold = min(1.0, probability_ratio)
+                if accept_threshold < 1.0:
+                    # consider rejection
+                    test_result = generator.uniform(0.0, 1.0)
+                    if test_result > accept_threshold:
+                        # rejection - continue using the same sample
+                        reject_counter += 1
+                        samples.append(current_sample)
+                        continue
+                # must accept
+                accept_counter += 1
+                current_sample = candidate_sample
+                current_sample_probability = candidate_sample_probability
+                samples.append(current_sample)
+
+        logging.info('Metropolis accept vs. reject ration: (%d, %d)', accept_counter, reject_counter)
+
+        shortlisted_samples = samples[burn_in_period:]
+        shortlisted_samples = shortlisted_samples[::independent_sample_step]
+
+        assert len(shortlisted_samples) == num_samples
+
+        return [self.sample_to_frame(sample) for sample in shortlisted_samples]
+
+    def probability(self, sample: numpy.array) -> float:
+        max_value = numpy.max(sample)
+        if max_value > 100.0:
+            return 0.0
+
+        min_value = numpy.min(sample)
+        if min_value < -100.0:
+            return 0.0
+
+        return 1.0 / (self.distance(sample) + 1.0)
+
+    def distance(self, sample: numpy.array):
+        return numpy.sum(-2 * numpy.dot(sample, self.__sample_matrix)
+                         + numpy.sum(sample ** 2, axis=0)
+                         + self.__sum_of_squares)
+
+    @property
+    def data(self):
+        frames = []
+
+        for sample_index in range(self.__sample_matrix.shape[1]):
+            frame = self.sample_to_frame(self.__sample_matrix[:, sample_index])
+            frames.append(frame)
+
+        return frames
+
+    @property
+    def samples(self):
+        return self.__sample_matrix
+
+    def __slow_distance(self, sample: numpy.array):
+        distances = []
+        for sample_index in range(self.__sample_matrix.shape[1]):
+            distances.append(numpy.sum((self.__sample_matrix[:, sample_index] - sample) ** 4))
+        return numpy.sum(distances)
+
+    @staticmethod
+    def frame_to_sample(frame: pandas.DataFrame) -> numpy.array:
+        if not (frame.index.size == SampleSpace.NUM_OBSERVATIONS and frame.index.inferred_freq == '3H' and not frame.index.has_duplicates):
+            raise ValueError('Frame may have missing values')
+
+        sample = []
+        for city in quake.city.ALL:
+            sample.extend(frame[city].values)
+
+        return numpy.array(sample)
+
+    @staticmethod
+    def sample_to_frame(sample: numpy.array) -> pandas.DataFrame:
+        current_delay = datetime.timedelta()
+        delay_step = datetime.timedelta(hours=3)
+        rows = []
+        index = []
+        for offset in range(SampleSpace.NUM_OBSERVATIONS):
+            row = sample[offset::SampleSpace.NUM_OBSERVATIONS].flatten()
+
+            assert len(row) == len(quake.city.ALL)
+
+            rows.append(row)
+            index.append(current_delay)
+
+            current_delay += delay_step
+
+        assert current_delay == datetime.timedelta(hours=120)
+
+        frame = pandas.DataFrame(index=index, data=rows, columns=quake.city.ALL)
+
+        return frame
 
 
 if __name__ == '__main__':
@@ -863,57 +1054,65 @@ if __name__ == '__main__':
     elif command == ANALYZE_COMMAND:
         analyze_command(args)
 
-    weather_cache = quake.weather.cache.WeatherCache()
-    weather_cache.load()
-    error_frames = weather_cache.get_error_frames(weather_cache.get_forecast_time_points())
+    if os.path.exists('sample.pickle'):
+        with open('sample.pickle', 'rb') as file_stream:
+            filter_frames = pickle.load(file_stream)
+    else:
+        weather_cache = quake.weather.cache.WeatherCache()
+        weather_cache.load()
+        error_frames = weather_cache.get_error_frames(weather_cache.get_forecast_time_points())
+        filter_frames = [error_frame for error_frame in error_frames if len(error_frame) == 40]
+        with open('sample.pickle', 'wb') as file_stream:
+            pickle.dump(filter_frames, file_stream)
 
-    # filter out samples with missing values
-    filter_frames = [error_frame for error_frame in error_frames if len(error_frame) == 40]
-
-
-    def frame_to_sample(frame: pandas.DataFrame) -> numpy.array:
-        if not (frame.index.size == 40 and frame.index.inferred_freq == '3H' and not frame.index.has_duplicates):
-            raise ValueError('Frame may have missing values')
-
-        sample = []
-        for city in quake.city.ALL:
-            sample.extend(frame[city].values)
-
-        return numpy.array(sample)
+    sample_space = SampleSpace(filter_frames)
+    new_samples = sample_space.generate_sample(25)
 
 
-    samples = [frame_to_sample(frame) for frame in filter_frames]
+    def draw_joint_distribution(city_x, city_y, delay, samples):
+        fig, ax = matplotlib.pyplot.subplots(1, 1)
 
-    sample_matrix = numpy.column_stack(samples)
+        error_x = []
+        error_y = []
 
-    means = []
-    variances = []
-    for row_index in range(sample_matrix.shape[0]):
-        means.append(numpy.mean(sample_matrix[row_index, :]))
-        variances.append(numpy.var(sample_matrix[row_index, :]))
+        for sample in samples:
+            error_x.append(sample.loc[delay][city_x])
+            error_y.append(sample.loc[delay][city_y])
 
-    covariances = numpy.diag(variances)
+        ax.scatter(error_x, error_y)
 
-    step_distribution = numpy.random.multivariate_normal(means, covariances, size=1)
-
-    print('here')
+        return fig
 
 
-    def distance():
-        distances = []
-        for sample_index in range(sample_matrix.shape[1]):
-            distances.append(numpy.sum((sample_matrix[:,sample_index] - step_distribution) ** 2, axis=1)[0])
-        return numpy.array(distances)
+    def draw_marginal_distribution(city, delay, samples):
+        fig, ax = matplotlib.pyplot.subplots(1, 1)
+
+        x = []
+        for sample in samples:
+            x.append(sample.loc[delay][city])
+        ax.hist(x)
+
+        return fig
 
 
-    def vector_distance():
-        return (-2 * numpy.dot(step_distribution, sample_matrix) + numpy.sum(step_distribution ** 2, axis=1) + numpy.sum(sample_matrix ** 2, axis=0))[:, numpy.newaxis]
+    city_x = quake.city.LONDON
+    city_y = quake.city.CAMBRIDGE
 
+    data = sample_space.data
 
-    simple_distances = distance()
-    vector_distances = vector_distance()
-    # obtain marginal distribution of errors for each station / data point
-    # obtain a collection of points to calculate distance to
+    # for hour_delay in tqdm.tqdm(range(0, 12, 3), desc='Plotting'):
+    #     current_delay = datetime.timedelta(hours=hour_delay)
+    #     data_figure = draw_joint_distribution(city_x, city_y, current_delay, data)
+    #     data_figure.savefig('slice_joint_dist_{0}_{1}_H{2}_data.png'.format(city_x.name, city_y.name, hour_delay))
+    #     matplotlib.pyplot.close(data_figure)
+
+    # marginal_data_figure = draw_marginal_distribution(city_x, current_delay, data)
+    # marginal_data_figure.savefig('marginal_dist_{0}_H{1}_sample.png'.format(city_x.name, hour_delay))
+    # matplotlib.pyplot.close(marginal_data_figure)
+
+    # sample_figure = draw_joint_distribution(city_x, city_y, current_delay, new_samples)
+    # sample_figure.savefig('slice_joint_dist_{0}_{1}_H{2}_sample.png'.format(city_x.name, city_y.name, hour_delay))
+    # matplotlib.pyplot.close(sample_figure)
 
     print('here')
 
