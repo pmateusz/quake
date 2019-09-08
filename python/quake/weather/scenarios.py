@@ -1,11 +1,275 @@
+import collections
 import datetime
+import logging
+import random
 
-import pandas
-import numpy
 import GPy
+import numpy
+import pandas
+import scipy
+import scipy.stats
 import tqdm
 
 import quake.city
+
+
+class SampleSpace:
+    NUM_OBSERVATIONS = 40
+
+    class CachingSampler:
+        def __init__(self, mean, variance, pool_size=100000):
+            self.__mean = mean
+            self.__variance = variance
+            self.__pool_size = pool_size
+
+            self.__pool = None
+            self.__counter = 0
+
+        def __call__(self):
+            if self.__pool is None or self.__counter >= self.__pool.shape[1]:
+                self.__pool = numpy.random.multivariate_normal(self.__mean,
+                                                               numpy.diag(self.__variance),
+                                                               size=self.__pool_size).transpose()
+                self.__counter = 0
+            sample = self.__pool[:, self.__counter]
+            self.__counter += 1
+            return sample
+
+    def __init__(self, frames: list):
+        samples = [self.frame_to_sample(frame) for frame in frames]
+        self.__sample_matrix = numpy.column_stack(samples)
+        self.__sum_of_squares = numpy.sum(self.__sample_matrix ** 2, axis=0)
+        self.__mean = numpy.zeros(self.__sample_matrix.shape[0])
+
+        self.__full_covariance = numpy.cov(self.__sample_matrix)
+        self.__mean = numpy.mean(self.__sample_matrix, axis=1)
+        self.__gaussian = scipy.stats.multivariate_normal(self.__mean, numpy.diag(self.__full_covariance), allow_singular=True)
+
+    def heuristic_sample(self, num_samples):
+        num_topics_per_sample = numpy.random.poisson(1.0, num_samples) + 1
+        samples = []
+        for num_topics in num_topics_per_sample:
+            selected_topics = numpy.random.choice(self.__sample_matrix.shape[1], num_topics, replace=False)
+            weights = numpy.random.normal(loc=1.0, scale=0.25, size=num_topics)
+            # weights = numpy.ones(num_topics)
+            # weights = numpy.random.dirichlet(numpy.full(num_topics, 0.05), 1)[0]
+            sample = numpy.sum(numpy.dot(self.__sample_matrix[:, selected_topics], weights[0]), axis=1)
+            samples.append(sample)
+        return [self.sample_to_frame(sample) for sample in samples]
+
+    def gaussian_sample(self, num_samples):
+        samples = self.__gaussian.rvs(num_samples)
+        return [self.sample_to_frame(sample) for sample in samples]
+
+    def monte_carlo_markov_chain_sample(self, num_samples, burn_in_period=5000, independent_sample_step=1000):
+        generator = random.Random(0)
+        sampler = SampleSpace.CachingSampler(self.__mean, self.__full_covariance)
+        accept_counter = 0
+        reject_counter = 0
+
+        iterations = burn_in_period + independent_sample_step * num_samples
+        samples = []
+        current_sample = self.__sample_matrix[:, generator.randint(0, self.__sample_matrix.shape[1])]
+        current_sample_probability = self.heuristic_probability(current_sample)
+        with tqdm.tqdm(range(iterations), leave=False) as iterator:
+            for _ in iterator:
+                raw_sample = sampler()
+                candidate_sample = current_sample + raw_sample
+                candidate_sample_probability = self.heuristic_probability(candidate_sample)
+                probability_ratio = candidate_sample_probability / current_sample_probability
+
+                accept_threshold = min(1.0, probability_ratio)
+                if accept_threshold < 1.0:
+                    # consider rejection
+                    test_result = generator.uniform(0.0, 1.0)
+                    if test_result > accept_threshold:
+                        # rejection - continue using the same sample
+                        reject_counter += 1
+                        samples.append(current_sample)
+                        continue
+                # must accept
+                accept_counter += 1
+                current_sample = candidate_sample
+                current_sample_probability = candidate_sample_probability
+                samples.append(current_sample)
+
+        logging.info('Metropolis accept vs. reject ration: (%d, %d)', accept_counter, reject_counter)
+
+        shortlisted_samples = samples[burn_in_period:]
+        shortlisted_samples = shortlisted_samples[::independent_sample_step]
+
+        assert len(shortlisted_samples) == num_samples
+
+        return [self.sample_to_frame(sample) for sample in shortlisted_samples]
+
+    def heuristic_probability(self, sample: numpy.array) -> float:
+        max_value = numpy.max(sample)
+        if max_value > 100.0:
+            return 0.0
+
+        min_value = numpy.min(sample)
+        if min_value < -100.0:
+            return 0.0
+
+        return 1.0 / (self.distance(sample) + 1.0)
+
+    def distance(self, sample: numpy.array):
+        return numpy.sum(-2 * numpy.dot(sample, self.__sample_matrix)
+                         + numpy.sum(sample ** 2, axis=0)
+                         + self.__sum_of_squares)
+
+    @property
+    def samples(self):
+        return self.__sample_matrix
+
+    def __slow_distance(self, sample: numpy.array):
+        distances = []
+        for sample_index in range(self.__sample_matrix.shape[1]):
+            distances.append(numpy.sum((self.__sample_matrix[:, sample_index] - sample) ** 2))
+        return numpy.sum(distances)
+
+    @staticmethod
+    def frame_to_sample(frame: pandas.DataFrame) -> numpy.array:
+        if not (frame.index.size == SampleSpace.NUM_OBSERVATIONS and frame.index.inferred_freq == '3H' and not frame.index.has_duplicates):
+            raise ValueError('Frame may have missing values')
+
+        sample = []
+        for city in quake.city.ALL:
+            sample.extend(frame[city].values)
+
+        return numpy.array(sample)
+
+    @staticmethod
+    def sample_to_frame(sample: numpy.array) -> pandas.DataFrame:
+        data = []
+        for offset in range(SampleSpace.NUM_OBSERVATIONS):
+            row = sample[offset::SampleSpace.NUM_OBSERVATIONS].flatten()
+
+            assert len(row) == len(quake.city.ALL)
+
+            data.append(row)
+
+        return pandas.DataFrame(data=data, columns=quake.city.ALL)
+
+
+MeanVarianceResult = collections.namedtuple('MeanVarianceResult',
+                                            ['confidence_interval',
+                                             'mean', 'mean_lower', 'mean_upper',
+                                             'variance', 'variance_lower', 'variance_upper'])
+
+
+class PastErrorsScenarioGenerator:
+    def __init__(self, weather_cache, forecast_frame):
+        self.__weather_cache = weather_cache
+        self.__forecast_frame = forecast_frame
+        self.__sample_space = None
+        self.__weather_samples = None
+
+    def optimize(self):
+        forecast_time_points = self.__weather_cache.get_forecast_time_points()
+        error_frames = self.__weather_cache.get_error_frames(forecast_time_points)
+        filter_frames = [error_frame for error_frame in error_frames if len(error_frame) == SampleSpace.NUM_OBSERVATIONS]
+        self.__sample_space = SampleSpace(filter_frames)
+
+        forecast_sample = self.__sample_space.frame_to_sample(self.__forecast_frame)
+
+        weather_samples = []
+        for sample_index in range(self.__sample_space.samples.shape[1]):
+            weather_sample = self.__sample_space.samples[:, sample_index].T + forecast_sample
+            weather_samples.append(weather_sample)
+        self.__weather_samples = numpy.column_stack(weather_samples)
+
+    def samples(self, size):
+        if size > self.num_samples:
+            logging.warning('Too many samples requested. The generate will generate %d samples out of %d samples requested', self.num_samples, size)
+
+        if size < self.num_samples:
+            samples_selected = numpy.random.choice(self.num_samples, size, replace=False)
+        else:
+            samples_selected = numpy.arange(0, self.num_samples)
+
+        samples = self.__weather_samples[:, samples_selected]
+
+        frames = []
+        for sample_index in range(samples.shape[1]):
+            sample = numpy.copy(samples[:, sample_index])
+
+            sample[sample > 100.0] = 100.0
+            sample[sample < 0.0] = 0.0
+
+            frame = self.__sample_space.sample_to_frame(sample)
+            frame.set_index(self.__forecast_frame.index, inplace=True)
+            frames.append(frame)
+        return frames
+
+    def bootstrap_mean_variance(self, iterations, batch_size=100, confidence=0.8) -> MeanVarianceResult:
+        if confidence > 1.0 or confidence < 0.0:
+            raise ValueError('confidence')
+
+        mean = []
+        variance = []
+
+        for _ in tqdm.tqdm(range(iterations), leave=False):
+            sample_indices = numpy.random.choice(self.num_samples, batch_size, replace=True)
+            batch = self.__weather_samples[:, sample_indices]
+            sample_mean = numpy.mean(batch, axis=1)
+            mean.append(sample_mean)
+
+            sample_variance = numpy.var(batch, axis=1)
+            variance.append(sample_variance)
+
+        mean = numpy.column_stack(mean)
+        population_mean = numpy.mean(mean, axis=1)[:, numpy.newaxis]
+
+        variance = numpy.column_stack(variance)
+        population_variance = numpy.mean(variance, axis=1)[:, numpy.newaxis]
+
+        confidence_fraction = (1.0 - confidence) / 2.0
+        lower_conf_pos = int(numpy.floor(confidence_fraction * iterations))
+        upper_conf_pos = int(numpy.ceil((1.0 - confidence_fraction) * iterations))
+        upper_conf_pos = min(upper_conf_pos, iterations - 1)
+
+        def get_confidence_intervals(sample_statistics, population_value):
+            diff = numpy.sort(sample_statistics - population_value, axis=1)
+            lower_conf = population_value + diff[:, lower_conf_pos][:, numpy.newaxis]
+            upper_conf = population_value + diff[:, upper_conf_pos][:, numpy.newaxis]
+
+            assert numpy.all(lower_conf <= population_value) and numpy.all(population_value <= upper_conf)
+
+            return lower_conf, upper_conf
+
+        mean_lower_ci, mean_upper_ci = get_confidence_intervals(mean, population_mean)
+        variance_lower_ci, variance_upper_ci = get_confidence_intervals(variance, population_variance)
+
+        trimmed_population_mean = numpy.copy(population_mean)
+        trimmed_population_mean[trimmed_population_mean > 100.0] = 100.0
+        trimmed_population_mean[trimmed_population_mean < 0.0] = 0.0
+
+        mean_frame = self.__sample_space.sample_to_frame(trimmed_population_mean)
+        mean_frame.set_index(self.__forecast_frame.index, inplace=True)
+
+        mean_lower_ci_frame = self.__sample_space.sample_to_frame(mean_lower_ci)
+        mean_lower_ci_frame.set_index(self.__forecast_frame.index, inplace=True)
+
+        mean_upper_ci_frame = self.__sample_space.sample_to_frame(mean_upper_ci)
+        mean_upper_ci_frame.set_index(self.__forecast_frame.index, inplace=True)
+
+        variance_frame = self.__sample_space.sample_to_frame(population_variance)
+        variance_frame.set_index(self.__forecast_frame.index, inplace=True)
+
+        variance_lower_ci_frame = self.__sample_space.sample_to_frame(variance_lower_ci)
+        variance_lower_ci_frame.set_index(self.__forecast_frame.index, inplace=True)
+
+        variance_upper_ci_frame = self.__sample_space.sample_to_frame(variance_upper_ci)
+        variance_upper_ci_frame.set_index(self.__forecast_frame.index, inplace=True)
+
+        return MeanVarianceResult(confidence,
+                                  mean_frame, mean_lower_ci_frame, mean_upper_ci_frame,
+                                  variance_frame, variance_lower_ci_frame, variance_upper_ci_frame)
+
+    @property
+    def num_samples(self):
+        return self.__weather_samples.shape[1]
 
 
 class CoregionalizationModel:
@@ -215,7 +479,8 @@ class HeteroscedasticAutoCorrelatedNoiseModel:
         rows = []
         for city in self.__forecast_frame.columns:
             city_covariance = self.__city_covariance[city]
-            prediction = self.__forecast_frame[city].values + numpy.random.multivariate_normal(numpy.zeros(city_covariance.shape[0]), city_covariance)
+            prediction = self.__forecast_frame[city].values + numpy.random.multivariate_normal(numpy.zeros(city_covariance.shape[0]),
+                                                                                               city_covariance)
             for time_delta, value in zip(self.__forecast_frame.index, prediction):
                 rows.append([city, time_delta, value])
         sample_frame = pandas.DataFrame(data=rows, columns=['City', 'DateTime', 'y'])

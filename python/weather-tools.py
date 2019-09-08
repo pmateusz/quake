@@ -25,15 +25,12 @@ import concurrent.futures
 import concurrent.futures.process
 import copy
 import datetime
-import pickle
 import json
 import logging
 import os
-import random
 import subprocess
 import warnings
 
-import scipy.stats
 import matplotlib.colors
 import matplotlib.dates
 import matplotlib.offsetbox
@@ -49,9 +46,9 @@ import quake.city
 import quake.weather.cache
 import quake.weather.metadata
 import quake.weather.problem
+import quake.weather.scenarios
 import quake.weather.solution
 import quake.weather.time_period
-import quake.weather.scenarios
 
 BUILD_CACHE_COMMAND = 'build-cache'
 PLOT_COMMAND = 'plot-cloud-cover'
@@ -109,7 +106,7 @@ def parse_args():
     generate_parser.add_argument('--problem-prefix')
     generate_parser.add_argument('--num-scenarios', default=0, type=int)
     generate_parser.add_argument('--scenario-generator',
-                                 choices=quake.weather.scenarios.ScenarioGeneratorFactory.MODEL_NAMES, required=True)
+                                 choices=quake.weather.scenarios.ScenarioGeneratorFactory.MODEL_NAMES, required=False)
 
     plot_forecast_parser = sub_parsers.add_parser(PLOT_FORECAST_COMMAND)
     plot_forecast_parser.add_argument('--from', action=ParseDateAction)
@@ -276,31 +273,23 @@ def compute_vector_auto_regression(args):
 
 
 def extend_problem_definition(args):
+    # insert mean, variance and confidence intervals using bootstrap
+
     problem_file = getattr(args, 'problem_file')
     output_file = getattr(args, 'output')
     num_scenarios = getattr(args, 'num_scenarios')
     scenario_generator_name = getattr(args, 'scenario_generator')
 
-    def __generate_var_model(weather_cache, forecast_start, look_behind):
-        sample_end = forecast_start
-        sample_start = forecast_start - look_behind
-        forecast_frame = weather_cache.forecast_frame.loc[
-                         pandas.IndexSlice[sample_start:sample_end, weather_cache.ZERO_TIME_DELTA], :].copy()
-        forecast_frame.reset_index(inplace=True)
-        forecast_frame.drop(columns=['Delay', 'Description'], inplace=True)
-        pivot_frame = forecast_frame.pivot_table(columns=['City'], values=['CloudCover'], index=['DateTime'])
-        pivot_frame.columns = pivot_frame.columns.droplevel()
-        pivot_frame = weather_cache.fill_missing_values(pivot_frame)
-
-        cities = [column for column in pivot_frame.columns if isinstance(column, quake.city.City)]
-        if len(pivot_frame) > 1:
-            model = statsmodels.tsa.api.VAR(pivot_frame)
+    def __generate_var_model(frame):
+        cities = [column for column in frame.columns if isinstance(column, quake.city.City)]
+        if len(frame) > 1:
+            model = statsmodels.tsa.api.VAR(frame)
             result = model.fit()
             params = result.params
             stderr = result.stderr
             stderr_residuals = result.resid.std()
             stderr_mean = result.resid.mean()
-            corr = pivot_frame.corr()
+            corr = frame.corr()
         else:
             rows_index = ['const']
             params_data = [numpy.zeros(len(cities)).tolist()]
@@ -319,42 +308,67 @@ def extend_problem_definition(args):
             corr = pandas.DataFrame(data=numpy.identity(len(cities)), columns=cities, index=cities)
 
         model_data = {}
-        for station in cities:
-            station_data = dict()
-            station_data['residual'] = {'value': stderr_mean[station], 'stderr': stderr_residuals[station]}
-            station_params = params[station]
-            station_stderr = stderr[station]
-            station_corr = corr[station]
+        for city in cities:
+            city_data = dict()
+            city_data['residual'] = {'value': stderr_mean[city], 'stderr': stderr_residuals[city]}
+            city_params = params[city]
+            city_stderr = stderr[city]
+            city_corr = corr[city]
 
-            for index_value in station_params.index:
+            for index_value in city_params.index:
                 terms = index_value.split('.')
                 if len(terms) == 1:
                     assert terms[0] == 'const'
-                    station_data['const'] = {'value': station_params[index_value],
-                                             'stderr': station_stderr[index_value]}
+                    city_data['const'] = {'value': city_params[index_value],
+                                          'stderr': city_stderr[index_value]}
                 elif len(terms) == 2:
                     assert terms[0] == 'L1'
                     other_station_name = terms[1]
                     other_station = quake.city.from_name(terms[1])
-                    station_data[other_station_name] = {'L1': station_params[index_value],
-                                                        'L1.stderr': station_stderr[index_value],
-                                                        'corr': station_corr[other_station]}
+                    city_data[other_station_name] = {'L1': city_params[index_value],
+                                                     'L1.stderr': city_stderr[index_value],
+                                                     'corr': city_corr[other_station]}
                 else:
                     raise RuntimeError('Invalid number of terms')
-            model_data[station.name] = station_data
+            model_data[city.name] = city_data
         return model_data
+
+    def __generate_var_model_from_forecast(weather_cache, forecast_start, look_behind):
+        sample_end = forecast_start
+        sample_start = forecast_start - look_behind
+        data_source = weather_cache.forecast_frame.loc[
+                      pandas.IndexSlice[sample_start:sample_end, weather_cache.ZERO_TIME_DELTA], :].copy()
+        data_source.reset_index(inplace=True)
+        data_source.drop(columns=['Delay', 'Description'], inplace=True)
+        pivot_frame = data_source.pivot_table(columns=['City'], values=['CloudCover'], index=['DateTime'])
+        pivot_frame.columns = pivot_frame.columns.droplevel()
+        pivot_frame = weather_cache.fill_missing_values(pivot_frame)
+        return __generate_var_model(pivot_frame)
+
+    def __generate_var_model_from_observation(weather_cache, datetime_start, datetime_end):
+        data_source = weather_cache.observation_frame[(weather_cache.observation_frame['date_time'] >= datetime_start)
+                                                      & (weather_cache.observation_frame['date_time'] <= datetime_end)].copy()
+        data_source['City'] = data_source['city_name'].apply(quake.city.from_name)
+        pivot_frame = data_source.pivot_table(columns=['City'], index=['date_time'], values=['clouds_all'])
+        pivot_frame.columns = pivot_frame.columns.droplevel()
+        pivot_frame = weather_cache.fill_missing_values(pivot_frame)
+        return __generate_var_model(pivot_frame)
 
     with open(problem_file, 'r') as input_stream:
         json_object = json.load(input_stream)
         problem = quake.weather.problem.Problem(json_object)
 
-    weather_cache = quake.weather.cache.WeatherCache()
+    weather_cache = quake.weather.cache.WeatherCache(load_historical_observations=True)
     weather_cache.load()
 
-    forecast_frame = weather_cache.get_closest_forecast_frame(problem.observation_period.begin,
-                                                              problem.observation_period.length)
-    real_frame = weather_cache.get_observation_frame(problem.observation_period.begin,
-                                                     problem.observation_period.length)
+    # get forecast at midday of the requested day and finish at midday of the next day
+    noon_time = datetime.time(12, 0, 0)
+    forecast_start = datetime.datetime.combine(problem.observation_period.begin.date(), noon_time)
+    forecast_end = datetime.datetime.combine((problem.observation_period.end + datetime.timedelta(days=1)).date(), noon_time)
+    forecast_length = forecast_end - forecast_start
+
+    forecast_frame = weather_cache.get_closest_forecast_frame(forecast_start, forecast_length)
+    real_frame = weather_cache.get_observation_frame(forecast_start, forecast_length)
 
     forecast_frame = weather_cache.fill_missing_values(forecast_frame)
     real_frame = weather_cache.fill_missing_values(real_frame)
@@ -362,10 +376,8 @@ def extend_problem_definition(args):
     min_time = max(forecast_frame.index.min(), real_frame.index.min())
     max_time = min(forecast_frame.index.max(), real_frame.index.max())
 
-    if problem.observation_period.begin < min_time or problem.observation_period.end > max_time:
-        assert problem.observation_period.begin <= min_time
-        assert problem.observation_period.end >= max_time
-        total_reduction = (min_time - problem.observation_period.begin) + (problem.observation_period.end - max_time)
+    if forecast_start < min_time or forecast_end > max_time:
+        total_reduction = (min_time - forecast_start) + (forecast_end - max_time)
         if total_reduction > datetime.timedelta(hours=3):
             warnings.warn('Problem observation period is reduced from [{0}, {1}] to [{2}, {3}]'.format(
                 problem.observation_period.begin,
@@ -373,35 +385,50 @@ def extend_problem_definition(args):
                 min_time,
                 max_time))
 
-    std_frame = weather_cache.get_std_frame()
-    assert len(std_frame) >= len(forecast_frame)
-    if len(std_frame) > len(forecast_frame):
-        std_frame = std_frame.iloc[:len(forecast_frame)]
+    def trim_to_time_interval(frame):
+        return frame[(frame.index >= min_time) & (frame.index <= max_time)].copy()
 
-    model_factory = quake.weather.scenarios.ScenarioGeneratorFactory()
+    forecast_frame = trim_to_time_interval(forecast_frame)
+    real_frame = trim_to_time_interval(real_frame)
+    assert numpy.all(forecast_frame.index == real_frame.index)
 
-    def value_range(value):
-        return max(0.0, min(100.0, value))
-
-    def enforce_cloud_cover_limits(frame):
-        frame_to_use = frame.copy()
-        for column in frame.columns:
-            frame_to_use[column] = frame_to_use[column].apply(value_range)
-        return frame_to_use
+    scenario_generator = quake.weather.scenarios.PastErrorsScenarioGenerator(weather_cache, forecast_frame)
+    scenario_generator.optimize()
 
     scenario_frames = []
-    if num_scenarios > 0:
-        generation_model = model_factory.create_model(scenario_generator_name, weather_cache, forecast_frame)
-        generation_model.optimize()
+    if scenario_generator_name != quake.weather.scenarios.ScenarioGeneratorFactory.PAST_ERRORS_MODEL_NAME:
+        model_factory = quake.weather.scenarios.ScenarioGeneratorFactory()
 
-        sample_frames = generation_model.samples(num_scenarios)
-        for sample_frame in sample_frames:
-            scenario_frame = sample_frame.pivot_table(index='DateTime', columns='City', values='y')
-            scenario_frame = enforce_cloud_cover_limits(scenario_frame)
-            scenario_frames.append(scenario_frame)
+        def value_range(value):
+            return max(0.0, min(100.0, value))
 
-    def trim_to_time_interval(frame):
-        return frame[(frame.index >= min_time) & (frame.index <= max_time)]
+        def enforce_cloud_cover_limits(frame):
+            frame_to_use = frame.copy()
+            for column in frame.columns:
+                frame_to_use[column] = frame_to_use[column].apply(value_range)
+            return frame_to_use
+
+        if num_scenarios > 0:
+            generation_model = model_factory.create_model(scenario_generator_name, weather_cache, forecast_frame)
+            generation_model.optimize()
+
+            sample_frames = generation_model.samples(num_scenarios)
+            for sample_frame in sample_frames:
+                scenario_frame = sample_frame.pivot_table(index='DateTime', columns='City', values='y')
+                scenario_frame = enforce_cloud_cover_limits(scenario_frame)
+                scenario_frames.append(scenario_frame)
+    else:
+        scenario_frames = scenario_generator.samples(num_scenarios)
+
+    for scenario_frame in scenario_frames:
+        assert numpy.all(scenario_frame.index == real_frame.index)
+
+    time_zone = datetime.timezone(offset=datetime.timedelta())
+    var_model = __generate_var_model_from_observation(weather_cache,
+                                                      datetime.datetime(2018, 1, 1, tzinfo=time_zone),
+                                                      datetime.datetime(2019, 1, 1, tzinfo=time_zone))
+
+    mean_variance_result = scenario_generator.bootstrap_mean_variance(10000)
 
     updated_problem = copy.deepcopy(problem)
     updated_problem.trim_observation_period(quake.weather.time_period.TimePeriod(min_time, max_time))
@@ -413,24 +440,8 @@ def extend_problem_definition(args):
 
     updated_problem.set_metadata('scenarios_number', len(scenario_frames))
     updated_problem.set_metadata('scenario_generator', scenario_generator_name)
-
-    generation_model = model_factory.create_model(
-        quake.weather.scenarios.ScenarioGeneratorFactory.COREGIONALIZATION_MODEL_NAME, weather_cache,
-        forecast_frame)
-    var_model = __generate_var_model(weather_cache, min_time, datetime.timedelta(days=28))
-    fitted_frame = generation_model.optimize()
-    for station in fitted_frame['City'].unique():
-        city_frame = fitted_frame[fitted_frame['City'] == station].copy()
-        city_frame.set_index('DateTime', inplace=True)
-        city_frame.drop_duplicates(inplace=True)
-        var_model[station.name]['lower'] \
-            = city_frame[forecast_frame.index.min():forecast_frame.index.max()]['yhat_lower'].apply(
-            value_range).values.tolist()
-        var_model[station.name]['upper'] \
-            = city_frame[forecast_frame.index.min():forecast_frame.index.max()]['yhat_upper'].apply(
-            value_range).values.tolist()
-        var_model[station.name]['stderr'] = std_frame[station].values.tolist()
     updated_problem.set_var_model(var_model)
+    updated_problem.set_mean_variance(mean_variance_result)
 
     with open(output_file, 'w') as output_file:
         json.dump(updated_problem.json_object, output_file)
@@ -438,6 +449,7 @@ def extend_problem_definition(args):
 
 def generate_command(args):
     GENERATE_PROGRAM_PATH = '/home/pmateusz/dev/quake/cmake-build-debug/quake-generate'
+    TEMP_SUFFIX = '_temp'
 
     problem_prefix_arg = getattr(args, 'problem_prefix')
     from_date_arg = getattr(args, 'from')
@@ -455,10 +467,8 @@ def generate_command(args):
 
         current_date = next_date
 
-    temp_suffix = '_v0'
     for from_date, to_date, problem in configurations:
-
-        temp_problem = problem + temp_suffix
+        temp_problem = problem + TEMP_SUFFIX
         subprocess.run([GENERATE_PROGRAM_PATH,
                         '--from={0}'.format(from_date.date()),
                         '--to={0}'.format(to_date.date()),
@@ -867,168 +877,6 @@ def analyze_command(args):
         writer.save()
 
 
-class SampleSpace:
-    NUM_OBSERVATIONS = 40
-
-    class CachingSampler:
-        def __init__(self, mean, covariance, pool_size=100000):
-            self.__mean = mean
-            self.__covariance = covariance
-            self.__pool_size = pool_size
-
-            self.__pool = None
-            self.__counter = 0
-
-        def __call__(self):
-            if self.__pool is None or self.__counter >= self.__pool.shape[1]:
-                self.__pool = numpy.random.multivariate_normal(self.__mean, self.__covariance, size=self.__pool_size).transpose()
-                self.__counter = 0
-            sample = self.__pool[:, self.__counter]
-            self.__counter += 1
-            return sample
-
-    def __init__(self, frames: list):
-        samples = [self.frame_to_sample(frame) for frame in frames]
-        self.__sample_matrix = numpy.column_stack(samples)
-        self.__sum_of_squares = numpy.sum(self.__sample_matrix ** 2, axis=0)
-        self.__mean = numpy.zeros(self.__sample_matrix.shape[0])
-
-        test_covariance = numpy.cov(self.__sample_matrix)
-        test_mean = numpy.mean(self.__sample_matrix, axis=1)
-        self.__test_normal = scipy.stats.multivariate_normal(test_mean, test_covariance, allow_singular=True)
-
-        variances = []
-        for row_index in range(self.__sample_matrix.shape[0]):
-            variances.append(numpy.var(self.__sample_matrix[row_index, :]))
-        self.__covariance = numpy.diag(variances)
-
-        # variances = numpy.full(self.__sample_matrix.shape[0], 4.0)
-        # self.__covariance = numpy.diag(variances)
-
-    def generate_sample(self, num_samples):
-        matrix = self.__sample_matrix
-        for _ in range(num_samples):
-            weights = numpy.random.uniform(0.0, 0.1, self.__sample_matrix.shape[1])
-            scenario = self.__sample_matrix * weights.T
-            print('here')
-
-        return []
-
-    def mgaussian_sample(self, num_samples):
-        samples = self.__test_normal.rvs(num_samples)
-        return [self.sample_to_frame(sample) for sample in samples]
-
-    def mcmc_sample(self, num_samples, burn_in_period=5000, independent_sample_step=1000):
-        generator = random.Random(0)
-        sampler = SampleSpace.CachingSampler(self.__mean, self.__covariance)
-        accept_counter = 0
-        reject_counter = 0
-
-        iterations = burn_in_period + independent_sample_step * num_samples
-        samples = []
-        current_sample = self.__sample_matrix[:, generator.randint(0, self.__sample_matrix.shape[1])]
-        current_sample_probability = self.probability(current_sample)
-        with tqdm.tqdm(range(iterations), leave=False) as iterator:
-            for _ in iterator:
-                raw_sample = sampler()
-                candidate_sample = current_sample + raw_sample
-                candidate_sample_probability = self.probability(candidate_sample)
-                probability_ratio = candidate_sample_probability / current_sample_probability
-
-                accept_threshold = min(1.0, probability_ratio)
-                if accept_threshold < 1.0:
-                    # consider rejection
-                    test_result = generator.uniform(0.0, 1.0)
-                    if test_result > accept_threshold:
-                        # rejection - continue using the same sample
-                        reject_counter += 1
-                        samples.append(current_sample)
-                        continue
-                # must accept
-                accept_counter += 1
-                current_sample = candidate_sample
-                current_sample_probability = candidate_sample_probability
-                samples.append(current_sample)
-
-        logging.info('Metropolis accept vs. reject ration: (%d, %d)', accept_counter, reject_counter)
-
-        shortlisted_samples = samples[burn_in_period:]
-        shortlisted_samples = shortlisted_samples[::independent_sample_step]
-
-        assert len(shortlisted_samples) == num_samples
-
-        return [self.sample_to_frame(sample) for sample in shortlisted_samples]
-
-    def probability(self, sample: numpy.array) -> float:
-        max_value = numpy.max(sample)
-        if max_value > 100.0:
-            return 0.0
-
-        min_value = numpy.min(sample)
-        if min_value < -100.0:
-            return 0.0
-
-        return 1.0 / (self.distance(sample) + 1.0)
-
-    def distance(self, sample: numpy.array):
-        return numpy.sum(-2 * numpy.dot(sample, self.__sample_matrix)
-                         + numpy.sum(sample ** 2, axis=0)
-                         + self.__sum_of_squares)
-
-    @property
-    def data(self):
-        frames = []
-
-        for sample_index in range(self.__sample_matrix.shape[1]):
-            frame = self.sample_to_frame(self.__sample_matrix[:, sample_index])
-            frames.append(frame)
-
-        return frames
-
-    @property
-    def samples(self):
-        return self.__sample_matrix
-
-    def __slow_distance(self, sample: numpy.array):
-        distances = []
-        for sample_index in range(self.__sample_matrix.shape[1]):
-            distances.append(numpy.sum((self.__sample_matrix[:, sample_index] - sample) ** 4))
-        return numpy.sum(distances)
-
-    @staticmethod
-    def frame_to_sample(frame: pandas.DataFrame) -> numpy.array:
-        if not (frame.index.size == SampleSpace.NUM_OBSERVATIONS and frame.index.inferred_freq == '3H' and not frame.index.has_duplicates):
-            raise ValueError('Frame may have missing values')
-
-        sample = []
-        for city in quake.city.ALL:
-            sample.extend(frame[city].values)
-
-        return numpy.array(sample)
-
-    @staticmethod
-    def sample_to_frame(sample: numpy.array) -> pandas.DataFrame:
-        current_delay = datetime.timedelta()
-        delay_step = datetime.timedelta(hours=3)
-        rows = []
-        index = []
-        for offset in range(SampleSpace.NUM_OBSERVATIONS):
-            row = sample[offset::SampleSpace.NUM_OBSERVATIONS].flatten()
-
-            assert len(row) == len(quake.city.ALL)
-
-            rows.append(row)
-            index.append(current_delay)
-
-            current_delay += delay_step
-
-        assert current_delay == datetime.timedelta(hours=120)
-
-        frame = pandas.DataFrame(index=index, data=rows, columns=quake.city.ALL)
-
-        return frame
-
-
 if __name__ == '__main__':
     args = parse_args()
     command = getattr(args, 'command')
@@ -1054,19 +902,7 @@ if __name__ == '__main__':
     elif command == ANALYZE_COMMAND:
         analyze_command(args)
 
-    if os.path.exists('sample.pickle'):
-        with open('sample.pickle', 'rb') as file_stream:
-            filter_frames = pickle.load(file_stream)
-    else:
-        weather_cache = quake.weather.cache.WeatherCache()
-        weather_cache.load()
-        error_frames = weather_cache.get_error_frames(weather_cache.get_forecast_time_points())
-        filter_frames = [error_frame for error_frame in error_frames if len(error_frame) == 40]
-        with open('sample.pickle', 'wb') as file_stream:
-            pickle.dump(filter_frames, file_stream)
-
-    sample_space = SampleSpace(filter_frames)
-    new_samples = sample_space.generate_sample(25)
+    import matplotlib.cm
 
 
     def draw_joint_distribution(city_x, city_y, delay, samples):
@@ -1079,7 +915,14 @@ if __name__ == '__main__':
             error_x.append(sample.loc[delay][city_x])
             error_y.append(sample.loc[delay][city_y])
 
-        ax.scatter(error_x, error_y)
+        heatmap, xedges, yedges = numpy.histogram2d(error_x, error_y, bins=25, density=True, range=[[-100.0, 100.0], [-100.0, 100.0]])
+        extent = [xedges[0], xedges[-1], yedges[0], yedges[-1]]
+        im = ax.imshow(heatmap.T, extent=extent, origin='lower', cmap=matplotlib.cm.viridis)
+        matplotlib.pyplot.colorbar(im)
+
+        # ax.scatter(error_x, error_y, s=2)
+        # ax.set_xlim([-100, 100])
+        # ax.set_ylim([-100, 100])
 
         return fig
 
@@ -1098,24 +941,21 @@ if __name__ == '__main__':
     city_x = quake.city.LONDON
     city_y = quake.city.CAMBRIDGE
 
-    data = sample_space.data
 
+    # data = sample_space.data
     # for hour_delay in tqdm.tqdm(range(0, 12, 3), desc='Plotting'):
     #     current_delay = datetime.timedelta(hours=hour_delay)
     #     data_figure = draw_joint_distribution(city_x, city_y, current_delay, data)
     #     data_figure.savefig('slice_joint_dist_{0}_{1}_H{2}_data.png'.format(city_x.name, city_y.name, hour_delay))
     #     matplotlib.pyplot.close(data_figure)
-
-    # marginal_data_figure = draw_marginal_distribution(city_x, current_delay, data)
-    # marginal_data_figure.savefig('marginal_dist_{0}_H{1}_sample.png'.format(city_x.name, hour_delay))
-    # matplotlib.pyplot.close(marginal_data_figure)
-
-    # sample_figure = draw_joint_distribution(city_x, city_y, current_delay, new_samples)
-    # sample_figure.savefig('slice_joint_dist_{0}_{1}_H{2}_sample.png'.format(city_x.name, city_y.name, hour_delay))
-    # matplotlib.pyplot.close(sample_figure)
-
-    print('here')
-
+    #
+    #     # marginal_data_figure = draw_marginal_distribution(city_x, current_delay, data)
+    #     # marginal_data_figure.savefig('marginal_dist_{0}_H{1}_sample.png'.format(city_x.name, hour_delay))
+    #     # matplotlib.pyplot.close(marginal_data_figure)
+    #
+    #     sample_figure = draw_joint_distribution(city_x, city_y, current_delay, new_samples)
+    #     sample_figure.savefig('slice_joint_dist_{0}_{1}_H{2}_sample.png'.format(city_x.name, city_y.name, hour_delay))
+    #     matplotlib.pyplot.close(sample_figure)
 
     def plot_errors(station, begin_start_time, end_start_time):
         weather_cache = quake.weather.cache.WeatherCache()

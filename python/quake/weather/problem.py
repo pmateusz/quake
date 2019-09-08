@@ -7,11 +7,13 @@ import pandas
 import quake.city
 import quake.cloud_cover
 import quake.weather.metadata
+import quake.weather.scenarios
 import quake.weather.time_period
 
 
 class Problem:
     FORECASTS_KEY = 'forecasts'
+    DECIMAL_PLACES = 3
 
     def __init__(self, json_object):
         self.__json_object = json_object
@@ -48,8 +50,6 @@ class Problem:
         self.__json_object['metadata'] = quake.weather.metadata.to_json(metadata)
 
     def set_var_model(self, var_model):
-        decimal_places = 3
-
         var_model_to_use = []
         for station in var_model:
             station_object = dict()
@@ -58,18 +58,46 @@ class Problem:
                     converted_values = {}
                     for key, value in item[1].items():
                         if isinstance(value, float):
-                            converted_values[key] = round(value, decimal_places)
+                            converted_values[key] = round(value, self.DECIMAL_PLACES)
                         else:
                             converted_values[key] = value
                     station_object[item[0]] = converted_values
                 else:
                     if isinstance(item[1], list):
-                        station_object[item[0]] = [round(value, decimal_places) for value in item[1]]
+                        station_object[item[0]] = [round(value, self.DECIMAL_PLACES) for value in item[1]]
                     else:
                         station_object[item[0]] = item[1]
             var_model_to_use.append([station, station_object])
 
         self.__json_object['var_model'] = var_model_to_use
+
+    def set_mean_variance(self, mean_variance_result: quake.weather.scenarios.MeanVarianceResult):
+        model_to_use = dict()
+        model_to_use['confidence'] = mean_variance_result.confidence_interval
+        model_to_use['index'] = [str(value) for value in mean_variance_result.mean.index.values]
+
+        mean_frame = mean_variance_result.mean.round(self.DECIMAL_PLACES)
+        mean_lower_frame = mean_variance_result.mean_lower.round(self.DECIMAL_PLACES)
+        mean_upper_frame = mean_variance_result.mean_upper.round(self.DECIMAL_PLACES)
+        variance_frame = mean_variance_result.variance.round(self.DECIMAL_PLACES)
+        variance_lower_frame = mean_variance_result.variance_lower.round(self.DECIMAL_PLACES)
+        variance_upper_frame = mean_variance_result.variance_upper.round(self.DECIMAL_PLACES)
+
+        for city in mean_variance_result.mean.columns:
+            if not isinstance(city, quake.city.City):
+                continue
+
+            city_model = dict()
+            city_model['mean'] = mean_frame[city].tolist()
+            city_model['mean_lower'] = mean_lower_frame[city].tolist()
+            city_model['mean_upper'] = mean_upper_frame[city].tolist()
+            city_model['variance'] = variance_frame[city].tolist()
+            city_model['variance_lower'] = variance_lower_frame[city].tolist()
+            city_model['variance_upper'] = variance_upper_frame[city].tolist()
+
+            model_to_use[city.name] = city_model
+
+        self.__json_object['mean_variance_model'] = model_to_use
 
     def get_scenario(self, scenario_name):
         forecasts_json = self.__json_object['forecasts']
