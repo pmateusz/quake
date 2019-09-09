@@ -296,14 +296,18 @@ quake::RobustIndexMipModel::RobustIndexMipCallback::CreateCloudCoverVariables(co
         return {};
     }
 
-    const auto &lower_bound = model_.problem_->VarModel(station).LowerBound;
-    const auto &upper_bound = model_.problem_->VarModel(station).UpperBound;
+    LOG(FATAL) << "Not implemented";
+
+//    const auto &lower_bound = model_.problem_->VarModel(station).LowerBound;
+//    const auto &upper_bound = model_.problem_->VarModel(station).UpperBound;
 
     std::vector<GRBVar> cloud_cover_vars;
     cloud_cover_vars.reserve(num_variables);
     for (auto variable_index = 0; variable_index < num_variables; ++variable_index) {
-        const auto min_value = lower_bound.at(variable_index) / 100.0;
-        const auto max_value = upper_bound.at(variable_index) / 100.0;
+        const auto min_value = 0.0;
+        const auto max_value = 1.0;
+//        const auto min_value = lower_bound.at(variable_index) / 100.0;
+//        const auto max_value = upper_bound.at(variable_index) / 100.0;
 
         CHECK_GE(min_value, 0.0);
         CHECK_LE(min_value, 1.0);

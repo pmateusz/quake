@@ -417,8 +417,11 @@ std::vector<std::vector<GRBVar> > quake::RobustVarIndexMipModel::RobustVarIndexM
         const auto station_index = model_.Index(station);
         cloud_cover_variables.at(station_index).reserve(num_time_steps);
         for (auto time_step = 0; time_step < num_time_steps; ++time_step) {
-            const auto min_value = var_model.LowerBound.at(time_step) / 100.0;
-            const auto max_value = var_model.UpperBound.at(time_step) / 100.0;
+            const auto min_value = 0.0;
+            const auto max_value = 1.0;
+            LOG(FATAL) << "Not implemented";
+            //            const auto min_value = var_model.LowerBound.at(time_step) / 100.0;
+//            const auto max_value = var_model.UpperBound.at(time_step) / 100.0;
 
             CHECK_LE(min_value, 1.0);
             CHECK_GE(min_value, 0.0);

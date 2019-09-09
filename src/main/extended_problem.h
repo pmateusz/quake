@@ -81,6 +81,8 @@ namespace quake {
                       KeyConsumption{key_consumption},
                       CommunicationWindows{std::move(communication_windows)} {}
 
+            StationData Trim(const boost::posix_time::time_period &time_period) const;
+
             GroundStation Station;
             double TransferShare;
             int InitialBuffer;
@@ -106,10 +108,64 @@ namespace quake {
             Parameter Residual;
             std::unordered_map<GroundStation, Parameter> Parameters;
             std::unordered_map<GroundStation, double> Correlations;
-            std::vector<double> LowerBound;
-            std::vector<double> UpperBound;
-            // sample standard deviation
-            std::vector<double> StandardDeviation;
+        };
+
+        struct MeanVarianceModel {
+        public:
+            using Series = SparseSeries<double>;
+
+            struct StationMeanVarianceModel {
+            public:
+                StationMeanVarianceModel(const boost::posix_time::time_duration &update_frequency,
+                                         const boost::posix_time::time_period &time_period,
+                                         std::vector<double> mean,
+                                         std::vector<double> mean_lower,
+                                         std::vector<double> mean_upper,
+                                         std::vector<double> variance,
+                                         std::vector<double> variance_lower,
+                                         std::vector<double> variance_upper)
+                        : Mean{update_frequency, time_period, std::move(mean)},
+                          MeanLower{update_frequency, time_period, std::move(mean_lower)},
+                          MeanUpper{update_frequency, time_period, std::move(mean_upper)},
+                          Variance{update_frequency, time_period, std::move(variance)},
+                          VarianceLower{update_frequency, time_period, std::move(variance_lower)},
+                          VarianceUpper{update_frequency, time_period, std::move(variance_upper)} {}
+
+                StationMeanVarianceModel(Series mean,
+                                         Series mean_lower,
+                                         Series mean_upper,
+                                         Series variance,
+                                         Series variance_lower,
+                                         Series variance_upper)
+                        : Mean{std::move(mean)},
+                          MeanLower{std::move(mean_lower)},
+                          MeanUpper{std::move(mean_upper)},
+                          Variance{std::move(variance)},
+                          VarianceLower{std::move(variance_lower)},
+                          VarianceUpper{std::move(variance_upper)} {}
+
+                StationMeanVarianceModel Trim(const boost::posix_time::time_period &time_period) const;
+
+                Series Mean;
+                Series MeanLower;
+                Series MeanUpper;
+                Series Variance;
+                Series VarianceLower;
+                Series VarianceUpper;
+            };
+
+            MeanVarianceModel()
+                    : MeanVarianceModel(0.0, {}) {}
+
+            MeanVarianceModel(double confidence_interval,
+                              std::unordered_map<GroundStation, StationMeanVarianceModel> index)
+                    : ConfidenceInterval{confidence_interval},
+                      Index{std::move(index)} {}
+
+            MeanVarianceModel Trim(const boost::posix_time::time_period &time_period) const;
+
+            double ConfidenceInterval;
+            std::unordered_map<GroundStation, StationMeanVarianceModel> Index;
         };
 
         ExtendedProblem();
@@ -126,6 +182,8 @@ namespace quake {
         ExtendedProblem static load_json(const boost::filesystem::path &path);
 
         ExtendedProblem Round(unsigned int decimal_places) const;
+
+        ExtendedProblem Trim(const boost::posix_time::time_period &time_period) const;
 
         inline const std::vector<GroundStation> &Stations() const { return stations_; }
 
@@ -169,6 +227,7 @@ namespace quake {
         ExtendedProblem(Metadata metadata,
                         std::vector<StationData> station_data,
                         std::unordered_map<std::string, Forecast> forecasts,
+                        MeanVarianceModel mean_variance_model,
                         std::unordered_map<quake::GroundStation, ExtendedProblem::StationVarModel> var_model);
 
         double KeyRate(const GroundStation &station,
@@ -187,7 +246,8 @@ namespace quake {
         Metadata metadata_;
 
         std::vector<GroundStation> stations_;
-        std::unordered_map<quake::GroundStation, ExtendedProblem::StationVarModel> var_model_;
+        MeanVarianceModel mean_variance_model_;
+        std::unordered_map<GroundStation, ExtendedProblem::StationVarModel> var_model_;
     };
 
     void from_json(const nlohmann::json &json, ExtendedProblem &problem);
@@ -199,6 +259,8 @@ namespace quake {
     void from_json(const nlohmann::json &json, ExtendedProblem::StationVarModel &station_var_model);
 
     void from_json(const nlohmann::json &json, ExtendedProblem::StationVarModel::Parameter &parameter);
+
+    void from_json(const nlohmann::json &json, ExtendedProblem::MeanVarianceModel &mean_variance_model);
 
     void to_json(nlohmann::json &json, const ExtendedProblem &problem);
 

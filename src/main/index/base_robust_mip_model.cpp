@@ -30,14 +30,15 @@ quake::BaseRobustMipModel::BaseRobustMipModel(const quake::ExtendedProblem *prob
         cloud_cover_periods_ = std::move(cloud_cover_periods);
     }
 
-    // check var model
-    {
-        for (const auto &station : ObservableStations()) {
-            const auto &var_model = problem_->VarModel(station);
-            CHECK_EQ(var_model.LowerBound.size(), cloud_cover_periods_.size());
-            CHECK_EQ(var_model.UpperBound.size(), cloud_cover_periods_.size());
-        }
-    }
+    LOG(FATAL) << "Fix code below";
+// check var model
+//    {
+//        for (const auto &station : ObservableStations()) {
+//            const auto &var_model = problem_->VarModel(station);
+//            CHECK_EQ(var_model.LowerBound.size(), cloud_cover_periods_.size());
+//            CHECK_EQ(var_model.UpperBound.size(), cloud_cover_periods_.size());
+//        }
+//    }
 
     // create time periods for observable cloud cover measurements
     {
@@ -102,11 +103,13 @@ const std::vector<boost::posix_time::time_period> &quake::BaseRobustMipModel::Ob
 }
 
 double quake::BaseRobustMipModel::CloudCoverLowerBound(const quake::GroundStation &station, const boost::posix_time::time_period &period) const {
-    return GetCloudCoverValue(problem_->VarModel(station).LowerBound, period);
+    LOG(FATAL) << "Not implemented";
+    return 0;
 }
 
 double quake::BaseRobustMipModel::CloudCoverUpperBound(const quake::GroundStation &station, const boost::posix_time::time_period &period) const {
-    return GetCloudCoverValue(problem_->VarModel(station).UpperBound, period);
+    LOG(FATAL) << "Not implemented";
+    return 0;
 }
 
 double normalize_cloud_cover_value(double value) {
@@ -128,29 +131,34 @@ double cloud_cover_std_to_variance(double std) {
 }
 
 double quake::BaseRobustMipModel::CloudCoverVariance(const quake::GroundStation &station, const boost::posix_time::time_period &period) const {
-    const auto index = CloudCoverIndex(period);
-    const auto standard_deviation = problem_->VarModel(station).StandardDeviation.at(index);
-
-    if (index == 0) {
-        CHECK_GE(standard_deviation, 0.0);
-    } else {
-        CHECK_GT(standard_deviation, 0.0);
-    }
-
-    return cloud_cover_std_to_variance(standard_deviation);
+    LOG(FATAL) << "Fix code below";
+    return 0;
+    //    const auto index = CloudCoverIndex(period);
+//    const auto standard_deviation = problem_->VarModel(station).StandardDeviation.at(index);
+//
+//    if (index == 0) {
+//        CHECK_GE(standard_deviation, 0.0);
+//    } else {
+//        CHECK_GT(standard_deviation, 0.0);
+//    }
+//
+//    return cloud_cover_std_to_variance(standard_deviation);
 }
 
 double quake::BaseRobustMipModel::CloudCoverVarianceLowerBound() const {
-    auto variance_lower_bound = std::numeric_limits<double>::max();
-    for (const auto &station : Stations()) {
-        if (station == GroundStation::None) { continue; }
+    LOG(FATAL) << "Fix code below";
+    return 0;
 
-        for (const auto standard_deviation : problem_->VarModel(station).StandardDeviation) {
-            variance_lower_bound = std::min(cloud_cover_std_to_variance(standard_deviation), variance_lower_bound);
-        }
-    }
-
-    return variance_lower_bound;
+//    auto variance_lower_bound = std::numeric_limits<double>::max();
+//    for (const auto &station : Stations()) {
+//        if (station == GroundStation::None) { continue; }
+//
+//        for (const auto standard_deviation : problem_->VarModel(station).StandardDeviation) {
+//            variance_lower_bound = std::min(cloud_cover_std_to_variance(standard_deviation), variance_lower_bound);
+//        }
+//    }
+//
+//    return variance_lower_bound;
 }
 
 

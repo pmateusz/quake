@@ -78,6 +78,8 @@ namespace quake {
 
         explicit Metadata(std::unordered_map<Metadata::Property, nlohmann::json> properties);
 
+        Metadata Trim(const boost::posix_time::time_period &time_period) const;
+
         template<typename ValueType>
         void SetProperty(Metadata::Property property, ValueType value);
 

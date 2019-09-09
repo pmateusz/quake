@@ -2,6 +2,7 @@ import collections
 import datetime
 import logging
 import random
+import warnings
 
 import GPy
 import numpy
@@ -181,7 +182,8 @@ class PastErrorsScenarioGenerator:
 
     def samples(self, size):
         if size > self.num_samples:
-            logging.warning('Too many samples requested. The generate will generate %d samples out of %d samples requested', self.num_samples, size)
+            warnings.warn('Too many samples requested. The generator will generate {0} samples out of {1} samples requested'
+                          .format(self.num_samples, size))
 
         if size < self.num_samples:
             samples_selected = numpy.random.choice(self.num_samples, size, replace=False)

@@ -38,6 +38,14 @@ quake::Forecast::Forecast()
 quake::Forecast::Forecast(std::unordered_map<GroundStation, Series> index)
         : index_{std::move(index)} {}
 
+quake::Forecast quake::Forecast::Trim(const boost::posix_time::time_period &time_period) const {
+    std::unordered_map<quake::GroundStation, Series> trimmed_index;
+    for (const auto &entry : index_) {
+        trimmed_index.emplace(entry.first, entry.second.Trim(time_period));
+    }
+    return Forecast{std::move(trimmed_index)};
+}
+
 quake::Forecast::SeriesValueType quake::Forecast::GetCloudCover(const GroundStation &station, const boost::posix_time::ptime &time) const {
     if (station == GroundStation::None) {
         return 0;

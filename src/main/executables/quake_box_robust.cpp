@@ -33,7 +33,7 @@
 
 
 int main(int argc, char *argv[]) {
-    const auto arguments = quake::SetupLogsAndParseArgs<quake::MipArguments>(argc, argv);
+    const auto arguments = quake::SetupLogsAndParseArgs<quake::SingleStageArguments>(argc, argv);
     const auto problem = quake::ExtendedProblem::load_json(arguments.ProblemPath);
 
     quake::RobustBoxMipModel robust_mip_model{&problem, arguments.IntervalStep};

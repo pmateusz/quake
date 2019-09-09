@@ -26,7 +26,6 @@
 #include <string>
 #include <unordered_set>
 
-#include <boost/config.hpp>
 #include <boost/algorithm/string.hpp>
 
 #include <regex>
@@ -40,6 +39,28 @@
 #include "util/json.h"
 #include "forecast.h"
 #include "metadata.h"
+
+
+quake::ExtendedProblem::StationData quake::ExtendedProblem::StationData::Trim(const boost::posix_time::time_period &time_period) const {
+    std::vector<CommunicationWindowData> trimmed_communication_windows;
+
+    for (const auto &window : CommunicationWindows) {
+        if (window.Period.is_before(time_period.begin())) { continue; }
+        if (window.Period.is_after(time_period.end())) { continue; }
+
+        if (time_period.contains(window.Period)) {
+            trimmed_communication_windows.emplace_back(window);
+            continue;
+        }
+
+        CHECK(!window.Period.intersects(time_period)) << "Case when communication window intersects with time_period is not implemented";
+
+        LOG(FATAL) << "Unexpected case";
+    }
+
+    return {Station, TransferShare, InitialBuffer, KeyConsumption, std::move(trimmed_communication_windows)};
+}
+
 
 quake::ExtendedProblem::ExtendedProblem()
         : ExtendedProblem(util::DefaultPeriod(), boost::posix_time::time_duration(), std::vector<StationData>{}) {}
@@ -57,15 +78,18 @@ quake::ExtendedProblem::ExtendedProblem(boost::posix_time::time_period observati
                                     {Metadata::Property::ObservationPeriod, observation_period}}),
                           std::move(station_data),
                           std::move(forecasts),
+                          {},
                           {}) {}
 
 quake::ExtendedProblem::ExtendedProblem(Metadata metadata,
                                         std::vector<quake::ExtendedProblem::StationData> station_data,
                                         std::unordered_map<std::string, quake::Forecast> forecasts,
+                                        MeanVarianceModel mean_variance_model,
                                         std::unordered_map<quake::GroundStation, ExtendedProblem::StationVarModel> var_model)
         : station_data_{std::move(station_data)},
           forecasts_{std::move(forecasts)},
           metadata_{std::move(metadata)},
+          mean_variance_model_{std::move(mean_variance_model)},
           var_model_{std::move(var_model)} {
 
     std::unordered_set<GroundStation> ground_stations;
@@ -78,6 +102,24 @@ quake::ExtendedProblem::ExtendedProblem(Metadata metadata,
     std::sort(std::begin(stations_), std::end(stations_), [](const GroundStation &left, const GroundStation &right) -> bool {
         return left.name() < right.name();
     });
+}
+
+quake::ExtendedProblem quake::ExtendedProblem::Trim(const boost::posix_time::time_period &time_period) const {
+    std::vector<StationData> trimmed_station_data;
+    for (const auto &station_data_row: station_data_) {
+        trimmed_station_data.emplace_back(station_data_row.Trim(time_period));
+    }
+
+    std::unordered_map<std::string, Forecast> trimmed_forecast;
+    for (const auto &forecast_entry: forecasts_) {
+        trimmed_forecast.emplace(forecast_entry.first, forecast_entry.second.Trim(time_period));
+    }
+
+    return {metadata_.Trim(time_period),
+            std::move(trimmed_station_data),
+            std::move(trimmed_forecast),
+            mean_variance_model_.Trim(time_period),
+            var_model_};
 }
 
 quake::ExtendedProblem quake::ExtendedProblem::Round(unsigned int decimal_places) const {
@@ -109,7 +151,7 @@ quake::ExtendedProblem quake::ExtendedProblem::Round(unsigned int decimal_places
                                           std::move(communication_window_data));
     }
 
-    return {metadata_, std::move(rounded_station_data), forecasts_, var_model_};
+    return {metadata_, std::move(rounded_station_data), forecasts_, mean_variance_model_, var_model_};
 }
 
 std::vector<boost::posix_time::time_period> quake::ExtendedProblem::TransferWindows(const GroundStation &station) const {
@@ -393,15 +435,17 @@ void quake::from_json(const nlohmann::json &json, quake::ExtendedProblem &proble
         }
     }
 
-    if (!var_model.empty()) {
-        for (const auto &entry : var_model) {
-            CHECK_EQ(entry.second.LowerBound.size(), forecast_series_size);
-            CHECK_EQ(entry.second.UpperBound.size(), forecast_series_size);
+    const auto mean_variance_model = json.at("mean_variance_model").get<ExtendedProblem::MeanVarianceModel>();
+    if (!forecasts.empty()) {
+        const auto &first_forecast = forecasts.begin()->second;
+        const auto &first_forecast_series = first_forecast.Index().begin()->second;
+        for (const auto &entry : mean_variance_model.Index) {
+            CHECK_EQ(entry.second.Mean.Period(), first_forecast_series.Period());
+            CHECK_EQ(entry.second.Mean.UpdateFrequency(), first_forecast_series.UpdateFrequency());
         }
     }
 
-    ExtendedProblem problem_object{metadata, stations, std::move(forecasts), std::move(var_model)};
-    problem = problem_object;
+    problem = {metadata, stations, std::move(forecasts), std::move(mean_variance_model), std::move(var_model)};
 }
 
 void quake::from_json(const nlohmann::json &json, quake::ExtendedProblem::StationVarModel &station_var_model) {
@@ -419,15 +463,9 @@ void quake::from_json(const nlohmann::json &json, quake::ExtendedProblem::Statio
 
     auto intercept = json.at("const").get<ExtendedProblem::StationVarModel::Parameter>();
     auto residual = json.at("residual").get<ExtendedProblem::StationVarModel::Parameter>();
-    auto lower_bound = json.at("lower").get<std::vector<double> >();
-    auto upper_bound = json.at("upper").get<std::vector<double> >();
-    auto standard_error = json.at("stderr").get<std::vector<double> >();
 
     station_var_model.Intercept = intercept;
     station_var_model.Residual = residual;
-    station_var_model.LowerBound = lower_bound;
-    station_var_model.UpperBound = upper_bound;
-    station_var_model.StandardDeviation = standard_error;
     station_var_model.Parameters = parameters;
     station_var_model.Correlations = correlations;
 }
@@ -438,4 +476,88 @@ void quake::from_json(const nlohmann::json &json, quake::ExtendedProblem::Statio
 
     parameter.Value = value;
     parameter.Stderr = standard_error;
+}
+
+void quake::from_json(const nlohmann::json &json, quake::ExtendedProblem::MeanVarianceModel &mean_variance_model) {
+    const auto confidence_interval = json.at("confidence").get<double>();
+    const auto time_index = json.at("index").get<std::vector<boost::posix_time::ptime> >();
+
+    boost::posix_time::time_period time_period(boost::posix_time::min_date_time,
+                                               static_cast<boost::posix_time::ptime>(boost::posix_time::max_date_time));
+    boost::posix_time::time_duration update_frequency;
+
+    if (!time_index.empty()) {
+        if (time_index.size() >= 2) {
+            update_frequency = time_index[1] - time_index[0];
+
+            const auto num_updates = time_index.size();
+            for (auto update_index = 1; update_index < num_updates; ++update_index) {
+                CHECK_EQ(time_index[update_index] - time_index[update_index - 1], update_frequency);
+            }
+        }
+
+        time_period = {time_index.front(), time_index.back() + update_frequency}; // the last time period is not included
+    }
+
+    const auto size = time_index.size();
+    std::unordered_map<GroundStation, quake::ExtendedProblem::MeanVarianceModel::StationMeanVarianceModel> data;
+    for (const auto &json_entry : json.items()) {
+        const auto &ground_station = GroundStation::FromNameOrNone(json_entry.key());
+        if (ground_station == GroundStation::None) { continue; }
+
+        const auto mean = json_entry.value().at("mean").get<std::vector<double>>();
+        CHECK_EQ(mean.size(), size);
+
+        const auto mean_lower = json_entry.value().at("mean_lower").get<std::vector<double>>();
+        CHECK_EQ(mean_lower.size(), size);
+
+        const auto mean_upper = json_entry.value().at("mean_upper").get<std::vector<double>>();
+        CHECK_EQ(mean_upper.size(), size);
+
+        const auto variance = json_entry.value().at("variance").get<std::vector<double>>();
+        CHECK_EQ(variance.size(), size);
+
+        const auto variance_lower = json_entry.value().at("variance_lower").get<std::vector<double>>();
+        CHECK_EQ(variance_lower.size(), size);
+
+        const auto variance_upper = json_entry.value().at("variance_upper").get<std::vector<double>>();
+        CHECK_EQ(variance_upper.size(), size);
+
+        for (auto pos = 0; pos < size; ++pos) {
+            CHECK_LE(mean_lower[pos], mean_upper[pos]);
+            if (mean_lower[pos] <= 100.0) {
+                CHECK_LE(mean_lower[pos], mean[pos]);
+            }
+            if (mean_upper[pos] >= 0.0) {
+                CHECK_LE(mean[pos], mean_upper[pos]);
+            }
+
+            CHECK_LE(variance_lower[pos], variance[pos]);
+            CHECK_LE(variance[pos], variance_upper[pos]);
+        }
+
+        data.emplace(ground_station, quake::ExtendedProblem::MeanVarianceModel::StationMeanVarianceModel{
+                quake::ExtendedProblem::MeanVarianceModel::Series(update_frequency, time_period, mean),
+                quake::ExtendedProblem::MeanVarianceModel::Series(update_frequency, time_period, mean_lower),
+                quake::ExtendedProblem::MeanVarianceModel::Series(update_frequency, time_period, mean_upper),
+                quake::ExtendedProblem::MeanVarianceModel::Series(update_frequency, time_period, variance),
+                quake::ExtendedProblem::MeanVarianceModel::Series(update_frequency, time_period, variance_lower),
+                quake::ExtendedProblem::MeanVarianceModel::Series(update_frequency, time_period, variance_upper)});
+    }
+
+    mean_variance_model = {confidence_interval, std::move(data)};
+}
+
+quake::ExtendedProblem::MeanVarianceModel quake::ExtendedProblem::MeanVarianceModel::Trim(const boost::posix_time::time_period &time_period) const {
+    std::unordered_map<GroundStation, StationMeanVarianceModel> trimmed_index;
+    for (const auto &entry : Index) {
+        trimmed_index.emplace(entry.first, entry.second.Trim(time_period));
+    }
+    return {ConfidenceInterval, std::move(trimmed_index)};
+}
+
+quake::ExtendedProblem::MeanVarianceModel::StationMeanVarianceModel quake::ExtendedProblem::MeanVarianceModel::StationMeanVarianceModel::Trim(
+        const boost::posix_time::time_period &time_period) const {
+    return {Mean.Trim(time_period), MeanLower.Trim(time_period), MeanUpper.Trim(time_period),
+            Variance.Trim(time_period), VarianceLower.Trim(time_period), VarianceUpper.Trim(time_period)};
 }

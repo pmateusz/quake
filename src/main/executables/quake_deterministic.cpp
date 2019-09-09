@@ -20,28 +20,58 @@
 // SOFTWARE.
 
 #include <cstdlib>
+#include <string>
 #include <boost/format.hpp>
+#include <boost/algorithm/string.hpp>
 
 #include "extended_problem.h"
 #include "index/worst_case_mip_model.h"
 #include "mip_arguments.h"
 #include "metadata.h"
 
-DEFINE_string(solution_prefix, "solution", "Output prefix appended to the solution file.");
-
-struct Arguments : public quake::MipArguments {
-
-    Arguments()
-            : MipArguments() {}
-
-    void Fill() override {
-        MipArguments::Fill();
-
-        CHECK(!FLAGS_solution_prefix.empty());
-        SolutionPrefix = FLAGS_solution_prefix;
+inline bool ValidateSample(const char *flag_name, const std::string &value) {
+    const auto value_to_use = boost::algorithm::to_lower_copy(value);
+    if (value_to_use == "forecast" || value_to_use == "real") {
+        return true;
     }
 
-    std::string SolutionPrefix;
+    LOG(ERROR) << flag_name << " can be set to either 'real' or 'forecast'";
+    return false;
+}
+
+DEFINE_string(sample, "forecast", "Sample to use as the forecast.");
+DEFINE_validator(sample, ValidateSample);
+
+quake::ExtendedProblem::WeatherSample ParseWeatherSample(const std::string &value) {
+    const auto value_to_use = boost::algorithm::to_lower_copy(value);
+
+    if (value_to_use == "forecast") {
+        return quake::ExtendedProblem::WeatherSample::Forecast;
+    } else if (value_to_use == "real") {
+        return quake::ExtendedProblem::WeatherSample::Real;
+    } else if (value_to_use == "scenario") {
+        return quake::ExtendedProblem::WeatherSample::Scenario;
+    } else if (value_to_use == "none") {
+        return quake::ExtendedProblem::WeatherSample::None;
+    }
+
+    LOG(FATAL) << "Conversion of value '" << value << "' to WeatherSample is not implemented";
+    return quake::ExtendedProblem::WeatherSample::None;
+}
+
+struct Arguments : public quake::MultiStageArguments {
+
+    Arguments()
+            : MultiStageArguments(),
+              Sample{quake::ExtendedProblem::WeatherSample::None} {}
+
+    void Fill() override {
+        MultiStageArguments::Fill();
+
+        Sample = ParseWeatherSample(FLAGS_sample);
+    }
+
+    quake::ExtendedProblem::WeatherSample Sample;
 };
 
 
@@ -64,21 +94,54 @@ void Solve(const Arguments &args,
 
 int main(int argc, char *argv[]) {
     const auto arguments = quake::SetupLogsAndParseArgs<Arguments>(argc, argv);
-    const auto problem = quake::ExtendedProblem::load_json(arguments.ProblemPath);
 
-    {
-        LOG(INFO) << "Solving model with weather forecast";
-        const auto &forecast = problem.GetWeatherSample(quake::ExtendedProblem::WeatherSample::Forecast);
-        boost::filesystem::path solution_file_path = (boost::format("%1%_deterministic_forecast.json") % arguments.SolutionPrefix).str();
-        Solve(arguments, problem, forecast, quake::Metadata::SolutionType::Test, solution_file_path);
+    std::vector<quake::ExtendedProblem> problems;
+    for (const auto &file_path : arguments.ProblemPaths) {
+        problems.emplace_back(quake::ExtendedProblem::load_json(file_path));
+    }
+    CHECK(!problems.empty());
+
+    std::sort(problems.begin(), problems.end(), [](const quake::ExtendedProblem &left, const quake::ExtendedProblem &right) -> bool {
+        return left.ObservationPeriod().begin() < right.ObservationPeriod().begin();
+    });
+
+    const auto &master_problem = problems.front();
+    const auto master_observation_period = master_problem.ObservationPeriod();
+    const auto &master_real_forecast = master_problem.GetWeatherSample(quake::ExtendedProblem::WeatherSample::Real);
+
+    std::vector<quake::ExtendedProblem> trimmed_problems{master_problem};
+    const auto problem_it_end = problems.end();
+    for (auto problem_it = problems.begin() + 1; problem_it != problem_it_end; ++problem_it) {
+        boost::posix_time::time_period observation_period{problem_it->ObservationPeriod().begin(), master_observation_period.end()};
+        const auto trimmed_problem = problem_it->Trim(observation_period);
+
+        // check if real forecast agree with the trimmed and master problem
+        const auto &trimmed_real_forecast = trimmed_problem.GetWeatherSample(quake::ExtendedProblem::WeatherSample::Real);
+        for (const auto &trimmed_entry : trimmed_real_forecast.Index()) {
+            auto time_point = trimmed_entry.second.Period().begin();
+            while (time_point < trimmed_entry.second.Period().end()) {
+                CHECK_EQ(master_real_forecast.GetCloudCover(trimmed_entry.first, time_point),
+                         trimmed_real_forecast.GetCloudCover(trimmed_entry.first, time_point));
+                time_point += trimmed_entry.second.UpdateFrequency();
+            }
+        }
+
+        trimmed_problems.emplace_back(trimmed_problem);
     }
 
-    {
-        LOG(INFO) << "Solving model with weather forecast";
-        const auto &real_weather = problem.GetWeatherSample(quake::ExtendedProblem::WeatherSample::Real);
-        boost::filesystem::path solution_file_path = (boost::format("%1%_deterministic_real.json") % arguments.SolutionPrefix).str();
-        Solve(arguments, problem, real_weather, quake::Metadata::SolutionType::Reference, solution_file_path);
-    }
+//    {
+//        LOG(INFO) << "Solving model with weather forecast";
+//        const auto &forecast = problem.GetWeatherSample(quake::ExtendedProblem::WeatherSample::Forecast);
+//        boost::filesystem::path solution_file_path = (boost::format("%1%_deterministic_forecast.json") % arguments.SolutionPrefix).str();
+//        Solve(arguments, problem, forecast, quake::Metadata::SolutionType::Test, solution_file_path);
+//    }
+//
+//    {
+//        LOG(INFO) << "Solving model with weather forecast";
+//        const auto &real_weather = problem.GetWeatherSample(quake::ExtendedProblem::WeatherSample::Real);
+//        boost::filesystem::path solution_file_path = (boost::format("%1%_deterministic_real.json") % arguments.SolutionPrefix).str();
+//        Solve(arguments, problem, real_weather, quake::Metadata::SolutionType::Reference, solution_file_path);
+//    }
 
     return EXIT_SUCCESS;
 }

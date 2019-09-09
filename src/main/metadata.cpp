@@ -210,7 +210,7 @@ void quake::from_json(const nlohmann::json &json, quake::Metadata::Property &pro
     LOG(FATAL) << "Conversion from string for Property " << property_name << " is not defined";
 }
 
-quake::Metadata::Metadata() {}
+quake::Metadata::Metadata() = default;
 
 quake::Metadata::Metadata(std::unordered_map<quake::Metadata::Property, nlohmann::json> properties)
         : properties_{std::move(properties)} {}
@@ -233,6 +233,20 @@ void quake::to_json(nlohmann::json &json, const quake::Metadata &metadata) {
 void quake::from_json(const nlohmann::json &json, quake::Metadata &metadata) {
     auto properties = json.get<std::unordered_map<Metadata::Property, nlohmann::json> >();
     metadata = quake::Metadata(std::move(properties));
+}
+
+quake::Metadata quake::Metadata::Trim(const boost::posix_time::time_period &time_period) const {
+    quake::Metadata trimmed_metadata{*this};
+
+    const auto observation_period_opt = trimmed_metadata.GetProperty<boost::posix_time::time_period>(Property::ObservationPeriod);
+    if (observation_period_opt) {
+        CHECK_LE(observation_period_opt->begin(), time_period.begin());
+        CHECK_LE(time_period.end(), observation_period_opt->end());
+
+        trimmed_metadata.SetProperty(Property::ObservationPeriod, time_period);
+    }
+
+    return trimmed_metadata;
 }
 
 template<typename ValueType>

@@ -77,8 +77,17 @@ class ParseDateAction(argparse.Action):
     DATE_FORMAT = '%Y-%m-%d'
 
     def __call__(self, parser: argparse.ArgumentParser, namespace: argparse.Namespace, values, option_string=None):
-        date_time_value = datetime.datetime.strptime(values, ParseDateAction.DATE_FORMAT)
+        date_time_value = datetime.datetime.strptime(values, self.DATE_FORMAT)
         setattr(namespace, self.dest, date_time_value)
+
+
+class ParseTimeDeltaAction(argparse.Action):
+    TIME_DELTA_FORMAT = '%H:%M:%S'
+
+    def __call__(self, parser: argparse.ArgumentParser, namespace: argparse.Namespace, values, option_string=None):
+        time_point = datetime.datetime.strptime(values, self.TIME_DELTA_FORMAT)
+        time_delta_value = datetime.timedelta(hours=time_point.hour, minutes=time_point.minute, seconds=time_point.second)
+        setattr(namespace, self.dest, time_delta_value)
 
 
 def parse_args():
@@ -103,6 +112,7 @@ def parse_args():
     generate_parser = sub_parsers.add_parser(GENERATE_COMMAND)
     generate_parser.add_argument('--from', action=ParseDateAction)
     generate_parser.add_argument('--to', action=ParseDateAction)
+    generate_parser.add_argument('--time-step', action=ParseTimeDeltaAction, default=datetime.timedelta(days=1))
     generate_parser.add_argument('--problem-prefix')
     generate_parser.add_argument('--num-scenarios', default=0, type=int)
     generate_parser.add_argument('--scenario-generator',
@@ -456,30 +466,32 @@ def generate_command(args):
     to_date_arg = getattr(args, 'to')
     num_scenarios = getattr(args, 'num_scenarios')
     generation_model_name = getattr(args, 'scenario_generator')
+    time_step = getattr(args, 'time_step')
+    time_horizon = datetime.timedelta(days=5)
 
     configurations = []
     current_date = from_date_arg
     while current_date < to_date_arg:
-        next_date = current_date + datetime.timedelta(days=5)
-        next_date = min(next_date, to_date_arg)
-
-        configurations.append((current_date, next_date, '{0}_{1}.json'.format(problem_prefix_arg, current_date.date())))
-
-        current_date = next_date
+        current_end_date = current_date + time_horizon
+        configurations.append((current_date, current_end_date, '{0}_{1}.json'.format(problem_prefix_arg, current_date.date())))
+        current_date += time_step
 
     for from_date, to_date, problem in configurations:
         temp_problem = problem + TEMP_SUFFIX
         subprocess.run([GENERATE_PROGRAM_PATH,
                         '--from={0}'.format(from_date.date()),
                         '--to={0}'.format(to_date.date()),
+                        '--initial-epoch={0}'.format(from_date_arg.date()),
                         '--output={0}'.format(temp_problem)], check=True)
 
         if not os.path.exists(temp_problem):
             raise Exception('Failed to generate problem {0}'.format(temp_problem))
 
-        args = argparse.Namespace(**{'problem_file': temp_problem, 'output': problem,
-                                     'num_scenarios': num_scenarios, 'scenario_generator': generation_model_name})
-        extend_problem_definition(args)
+        local_args = argparse.Namespace(**{'problem_file': temp_problem,
+                                           'output': problem,
+                                           'num_scenarios': num_scenarios,
+                                           'scenario_generator': generation_model_name})
+        extend_problem_definition(local_args)
 
         if not os.path.exists(problem):
             raise Exception('Failed to generate problem {0}'.format(problem))
