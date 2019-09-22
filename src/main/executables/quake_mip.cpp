@@ -86,13 +86,11 @@ Arguments SetupLogsAndParseArgs(int argc, char *argv[]) {
     gflags::ParseCommandLineFlags(&argc, &argv, true);
 
     CHECK(!FLAGS_input.empty()) << "Input problem is required";
-    CHECK(!FLAGS_cloud_cover.empty()) << "Cloud cover is required";
     CHECK(!FLAGS_time_step.empty()) << "Time step is required";
     CHECK(!FLAGS_output.empty()) << "Solution's output path is required";
 
     Arguments args;
     args.ModelPath = FLAGS_input;
-    args.CloudCoverPath = FLAGS_cloud_cover;
     args.OutputSolutionPath = FLAGS_output;
 
     if (!FLAGS_previous_solution.empty()) {
@@ -108,7 +106,7 @@ Arguments SetupLogsAndParseArgs(int argc, char *argv[]) {
     return args;
 }
 
-void Save(const quake::InferredModel &model,
+void Save(const quake::ExtendedProblem &model,
           const quake::Solution &solution,
           const boost::filesystem::path &output_file_path,
           const quake::Forecast &forecast) {
@@ -118,47 +116,44 @@ void Save(const quake::InferredModel &model,
         throw quake::util::OnFailedSaveOutput(FLAGS_output);
     }
 
-    std::vector<quake::CpSolution::Job> raw_jobs(model.StationCount());
-    std::vector<int64> raw_final_buffers(model.StationCount());
-
-    for (const auto &station_buffer: solution.FinalBuffers()) {
-        const auto station_index = model.GetStationIndex(station_buffer.first);
-
-        raw_final_buffers.at(station_index) = station_buffer.second;
-        for (const auto &observation : solution.ObservationWindows(station_buffer.first)) {
-            const auto start = model.GetStartIndex(observation.begin());
-            const auto duration = start - model.GetEndIndex(observation.end());
-            const auto key_rate = model.WeatherAdjustedTransferredKeys(station_buffer.first, observation.begin(),
-                                                                       observation.end(), forecast);
-            raw_jobs.emplace_back(start, duration, station_index, key_rate);
-        }
-    }
-
-    quake::CpSolution legacy_solution{std::move(raw_jobs), std::move(raw_final_buffers)};
-    quake::CpSolutionJsonWriter<std::ofstream> json_writer{std::move(output_file)};
-    json_writer.Write(model, legacy_solution);
-    json_writer.Close();
+    LOG(FATAL) << "Not Implemented";
+//    std::vector<quake::CpSolution::Job> raw_jobs(model.StationCount());
+//    std::vector<int64> raw_final_buffers(model.StationCount());
+//
+//    for (const auto &station_buffer: solution.FinalBuffers()) {
+//        const auto station_index = model.GetStationIndex(station_buffer.first);
+//
+//        raw_final_buffers.at(station_index) = station_buffer.second;
+//        for (const auto &observation : solution.ObservationWindows(station_buffer.first)) {
+//            const auto start = model.GetStartIndex(observation.begin());
+//            const auto duration = start - model.GetEndIndex(observation.end());
+//            const auto key_rate = model.WeatherAdjustedTransferredKeys(station_buffer.first, observation.begin(), observation.end(), forecast);
+//            raw_jobs.emplace_back(start, duration, station_index, key_rate);
+//        }
+//    }
+//
+//    quake::CpSolution legacy_solution{std::move(raw_jobs), std::move(raw_final_buffers)};
+//    quake::CpSolutionJsonWriter<std::ofstream> json_writer{std::move(output_file)};
+//    json_writer.Write(model, legacy_solution);
+//    json_writer.Close();
 }
 
 int main(int argc, char *argv[]) {
     const auto arguments = SetupLogsAndParseArgs(argc, argv);
 
-    auto model = quake::InferredModel::Load(arguments.ModelPath);
-    const auto forecast = quake::Forecast::load_csv(arguments.CloudCoverPath);
-    model.Apply(forecast);
-
+    auto model = quake::ExtendedProblem::load_json(arguments.ModelPath);
     if (arguments.PreviousSolutionPath) {
         const auto previous_solution = quake::Solution::load_json(*arguments.PreviousSolutionPath);
-        model.Apply(previous_solution);
+        LOG(FATAL) << "Not Implemented";
+//        model.Apply(previous_solution);
     }
 
-//    quake::BlockIntervalsMipModel mip_model(&model, forecast, arguments.TimeStep);
-//    const auto solution_opt = mip_model.Solve(arguments.TimeLimit, boost::none, boost::none);
-    boost::optional<quake::Solution> solution_opt = boost::none;
-    LOG(FATAL) << "Not ported";
+    const auto forecast = model.GetWeatherSample(quake::ExtendedProblem::WeatherSample::Real);
+    quake::BlockIntervalsMipModel mip_model(&model, forecast, arguments.TimeStep);
+    const auto solution_opt = mip_model.Solve(arguments.TimeLimit, boost::none, boost::none);
     if (solution_opt) {
         Save(model, *solution_opt, arguments.OutputSolutionPath, forecast);
     }
 
-    return 0;
+    return EXIT_SUCCESS;
 }

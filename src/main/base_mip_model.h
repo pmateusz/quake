@@ -142,7 +142,6 @@ namespace quake {
             }
 
             Metadata metadata;
-
             {
                 static const std::vector<Metadata::Property> PROPERTIES_TO_COPY{
                         Metadata::Property::SwitchDuration,
