@@ -200,7 +200,7 @@ class Problem:
         return self.__json_object
 
     @property
-    def observation_period(self):
+    def observation_period(self) -> quake.weather.time_period.TimePeriod:
         metadata = quake.weather.metadata.from_json(self.__json_object['metadata'])
         return metadata[quake.weather.metadata.OBSERVATION_PERIOD]
 

@@ -41,9 +41,6 @@ namespace quake {
         void ReportResults(util::SolverStatus solver_status) override;
 
     private:
-        double first_objective_mip_gap_ = 0.005;
-        double second_objective_mip_gap_ = 0.005;
-
         GRBVar lambda_;
         GRBVar total_keys_;
     };

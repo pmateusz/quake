@@ -67,10 +67,16 @@ class WeatherCache:
                                      'rain_3h', 'snow_3h',
                                      'rain_24h', 'snow_24h'], inplace=True)
             data_frame['city_name'] = data_frame['city_id'].apply(quake.city.from_key)
+            data_frame.rename(columns={'clouds_all': 'CloudCover'}, inplace=True)
+            data_frame.set_index(keys=['date_time', 'city_name'], inplace=True, drop=True)
+            data_frame.sort_index(inplace=True)
             return data_frame
 
-        resolved_root_directory = os.path.expanduser('~/OneDrive/dev/quake/data/forecasts/')
+        observation_frame = load_observation_frame('/home/pmateusz/dev/quake/data/weather/ground_station_data_set_filled.csv')
+        observation_frame = observation_frame.infer_objects()
+        self.__observation_frame = observation_frame
 
+        resolved_root_directory = os.path.expanduser('~/OneDrive/dev/quake/data/forecasts/')
         file_paths = [os.path.abspath(os.path.join(resolved_root_directory, file_name))
                       for file_name in os.listdir(resolved_root_directory) if file_name.endswith('.json')]
 
@@ -91,11 +97,7 @@ class WeatherCache:
         forecast_frame.set_index(['DateTime', 'Delay', 'City'], inplace=True, drop=True)
         forecast_frame.sort_index(0, inplace=True)
 
-        observation_frame = load_observation_frame('/home/pmateusz/dev/quake/data/weather/ground_station_data_set_filled.csv')
-        observation_frame = observation_frame.infer_objects()
-
         self.__forecast_frame = forecast_frame
-        self.__observation_frame = observation_frame
 
     def load(self):
         self.__forecast_frame = pandas.read_hdf(self.FORECAST_CACHE_FILE, self.HDF_FILE_TABLE)
@@ -110,7 +112,6 @@ class WeatherCache:
 
         if self.__load_historical_observations:
             observation_frame = self.__observation_frame.copy()
-            observation_frame['city_name'] = observation_frame['city_name'].astype(str)
             observation_frame.to_hdf(self.OBSERVATION_CACHE_FILE, self.HDF_FILE_TABLE, mode=self.HDF_FILE_MODE, format=self.HDF_FORMAT)
 
     def get_forecast_frame(self, start_time, duration):
@@ -123,6 +124,12 @@ class WeatherCache:
     def get_observation_frame(self, start_time, duration):
         end_time = start_time + duration
         data_frame = self.__forecast_frame.loc[pandas.IndexSlice[start_time:end_time, self.ZERO_TIME_DELTA], :]
+
+        if data_frame.empty:
+            data_frame = self.__observation_frame.loc[pandas.IndexSlice[start_time:end_time], :].copy()
+            data_frame['DateTime'] = data_frame.index.get_level_values(0)
+            data_frame['City'] = data_frame.index.get_level_values(1)
+
         return self.__pivot_transform(data_frame)
 
     def get_closest_forecast_frame(self, start_time, duration):

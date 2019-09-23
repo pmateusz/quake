@@ -29,6 +29,18 @@ quake::BlockIntervalsMipModel::BlockIntervalsMipModel(ExtendedProblem const *pro
 void quake::BlockIntervalsMipModel::Build(const boost::optional<Solution> &solution) {
     BaseIntervalMipModel::Build(solution);
 
+    // correction to avoid large numbers if stations are not consuming keys
+    auto initial_buffer_lambda = std::numeric_limits<double>::max();
+    for (const auto &station: ObservableStations()) {
+        auto station_initial_lambda = InitialBuffer(station) / TransferShare(station);
+        initial_buffer_lambda = std::min(initial_buffer_lambda, station_initial_lambda);
+    }
+
+    std::unordered_map<GroundStation, double> initial_buffer_to_use;
+    for (const auto &station: ObservableStations()) {
+        initial_buffer_to_use[station] = InitialBuffer(station) - TransferShare(station) * initial_buffer_lambda;
+    }
+
     const auto &forecast = Forecasts().front();
 
     // obtain maximum lambdas
@@ -49,9 +61,7 @@ void quake::BlockIntervalsMipModel::Build(const boost::optional<Solution> &solut
     const double max_lambda = *std::max_element(std::cbegin(max_station_lambda), std::cend(max_station_lambda));
     lambda_ = mip_model_.addVar(0.0, max_lambda, 0.0, GRB_CONTINUOUS, "lambda");
 
-    for (const auto &station : Stations()) {
-        if (station == GroundStation::None) { continue; }
-
+    for (const auto &station : ObservableStations()) {
         GRBLinExpr keys_delivered = 0;
         const auto station_index = Index(station);
         for (const auto &interval : StationIntervals(station)) {
@@ -59,7 +69,7 @@ void quake::BlockIntervalsMipModel::Build(const boost::optional<Solution> &solut
             keys_delivered += problem_->KeyRate(station, interval.Period(), forecast) * interval.Var();
         }
 
-        mip_model_.addConstr(TransferShare(station) * lambda_ <= InitialBuffer(station) + keys_delivered);
+        mip_model_.addConstr(TransferShare(station) * lambda_ <= initial_buffer_to_use.at(station) + keys_delivered);
     }
 
     // objective function
@@ -84,7 +94,7 @@ void quake::BlockIntervalsMipModel::Build(const boost::optional<Solution> &solut
 
     const auto solver_gap = mip_model_.get(GRB_DoubleParam_MIPGap);
     auto first_obj_env = mip_model_.getMultiobjEnv(0);
-    first_obj_env.set(GRB_DoubleParam_MIPGap,  solver_gap);
+    first_obj_env.set(GRB_DoubleParam_MIPGap, solver_gap);
 
     auto second_obj_env = mip_model_.getMultiobjEnv(1);
     second_obj_env.set(GRB_DoubleParam_MIPGap, solver_gap);
@@ -96,7 +106,7 @@ void quake::BlockIntervalsMipModel::ReportResults(quake::util::SolverStatus solv
     std::stringstream msg;
 
     auto first_obj_env = mip_model_.getMultiobjEnv(0);
-    msg << "First objective stop MIP Gap: " <<  first_obj_env.get(GRB_DoubleParam_MIPGap) << std::endl;
+    msg << "First objective stop MIP Gap: " << first_obj_env.get(GRB_DoubleParam_MIPGap) << std::endl;
 
     auto second_obj_env = mip_model_.getMultiobjEnv(1);
     msg << "Second objective stop MIP Gap: " << second_obj_env.get(GRB_DoubleParam_MIPGap) << std::endl;

@@ -231,7 +231,7 @@ namespace quake {
         ExtendedProblem(Metadata metadata,
                         std::vector<StationData> station_data,
                         std::unordered_map<std::string, Forecast> forecasts,
-                        MeanVarianceModel mean_variance_model,
+                        boost::optional<MeanVarianceModel> mean_variance_model,
                         std::unordered_map<quake::GroundStation, ExtendedProblem::StationVarModel> var_model);
 
         bool TrackConsumption() const;
@@ -252,9 +252,9 @@ namespace quake {
         std::unordered_map<std::string, Forecast> forecasts_;
 
         Metadata metadata_;
-
         std::vector<GroundStation> stations_;
-        MeanVarianceModel mean_variance_model_;
+
+        boost::optional<MeanVarianceModel> mean_variance_model_;
         std::unordered_map<GroundStation, ExtendedProblem::StationVarModel> var_model_;
     };
 

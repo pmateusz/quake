@@ -172,19 +172,9 @@ void quake::BaseIntervalMipModel::Build(const boost::optional<Solution> &solutio
 }
 
 std::unordered_map<quake::GroundStation, std::vector<boost::posix_time::time_period> > quake::BaseIntervalMipModel::GetObservations() const {
-
-    const auto &forecast = problem_->GetWeatherSample(ExtendedProblem::WeatherSample::Forecast);
-
     std::unordered_map<quake::GroundStation, std::vector<boost::posix_time::time_period> > assignment;
     for (const auto &station : ObservableStations()) {
         const auto &station_intervals = StationIntervals(station);
-
-        double sub_interval_keys_received = 0;
-        for (const auto &interval : station_intervals) {
-            if (util::IsActive(interval.Var())) {
-                sub_interval_keys_received += problem_->KeyRate(station, interval.Period(), forecast);
-            }
-        }
 
         std::vector<boost::posix_time::time_period> observations;
         const auto num_intervals = station_intervals.size();
@@ -232,12 +222,6 @@ std::unordered_map<quake::GroundStation, std::vector<boost::posix_time::time_per
             }
             CHECK(found_aggregate);
         }
-
-        double observations_keys_received = 0;
-        for (const auto &observation: observations) {
-            observations_keys_received += problem_->KeyRate(station, observation, forecast);
-        }
-        util::is_nearly_eq(sub_interval_keys_received, observations_keys_received);
 
         assignment.emplace(station, std::move(observations));
     }

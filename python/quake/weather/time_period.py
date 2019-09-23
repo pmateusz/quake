@@ -19,6 +19,9 @@ class TimePeriod:
         intersect_end = min(self.end, other_period.end)
         return TimePeriod(intersect_begin, intersect_end)
 
+    def contains(self, other_period: 'TimePeriod') -> bool:
+        return self.begin <= other_period.begin and other_period.end <= self.end
+
     def __str__(self):
         return '[{0}/{1}]'.format(self.__begin_time.strftime(self.DATETIME_FORMAT), self.__end_time.strftime(self.DATETIME_FORMAT))
 

@@ -79,13 +79,13 @@ quake::ExtendedProblem::ExtendedProblem(boost::posix_time::time_period observati
                                     {Metadata::Property::ObservationPeriod, observation_period}}),
                           std::move(station_data),
                           std::move(forecasts),
-                          {},
+                          boost::none,
                           {}) {}
 
 quake::ExtendedProblem::ExtendedProblem(Metadata metadata,
                                         std::vector<quake::ExtendedProblem::StationData> station_data,
                                         std::unordered_map<std::string, quake::Forecast> forecasts,
-                                        MeanVarianceModel mean_variance_model,
+                                        boost::optional<MeanVarianceModel> mean_variance_model,
                                         std::unordered_map<quake::GroundStation, ExtendedProblem::StationVarModel> var_model)
         : station_data_{std::move(station_data)},
           forecasts_{std::move(forecasts)},
@@ -116,10 +116,15 @@ quake::ExtendedProblem quake::ExtendedProblem::Trim(const boost::posix_time::tim
         trimmed_forecast.emplace(forecast_entry.first, forecast_entry.second.Trim(time_period));
     }
 
+    boost::optional<MeanVarianceModel> trimmed_mean_variance_model;
+    if (mean_variance_model_) {
+        trimmed_mean_variance_model = mean_variance_model_->Trim(time_period);
+    }
+
     return {metadata_.Trim(time_period),
             std::move(trimmed_station_data),
             std::move(trimmed_forecast),
-            mean_variance_model_.Trim(time_period),
+            std::move(trimmed_mean_variance_model),
             var_model_};
 }
 
@@ -446,17 +451,22 @@ void quake::from_json(const nlohmann::json &json, quake::ExtendedProblem &proble
         }
     }
 
-    const auto mean_variance_model = json.at("mean_variance_model").get<ExtendedProblem::MeanVarianceModel>();
-    if (!forecasts.empty()) {
-        const auto &first_forecast = forecasts.begin()->second;
-        const auto &first_forecast_series = first_forecast.Index().begin()->second;
-        for (const auto &entry : mean_variance_model.Index) {
-            CHECK_EQ(entry.second.Mean.Period(), first_forecast_series.Period());
-            CHECK_EQ(entry.second.Mean.UpdateFrequency(), first_forecast_series.UpdateFrequency());
+    boost::optional<quake::ExtendedProblem::MeanVarianceModel> mean_variance_model_opt;
+    const auto mean_variance_model_it = json.find("mean_variance_model");
+    if (mean_variance_model_it != std::cend(json)) {
+        mean_variance_model_opt = mean_variance_model_it->get<ExtendedProblem::MeanVarianceModel>();
+
+        if (!forecasts.empty()) {
+            const auto &first_forecast = forecasts.begin()->second;
+            const auto &first_forecast_series = first_forecast.Index().begin()->second;
+            for (const auto &entry : mean_variance_model_opt->Index) {
+                CHECK_EQ(entry.second.Mean.Period(), first_forecast_series.Period());
+                CHECK_EQ(entry.second.Mean.UpdateFrequency(), first_forecast_series.UpdateFrequency());
+            }
         }
     }
 
-    problem = {metadata, stations, std::move(forecasts), std::move(mean_variance_model), std::move(var_model)};
+    problem = {metadata, stations, std::move(forecasts), std::move(mean_variance_model_opt), std::move(var_model)};
 }
 
 void quake::ExtendedProblem::OverwriteInitialConditions(const Solution &previous_solution) {

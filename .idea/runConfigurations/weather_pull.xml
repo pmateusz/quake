@@ -1,18 +1,19 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="weather extend" type="PythonConfigurationType" factoryName="Python">
+  <configuration default="false" name="weather pull" type="PythonConfigurationType" factoryName="Python">
     <module name="quake" />
     <option name="INTERPRETER_OPTIONS" value="" />
     <option name="PARENT_ENVS" value="true" />
     <envs>
       <env name="PYTHONUNBUFFERED" value="1" />
     </envs>
-    <option name="SDK_HOME" value="/usr/bin/python3.6" />
+    <option name="SDK_HOME" value="" />
     <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/python" />
     <option name="IS_MODULE_SDK" value="false" />
     <option name="ADD_CONTENT_ROOTS" value="true" />
     <option name="ADD_SOURCE_ROOTS" value="true" />
-    <option name="SCRIPT_NAME" value="$PROJECT_DIR$/python/weather-tools.py" />
-    <option name="PARAMETERS" value="extend $PROJECT_DIR$/cmake-build-debug/week_2018-01-01.json --output=$PROJECT_DIR$/cmake-build-debug/week_2018-01-01_extended.json" />
+    <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
+    <option name="SCRIPT_NAME" value="$PROJECT_DIR$/python/download-weather.py" />
+    <option name="PARAMETERS" value="pull --output-dir=$PROJECT_DIR$" />
     <option name="SHOW_COMMAND_LINE" value="false" />
     <option name="EMULATE_TERMINAL" value="false" />
     <option name="MODULE_MODE" value="false" />

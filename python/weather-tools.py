@@ -106,8 +106,11 @@ def parse_args():
     extend_parser.add_argument('problem_file')
     extend_parser.add_argument('--output')
     extend_parser.add_argument('--num-scenarios', default=0, type=int)
-    extend_parser.add_argument('--scenario-generator',
-                               choices=quake.weather.scenarios.ScenarioGeneratorFactory.MODEL_NAMES, required=True)
+
+    scenario_generation_models_to_use = copy.copy(quake.weather.scenarios.ScenarioGeneratorFactory.MODEL_NAMES)
+    scenario_generation_models_to_use.append('')
+
+    extend_parser.add_argument('--scenario-generator', default='', choices=scenario_generation_models_to_use, required=False)
 
     generate_parser = sub_parsers.add_parser(GENERATE_COMMAND)
     generate_parser.add_argument('--from', action=ParseDateAction)
@@ -115,8 +118,8 @@ def parse_args():
     generate_parser.add_argument('--time-step', action=ParseTimeDeltaAction, default=datetime.timedelta(days=1))
     generate_parser.add_argument('--problem-prefix')
     generate_parser.add_argument('--num-scenarios', default=0, type=int)
-    generate_parser.add_argument('--scenario-generator',
-                                 choices=quake.weather.scenarios.ScenarioGeneratorFactory.MODEL_NAMES, required=False)
+
+    generate_parser.add_argument('--scenario-generator', default='', choices=scenario_generation_models_to_use, required=False)
 
     plot_forecast_parser = sub_parsers.add_parser(PLOT_FORECAST_COMMAND)
     plot_forecast_parser.add_argument('--from', action=ParseDateAction)
@@ -144,7 +147,7 @@ def parse_args():
 
 
 def build_cache_command(args):
-    weather_cache = quake.weather.cache.WeatherCache()
+    weather_cache = quake.weather.cache.WeatherCache(load_historical_observations=True)
     weather_cache.rebuild()
     weather_cache.save()
 
@@ -371,90 +374,108 @@ def extend_problem_definition(args):
     weather_cache = quake.weather.cache.WeatherCache(load_historical_observations=True)
     weather_cache.load()
 
-    # get forecast at midday of the requested day and finish at midday of the next day
     noon_time = datetime.time(12, 0, 0)
-    forecast_start = datetime.datetime.combine(problem.observation_period.begin.date(), noon_time)
-    forecast_end = datetime.datetime.combine((problem.observation_period.end + datetime.timedelta(days=1)).date(), noon_time)
-    forecast_length = forecast_end - forecast_start
+    observation_date_time_series = weather_cache.observation_frame.index.get_level_values(0)
+    historical_observation_period \
+        = quake.weather.time_period.TimePeriod(datetime.datetime.combine(observation_date_time_series.min().date(), datetime.time()),
+                                               datetime.datetime.combine(observation_date_time_series.max().date(), datetime.time()))
+    if historical_observation_period.contains(problem.observation_period):
+        observation_start = datetime.datetime.combine(problem.observation_period.begin.date(), noon_time)
+        observation_end = datetime.datetime.combine(problem.observation_period.end.date(), noon_time)
+        observation_length = observation_end - observation_start
+        real_frame = weather_cache.get_observation_frame(observation_start, observation_length)
+        real_frame = weather_cache.fill_missing_values(real_frame)
 
-    forecast_frame = weather_cache.get_closest_forecast_frame(forecast_start, forecast_length)
-    real_frame = weather_cache.get_observation_frame(forecast_start, forecast_length)
+        updated_problem = copy.deepcopy(problem)
+        updated_problem.trim_observation_period(quake.weather.time_period.TimePeriod(observation_start, observation_end))
+        updated_problem.add_forecast('real', real_frame)
 
-    forecast_frame = weather_cache.fill_missing_values(forecast_frame)
-    real_frame = weather_cache.fill_missing_values(real_frame)
-
-    min_time = max(forecast_frame.index.min(), real_frame.index.min())
-    max_time = min(forecast_frame.index.max(), real_frame.index.max())
-
-    if forecast_start < min_time or forecast_end > max_time:
-        total_reduction = (min_time - forecast_start) + (forecast_end - max_time)
-        if total_reduction > datetime.timedelta(hours=3):
-            warnings.warn('Problem observation period is reduced from [{0}, {1}] to [{2}, {3}]'.format(
-                problem.observation_period.begin,
-                problem.observation_period.end,
-                min_time,
-                max_time))
-
-    def trim_to_time_interval(frame):
-        return frame[(frame.index >= min_time) & (frame.index <= max_time)].copy()
-
-    forecast_frame = trim_to_time_interval(forecast_frame)
-    real_frame = trim_to_time_interval(real_frame)
-    assert numpy.all(forecast_frame.index == real_frame.index)
-
-    scenario_generator = quake.weather.scenarios.PastErrorsScenarioGenerator(weather_cache, forecast_frame)
-    scenario_generator.optimize()
-
-    scenario_frames = []
-    if scenario_generator_name != quake.weather.scenarios.ScenarioGeneratorFactory.PAST_ERRORS_MODEL_NAME:
-        model_factory = quake.weather.scenarios.ScenarioGeneratorFactory()
-
-        def value_range(value):
-            return max(0.0, min(100.0, value))
-
-        def enforce_cloud_cover_limits(frame):
-            frame_to_use = frame.copy()
-            for column in frame.columns:
-                frame_to_use[column] = frame_to_use[column].apply(value_range)
-            return frame_to_use
-
-        if num_scenarios > 0:
-            generation_model = model_factory.create_model(scenario_generator_name, weather_cache, forecast_frame)
-            generation_model.optimize()
-
-            sample_frames = generation_model.samples(num_scenarios)
-            for sample_frame in sample_frames:
-                scenario_frame = sample_frame.pivot_table(index='DateTime', columns='City', values='y')
-                scenario_frame = enforce_cloud_cover_limits(scenario_frame)
-                scenario_frames.append(scenario_frame)
+        with open(output_file, 'w') as output_file:
+            json.dump(updated_problem.json_object, output_file)
     else:
-        scenario_frames = scenario_generator.samples(num_scenarios)
+        # get forecast at midday of the requested day and finish at midday of the next day
+        forecast_start = datetime.datetime.combine(problem.observation_period.begin.date(), noon_time)
+        forecast_end = datetime.datetime.combine((problem.observation_period.end + datetime.timedelta(days=1)).date(), noon_time)
+        forecast_length = forecast_end - forecast_start
 
-    for scenario_frame in scenario_frames:
-        assert numpy.all(scenario_frame.index == real_frame.index)
+        forecast_frame = weather_cache.get_closest_forecast_frame(forecast_start, forecast_length)
+        real_frame = weather_cache.get_observation_frame(forecast_start, forecast_length)
 
-    time_zone = datetime.timezone(offset=datetime.timedelta())
-    var_model = __generate_var_model_from_observation(weather_cache,
-                                                      datetime.datetime(2018, 1, 1, tzinfo=time_zone),
-                                                      datetime.datetime(2019, 1, 1, tzinfo=time_zone))
+        forecast_frame = weather_cache.fill_missing_values(forecast_frame)
+        real_frame = weather_cache.fill_missing_values(real_frame)
 
-    mean_variance_result = scenario_generator.bootstrap_mean_variance(10000)
+        min_time = max(forecast_frame.index.min(), real_frame.index.min())
+        max_time = min(forecast_frame.index.max(), real_frame.index.max())
 
-    updated_problem = copy.deepcopy(problem)
-    updated_problem.trim_observation_period(quake.weather.time_period.TimePeriod(min_time, max_time))
-    updated_problem.add_forecast('forecast', trim_to_time_interval(forecast_frame))
-    updated_problem.add_forecast('real', trim_to_time_interval(real_frame))
+        if forecast_start < min_time or forecast_end > max_time:
+            total_reduction = (min_time - forecast_start) + (forecast_end - max_time)
+            if total_reduction > datetime.timedelta(hours=3):
+                warnings.warn('Problem observation period is reduced from [{0}, {1}] to [{2}, {3}]'.format(
+                    problem.observation_period.begin,
+                    problem.observation_period.end,
+                    min_time,
+                    max_time))
 
-    for scenario_index, scenario_frame in enumerate(scenario_frames):
-        updated_problem.add_forecast('scenario_{0}'.format(scenario_index), trim_to_time_interval(scenario_frame))
+        def trim_to_time_interval(frame):
+            return frame[(frame.index >= min_time) & (frame.index <= max_time)].copy()
 
-    updated_problem.set_metadata('scenarios_number', len(scenario_frames))
-    updated_problem.set_metadata('scenario_generator', scenario_generator_name)
-    updated_problem.set_var_model(var_model)
-    updated_problem.set_mean_variance(mean_variance_result)
+        forecast_frame = trim_to_time_interval(forecast_frame)
+        real_frame = trim_to_time_interval(real_frame)
+        assert numpy.all(forecast_frame.index == real_frame.index)
 
-    with open(output_file, 'w') as output_file:
-        json.dump(updated_problem.json_object, output_file)
+        scenario_generator = quake.weather.scenarios.PastErrorsScenarioGenerator(weather_cache, forecast_frame)
+        scenario_generator.optimize()
+
+        scenario_frames = []
+        if scenario_generator_name != quake.weather.scenarios.ScenarioGeneratorFactory.PAST_ERRORS_MODEL_NAME:
+            model_factory = quake.weather.scenarios.ScenarioGeneratorFactory()
+
+            def value_range(value):
+                return max(0.0, min(100.0, value))
+
+            def enforce_cloud_cover_limits(frame):
+                frame_to_use = frame.copy()
+                for column in frame.columns:
+                    frame_to_use[column] = frame_to_use[column].apply(value_range)
+                return frame_to_use
+
+            if num_scenarios > 0:
+                generation_model = model_factory.create_model(scenario_generator_name, weather_cache, forecast_frame)
+                generation_model.optimize()
+
+                sample_frames = generation_model.samples(num_scenarios)
+                for sample_frame in sample_frames:
+                    scenario_frame = sample_frame.pivot_table(index='DateTime', columns='City', values='y')
+                    scenario_frame = enforce_cloud_cover_limits(scenario_frame)
+                    scenario_frames.append(scenario_frame)
+        else:
+            scenario_frames = scenario_generator.samples(num_scenarios)
+
+        for scenario_frame in scenario_frames:
+            assert numpy.all(scenario_frame.index == real_frame.index)
+
+        time_zone = datetime.timezone(offset=datetime.timedelta())
+        var_model = __generate_var_model_from_observation(weather_cache,
+                                                          datetime.datetime(2018, 1, 1, tzinfo=time_zone),
+                                                          datetime.datetime(2019, 1, 1, tzinfo=time_zone))
+
+        mean_variance_result = scenario_generator.bootstrap_mean_variance(10000)
+
+        updated_problem = copy.deepcopy(problem)
+        updated_problem.trim_observation_period(quake.weather.time_period.TimePeriod(min_time, max_time))
+        updated_problem.add_forecast('forecast', trim_to_time_interval(forecast_frame))
+        updated_problem.add_forecast('real', trim_to_time_interval(real_frame))
+
+        for scenario_index, scenario_frame in enumerate(scenario_frames):
+            updated_problem.add_forecast('scenario_{0}'.format(scenario_index), trim_to_time_interval(scenario_frame))
+
+        updated_problem.set_metadata('scenarios_number', len(scenario_frames))
+        updated_problem.set_metadata('scenario_generator', scenario_generator_name)
+        updated_problem.set_var_model(var_model)
+        updated_problem.set_mean_variance(mean_variance_result)
+
+        with open(output_file, 'w') as output_file:
+            json.dump(updated_problem.json_object, output_file)
 
 
 def generate_command(args):

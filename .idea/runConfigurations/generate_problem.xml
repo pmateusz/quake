@@ -1,5 +1,5 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="generate problem" type="CMakeRunConfiguration" factoryName="Application" PROGRAM_PARAMS="--from=2019-06-25 --to=2019-07-1 --output=generated_problem.json --initial-epoch=2019-06-25" PASS_PARENT_ENVS_2="true" PROJECT_NAME="quake" TARGET_NAME="quake-generate" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="quake" RUN_TARGET_NAME="quake-generate">
+  <configuration default="false" name="generate problem" type="CMakeRunConfiguration" factoryName="Application" PROGRAM_PARAMS="--from=2018-01-01 --to=2018-01-08 --output=week_2018-01-01.json --initial-epoch=2018-01-01" PASS_PARENT_ENVS_2="true" PROJECT_NAME="quake" TARGET_NAME="quake-generate" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="quake" RUN_TARGET_NAME="quake-generate">
     <method v="2">
       <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
     </method>

@@ -90,7 +90,8 @@ Arguments SetupLogsAndParseArgs(int argc, char *argv[]) {
         initial_epoch = ParseDateTime(FLAGS_initial_epoch);
     }
 
-    args.ObservationTime = boost::posix_time::time_period(start_time, end_time);
+    args.ObservationTime = boost::posix_time::time_period(start_time + boost::posix_time::hours(12),
+                                                          end_time + boost::posix_time::hours(12));
     args.InitialEpoch = initial_epoch;
     return args;
 }
