@@ -57,7 +57,11 @@ class WeatherCache:
     def rebuild(self):
 
         def load_observation_frame(file_path):
-            data_frame = pandas.read_csv(file_path)
+            _, ext = os.path.splitext(file_path)
+            if ext == '.csv':
+                data_frame = pandas.read_csv(file_path)
+            elif ext == '.json':
+                data_frame = pandas.read_json(file_path)
             data_frame['date_time'] = data_frame['dt_iso'].apply(
                 lambda date_string: datetime.datetime.strptime(date_string, '%Y-%m-%d %H:%M:%S %z %Z'))
             data_frame.drop(columns=['weather_id', 'weather_icon', 'dt', 'dt_iso',
@@ -72,7 +76,9 @@ class WeatherCache:
             data_frame.sort_index(inplace=True)
             return data_frame
 
-        observation_frame = load_observation_frame('/home/pmateusz/dev/quake/data/weather/ground_station_data_set_filled.csv')
+        observation_frame_main = load_observation_frame('/home/pmateusz/dev/quake/data/weather/ground_station_data_set_filled.csv')
+        observation_frame_belfast = load_observation_frame('/home/pmateusz/dev/quake/data/weather/belfast.json')
+        observation_frame = pandas.merge([observation_frame_main, observation_frame_belfast])
         observation_frame = observation_frame.infer_objects()
         self.__observation_frame = observation_frame
 
