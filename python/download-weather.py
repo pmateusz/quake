@@ -42,6 +42,7 @@ Bristol = CityLocator(2654675, "Bristol", "GB", -2.59665, 51.455231)
 Ipswich = CityLocator(2646057, "Ipswich", "GB", 1.15545, 52.05917)
 Cambridge = CityLocator(2653941, "Cambridge", "GB", 0.11667, 52.200001)
 York = CityLocator(2633352, "York", "GB", -1.08271, 53.95763)
+Belfast = CityLocator(2655984, "Belfast", "GB", -5.9334, 54.5833)
 
 
 class QueryEngine:
@@ -108,7 +109,7 @@ def pull(args):
 
     forecast_file = 'forecast_' + datetime.datetime.now().strftime('%Y_%m_%d_%H_%M') + '.json'
 
-    cities = [London, Birmingham, Glasgow, Thurso, Manchester, Bristol, Ipswich, Cambridge, York]
+    cities = [London, Birmingham, Glasgow, Thurso, Manchester, Bristol, Ipswich, Cambridge, York, Belfast]
     engine = QueryEngine(load_api_key())
     responses = []
     for city in cities:
