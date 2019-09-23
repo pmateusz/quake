@@ -38,6 +38,8 @@
 
 namespace quake {
 
+    class Solution;
+
     class ExtendedProblem {
     public:
         enum class WeatherSample {
@@ -223,6 +225,8 @@ namespace quake {
 
         std::vector<Forecast> GetWeatherSamples(ExtendedProblem::WeatherSample sample, std::size_t size) const;
 
+        void OverwriteInitialConditions(const Solution &previous_solution);
+
     private:
         ExtendedProblem(Metadata metadata,
                         std::vector<StationData> station_data,
@@ -230,11 +234,15 @@ namespace quake {
                         MeanVarianceModel mean_variance_model,
                         std::unordered_map<quake::GroundStation, ExtendedProblem::StationVarModel> var_model);
 
+        bool TrackConsumption() const;
+
         double KeyRate(const GroundStation &station,
                        const boost::posix_time::time_period &period,
                        const std::function<double(boost::posix_time::ptime)> &weather_callback) const;
 
         const StationData &GetStationData(const quake::GroundStation &station) const;
+
+        StationData &GetStationData(const quake::GroundStation &station);
 
         friend void to_json(nlohmann::json &json, const ExtendedProblem &problem);
 

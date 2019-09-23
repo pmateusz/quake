@@ -82,11 +82,12 @@ void quake::BlockIntervalsMipModel::Build(const boost::optional<Solution> &solut
     GRBLinExpr second_objective = total_keys_;
     mip_model_.setObjectiveN(second_objective, 1, 5);
 
+    const auto solver_gap = mip_model_.get(GRB_DoubleParam_MIPGap);
     auto first_obj_env = mip_model_.getMultiobjEnv(0);
-    first_obj_env.set(GRB_DoubleParam_MIPGap, first_objective_mip_gap_);
+    first_obj_env.set(GRB_DoubleParam_MIPGap,  solver_gap);
 
     auto second_obj_env = mip_model_.getMultiobjEnv(1);
-    second_obj_env.set(GRB_DoubleParam_MIPGap, second_objective_mip_gap_);
+    second_obj_env.set(GRB_DoubleParam_MIPGap, solver_gap);
 }
 
 void quake::BlockIntervalsMipModel::ReportResults(quake::util::SolverStatus solver_status) {
@@ -94,8 +95,11 @@ void quake::BlockIntervalsMipModel::ReportResults(quake::util::SolverStatus solv
 
     std::stringstream msg;
 
-    msg << "First objective stop MIP Gap: " << first_objective_mip_gap_ << std::endl;
-    msg << "Second objective stop MIP Gap: " << second_objective_mip_gap_ << std::endl;
+    auto first_obj_env = mip_model_.getMultiobjEnv(0);
+    msg << "First objective stop MIP Gap: " <<  first_obj_env.get(GRB_DoubleParam_MIPGap) << std::endl;
+
+    auto second_obj_env = mip_model_.getMultiobjEnv(1);
+    msg << "Second objective stop MIP Gap: " << second_obj_env.get(GRB_DoubleParam_MIPGap) << std::endl;
 
     msg << "Best solution:" << std::endl
         << " - lambda: " << lambda_.get(GRB_DoubleAttr_X) << std::endl

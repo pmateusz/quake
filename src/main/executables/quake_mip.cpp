@@ -20,41 +20,30 @@
 // SOFTWARE.
 
 #include <vector>
-#include <memory>
 #include <fstream>
 
 #include <gflags/gflags.h>
 #include <glog/logging.h>
 
 #include <boost/config.hpp>
-#include <boost/format.hpp>
 #include <boost/optional.hpp>
-#include <boost/optional/optional_io.hpp>
 #include <boost/date_time.hpp>
-#include <boost/algorithm/string/join.hpp>
-
-#include <gurobi_c++.h>
 
 #include "util/error.h"
 #include "util/logging.h"
 #include "util/validation.h"
 
-
-#include "legacy/cp_solution.h"
-#include "legacy/cp_solution_json_writer.h"
-#include "legacy/inferred_model.h"
 #include "block_intervals_mip_model.h"
 
 DEFINE_string(output, "", "The output solution file.");
 DEFINE_string(input, "", "The input problem file.");
-DEFINE_string(cloud_cover, "", "Forecasts on cloud cover.");
 DEFINE_string(previous_solution, "", "The input file with the previous solution.");
 DEFINE_string(time_limit, "", "Time limit for a solver.");
 DEFINE_string(time_step, "00:00:15", "Time step for the discretisation scheme.");
+DEFINE_string(gap_limit, "", "Optimality gap to stop the MIP solver.");
 
 DEFINE_validator(input, quake::util::validate_input_file);
 DEFINE_validator(output, quake::util::validate_output_file);
-DEFINE_validator(cloud_cover, quake::util::validate_input_file);
 DEFINE_validator(previous_solution, quake::util::validate_input_file);
 DEFINE_validator(time_limit, quake::util::validate_duration);
 DEFINE_validator(time_step, quake::util::validate_duration);
@@ -62,13 +51,14 @@ DEFINE_validator(time_step, quake::util::validate_duration);
 struct Arguments {
     Arguments()
             : PreviousSolutionPath{boost::none},
-              TimeLimit{boost::none} {}
+              TimeLimit{boost::none},
+              GapLimit{boost::none} {}
 
     boost::filesystem::path ModelPath;
-    boost::filesystem::path CloudCoverPath;
     boost::filesystem::path OutputSolutionPath;
     boost::optional<boost::filesystem::path> PreviousSolutionPath;
     boost::optional<boost::posix_time::time_duration> TimeLimit;
+    boost::optional<double> GapLimit;
     boost::posix_time::time_duration TimeStep;
 };
 
@@ -101,41 +91,13 @@ Arguments SetupLogsAndParseArgs(int argc, char *argv[]) {
         args.TimeLimit = boost::posix_time::duration_from_string(FLAGS_time_limit);
     }
 
+    if (!FLAGS_gap_limit.empty()) {
+        args.GapLimit = std::stod(FLAGS_gap_limit);
+    }
+
     args.TimeStep = boost::posix_time::duration_from_string(FLAGS_time_step);
 
     return args;
-}
-
-void Save(const quake::ExtendedProblem &model,
-          const quake::Solution &solution,
-          const boost::filesystem::path &output_file_path,
-          const quake::Forecast &forecast) {
-    std::ofstream output_file;
-    output_file.open(output_file_path.string(), std::fstream::out | std::fstream::trunc);
-    if (!output_file.is_open()) {
-        throw quake::util::OnFailedSaveOutput(FLAGS_output);
-    }
-
-    LOG(FATAL) << "Not Implemented";
-//    std::vector<quake::CpSolution::Job> raw_jobs(model.StationCount());
-//    std::vector<int64> raw_final_buffers(model.StationCount());
-//
-//    for (const auto &station_buffer: solution.FinalBuffers()) {
-//        const auto station_index = model.GetStationIndex(station_buffer.first);
-//
-//        raw_final_buffers.at(station_index) = station_buffer.second;
-//        for (const auto &observation : solution.ObservationWindows(station_buffer.first)) {
-//            const auto start = model.GetStartIndex(observation.begin());
-//            const auto duration = start - model.GetEndIndex(observation.end());
-//            const auto key_rate = model.WeatherAdjustedTransferredKeys(station_buffer.first, observation.begin(), observation.end(), forecast);
-//            raw_jobs.emplace_back(start, duration, station_index, key_rate);
-//        }
-//    }
-//
-//    quake::CpSolution legacy_solution{std::move(raw_jobs), std::move(raw_final_buffers)};
-//    quake::CpSolutionJsonWriter<std::ofstream> json_writer{std::move(output_file)};
-//    json_writer.Write(model, legacy_solution);
-//    json_writer.Close();
 }
 
 int main(int argc, char *argv[]) {
@@ -144,15 +106,15 @@ int main(int argc, char *argv[]) {
     auto model = quake::ExtendedProblem::load_json(arguments.ModelPath);
     if (arguments.PreviousSolutionPath) {
         const auto previous_solution = quake::Solution::load_json(*arguments.PreviousSolutionPath);
-        LOG(FATAL) << "Not Implemented";
-//        model.Apply(previous_solution);
+        model.OverwriteInitialConditions(previous_solution);
     }
 
     const auto forecast = model.GetWeatherSample(quake::ExtendedProblem::WeatherSample::Real);
     quake::BlockIntervalsMipModel mip_model(&model, forecast, arguments.TimeStep);
-    const auto solution_opt = mip_model.Solve(arguments.TimeLimit, boost::none, boost::none);
+    const auto solution_opt = mip_model.Solve(arguments.TimeLimit, arguments.GapLimit, boost::none);
     if (solution_opt) {
-        Save(model, *solution_opt, arguments.OutputSolutionPath, forecast);
+        const auto final_solution = mip_model.UpdateFinalBuffers(solution_opt.get(), forecast);
+        quake::util::Save(final_solution, arguments.OutputSolutionPath);
     }
 
     return EXIT_SUCCESS;

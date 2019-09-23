@@ -65,9 +65,9 @@ namespace quake {
                 mip_model_.set(GRB_DoubleParam_MIPGap, *gap_opt);
             }
 
-            mip_model_.set(GRB_IntParam_Presolve, GRB_PRESOLVE_AGGRESSIVE);
-            mip_model_.set(GRB_IntParam_MIPFocus, GRB_MIPFOCUS_BALANCED);
-            mip_model_.set(GRB_IntParam_Cuts, GRB_CUTS_AUTO);
+//            mip_model_.set(GRB_IntParam_Presolve, GRB_PRESOLVE_AGGRESSIVE);
+//            mip_model_.set(GRB_IntParam_MIPFocus, GRB_MIPFOCUS_BALANCED);
+//            mip_model_.set(GRB_IntParam_Cuts, GRB_CUTS_AUTO);
 
             try {
                 Build(initial_guess);
@@ -116,29 +116,9 @@ namespace quake {
             auto observations = GetObservations();
             std::unordered_map<quake::GroundStation, int64> final_buffers;
             for (const auto &station: Stations()) {
-                if (station == GroundStation::None) {
-                    continue;
-                }
+                if (station == GroundStation::None) { continue; }
 
-                // number of keys transferred
-                const auto find_observations_it = observations.find(station);
-                double keys_received = 0.0;
-                if (find_observations_it != std::end(observations)) {
-                    for (const auto &observation_window : find_observations_it->second) {
-                        keys_received += problem_->KeyRate(station, observation_window, ExtendedProblem::WeatherSample::Forecast);
-                    }
-                }
-
-                // keys consumed
-                const auto total_days = problem_->ObservationPeriod().length().total_seconds() / boost::posix_time::hours(24).total_seconds();
-                const auto total_key_consumption = problem_->KeyConsumption(station) * total_days;
-
-                // initial buffer
-                const auto station_initial_buffer = problem_->InitialBuffer(station);
-
-                CHECK_GE(station_initial_buffer - total_key_consumption, 0);
-
-                final_buffers.emplace(station, station_initial_buffer + keys_received - total_key_consumption);
+                final_buffers.emplace(station, 0);
             }
 
             Metadata metadata;
@@ -166,7 +146,15 @@ namespace quake {
                     metadata.SetProperty(Metadata::Property::TimeLimit, *time_limit_opt);
                 }
 
-                const auto gap = mip_model_.get(GRB_DoubleAttr_MIPGap);
+                auto gap = 0.0;
+                const auto objectives_number = mip_model_.get(GRB_IntParam_ObjNumber);
+                if (objectives_number == 0) {
+                    // the default single objective case
+                    gap = mip_model_.get(GRB_DoubleAttr_MIPGap);
+                } else {
+                    const auto obj_env = mip_model_.getMultiobjEnv(0);
+                    gap = obj_env.get(GRB_DoubleParam_MIPGap);
+                }
                 metadata.SetProperty(Metadata::Property::Gap, gap);
             }
 
@@ -178,6 +166,32 @@ namespace quake {
             validator.Validate(solution);
 
             return boost::make_optional(solution);
+        }
+
+        Solution UpdateFinalBuffers(const Solution &solution, const Forecast &forecast) const {
+            std::unordered_map<quake::GroundStation, int64> final_buffers;
+            for (const auto &station: solution.Stations()) {
+                if (station == GroundStation::None) { continue; }
+
+                // number of keys transferred
+                double keys_received = 0.0;
+                for (const auto &observation_window : solution.ObservationWindows(station)) {
+                    keys_received += problem_->KeyRate(station, observation_window, forecast);
+                }
+
+                // keys consumed
+                const auto total_days = problem_->ObservationPeriod().length().total_seconds() / boost::posix_time::hours(24).total_seconds();
+                const auto total_key_consumption = problem_->KeyConsumption(station) * total_days;
+
+                // initial buffer
+                const auto station_initial_buffer = problem_->InitialBuffer(station);
+
+                CHECK_GE(station_initial_buffer - total_key_consumption, 0);
+
+                final_buffers.emplace(station, station_initial_buffer + keys_received - total_key_consumption);
+            }
+
+            return {solution.GetMetadata(), solution.Observations(), final_buffers};
         }
 
         inline std::size_t Index(const GroundStation &station) const { return station_indices_.at(station); }

@@ -39,6 +39,7 @@
 #include "util/json.h"
 #include "forecast.h"
 #include "metadata.h"
+#include "solution.h"
 
 
 quake::ExtendedProblem::StationData quake::ExtendedProblem::StationData::Trim(const boost::posix_time::time_period &time_period) const {
@@ -257,6 +258,16 @@ const quake::ExtendedProblem::StationData &quake::ExtendedProblem::GetStationDat
     LOG(FATAL) << "GroundStation not found: " << station;
 }
 
+quake::ExtendedProblem::StationData &quake::ExtendedProblem::GetStationData(const quake::GroundStation &station) {
+    for (auto &station_data: station_data_) {
+        if (station_data.Station == station) {
+            return station_data;
+        }
+    }
+
+    LOG(FATAL) << "GroundStation not found: " << station;
+}
+
 quake::ExtendedProblem quake::ExtendedProblem::load_json(const boost::filesystem::path &file_path) {
     std::ifstream input_stream;
     input_stream.open(file_path.string(), std::ifstream::in);
@@ -446,6 +457,35 @@ void quake::from_json(const nlohmann::json &json, quake::ExtendedProblem &proble
     }
 
     problem = {metadata, stations, std::move(forecasts), std::move(mean_variance_model), std::move(var_model)};
+}
+
+void quake::ExtendedProblem::OverwriteInitialConditions(const Solution &previous_solution) {
+    for (auto &current_station_data : station_data_) {
+        current_station_data.InitialBuffer = previous_solution.FinalBuffer(current_station_data.Station);
+    }
+
+    if (TrackConsumption()) {
+        auto min_consumption_index = std::numeric_limits<double>::max();
+        for (auto &current_station_data : station_data_) {
+            double current_consumption_index = static_cast<double>(current_station_data.InitialBuffer) / current_station_data.TransferShare;
+            min_consumption_index = std::min(min_consumption_index, current_consumption_index);
+        }
+
+        const auto total_days = ObservationPeriod().length().total_seconds() / boost::posix_time::hours(24).total_seconds();
+        for (auto &current_station_data : station_data_) {
+            current_station_data.KeyConsumption = static_cast<int>(std::floor(min_consumption_index * current_station_data.TransferShare
+                                                                              / static_cast<double>(total_days)));
+        }
+    }
+}
+
+bool quake::ExtendedProblem::TrackConsumption() const {
+    for (const auto &current_station_data : station_data_) {
+        if (current_station_data.KeyConsumption > 0) {
+            return true;
+        }
+    }
+    return false;
 }
 
 void quake::from_json(const nlohmann::json &json, quake::ExtendedProblem::StationVarModel &station_var_model) {

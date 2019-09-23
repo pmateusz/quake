@@ -53,9 +53,11 @@ namespace quake {
 
         static Solution load_json(const boost::filesystem::path &path);
 
-        inline const std::unordered_map<GroundStation, int64> &FinalBuffers() const { return final_buffers_; }
+        inline const std::vector<GroundStation> &Stations() const { return stations_; }
 
-        std::vector<GroundStation> Stations() const;
+        inline const std::unordered_map<GroundStation, std::vector<boost::posix_time::time_period> > &Observations() const { return observations_; }
+
+        inline const std::unordered_map<GroundStation, int64> &FinalBuffers() const { return final_buffers_; }
 
         int64 FinalBuffer(const GroundStation &station) const;
 
@@ -66,9 +68,10 @@ namespace quake {
 
         static const std::vector<boost::posix_time::time_period> NO_OBSERVATIONS;
 
+        Metadata metadata_;
+        std::vector<GroundStation> stations_;
         std::unordered_map<GroundStation, std::vector<boost::posix_time::time_period> > observations_;
         std::unordered_map<GroundStation, int64> final_buffers_;
-        Metadata metadata_;
     };
 
     void to_json(nlohmann::json &json, const Solution &solution);

@@ -36,6 +36,11 @@ quake::Solution::Solution(Metadata metadata,
           observations_{std::move(observations)},
           final_buffers_{std::move(final_buffers)} {
     CHECK_LE(observations_.size(), final_buffers_.size());
+
+    stations_.reserve(final_buffers_.size());
+    for (const auto &element : final_buffers_) {
+        stations_.emplace_back(element.first);
+    }
 }
 
 quake::Solution quake::Solution::load_json(const boost::filesystem::path &path) {
@@ -59,17 +64,6 @@ const std::vector<boost::posix_time::time_period> &quake::Solution::ObservationW
 }
 
 const std::vector<boost::posix_time::time_period> quake::Solution::NO_OBSERVATIONS = std::vector<boost::posix_time::time_period>();
-
-std::vector<quake::GroundStation> quake::Solution::Stations() const {
-    std::vector<quake::GroundStation> stations;
-    stations.reserve(final_buffers_.size());
-
-    for (const auto &element : final_buffers_) {
-        stations.emplace_back(element.first);
-    }
-
-    return stations;
-}
 
 int64 quake::Solution::FinalBuffer(const GroundStation &station) const {
     return final_buffers_.at(station);
