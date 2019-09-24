@@ -4,6 +4,7 @@ import datetime
 import json
 import logging
 import os
+import time
 import warnings
 
 import numpy
@@ -61,25 +62,50 @@ class WeatherCache:
             if ext == '.csv':
                 data_frame = pandas.read_csv(file_path)
             elif ext == '.json':
-                data_frame = pandas.read_json(file_path)
-            data_frame['date_time'] = data_frame['dt_iso'].apply(
-                lambda date_string: datetime.datetime.strptime(date_string, '%Y-%m-%d %H:%M:%S %z %Z'))
-            data_frame.drop(columns=['weather_id', 'weather_icon', 'dt', 'dt_iso',
-                                     'lat', 'lon',
-                                     'rain_today', 'snow_today',
-                                     'rain_1h', 'snow_1h',
-                                     'rain_3h', 'snow_3h',
-                                     'rain_24h', 'snow_24h'], inplace=True)
-            data_frame['city_name'] = data_frame['city_id'].apply(quake.city.from_key)
+                data = []
+                with open(file_path, 'r') as input_stream:
+                    records = json.load(input_stream)
+                    for record in records:
+                        record_dict = {}
+                        for master_key in record:
+                            if isinstance(record[master_key], dict):
+                                if master_key == 'main':
+                                    for leaf_key in record[master_key]:
+                                        record_dict[leaf_key] = record[master_key][leaf_key]
+                                else:
+                                    for leaf_key in record[master_key]:
+                                        record_dict[master_key + '_' + leaf_key] = record[master_key][leaf_key]
+                            elif isinstance(record[master_key], list):
+                                if record[master_key]:
+                                    for leaf_key in record[master_key][0]:
+                                        record_dict[master_key + '_' + leaf_key] = record[master_key][0][leaf_key]
+                            elif record[master_key] is None:
+                                continue
+                            else:
+                                record_dict[master_key] = record[master_key]
+                        data.append(record_dict)
+                data_frame = pandas.DataFrame(data=data)
+            else:
+                raise ValueError("File format '{0}' is not supported".format(ext))
+
+            def parse_datetime(text: str) -> datetime.datetime:
+                local_date_time = datetime.datetime.strptime(text, '%Y-%m-%d %H:%M:%S %z %Z')
+                seconds = time.mktime(local_date_time.timetuple())
+                utc_time = time.gmtime(seconds)
+                return utc_time
+
+            data_frame['DateTime'] = data_frame['dt_iso'].apply(parse_datetime)
+            data_frame['City'] = data_frame['city_id'].apply(quake.city.from_key)
             data_frame.rename(columns={'clouds_all': 'CloudCover'}, inplace=True)
-            data_frame.set_index(keys=['date_time', 'city_name'], inplace=True, drop=True)
-            data_frame.sort_index(inplace=True)
-            return data_frame
+            return data_frame[['DateTime', 'City', 'CloudCover']].copy()
 
         observation_frame_main = load_observation_frame('/home/pmateusz/dev/quake/data/weather/ground_station_data_set_filled.csv')
         observation_frame_belfast = load_observation_frame('/home/pmateusz/dev/quake/data/weather/belfast.json')
-        observation_frame = pandas.merge([observation_frame_main, observation_frame_belfast])
+        observation_frame = pandas.concat([observation_frame_main, observation_frame_belfast])
         observation_frame = observation_frame.infer_objects()
+        observation_frame.set_index(keys=['DateTime', 'City'], inplace=True, drop=True)
+        observation_frame.sort_index(0, inplace=True)
+
         self.__observation_frame = observation_frame
 
         resolved_root_directory = os.path.expanduser('~/OneDrive/dev/quake/data/forecasts/')
