@@ -26,11 +26,31 @@
 
 #include <boost/date_time.hpp>
 
+#include "kepler_elements.h"
+
+class Eci;
+
 namespace quake {
 
     class GroundStation;
 
     class KeplerElements;
+
+    class SatelliteTracker {
+    public:
+        SatelliteTracker(KeplerElements initial_satellite_position,
+                         boost::posix_time::ptime initial_epoch,
+                         boost::posix_time::time_period observation_period,
+                         boost::posix_time::time_duration time_step);
+
+        std::vector<Eci> CalculatePositions();
+
+    private:
+        KeplerElements initial_satellite_position_;
+        boost::posix_time::ptime initial_epoch_;
+        boost::posix_time::time_period observation_period_;
+        boost::posix_time::time_duration time_step_;
+    };
 
     /**
     * Compute elevation angle using Pykep

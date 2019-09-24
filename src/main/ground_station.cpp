@@ -19,10 +19,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <memory>
 #include <unordered_map>
 
-#include <boost/config.hpp>
 #include <boost/algorithm/string.hpp>
 
 #include "ground_station.h"
@@ -63,6 +61,7 @@ const quake::GroundStation quake::GroundStation::Bristol{{51.4545, -2.5879, 0.01
 const quake::GroundStation quake::GroundStation::Ipswich{{52.0567, 1.1482, 0.018}, "Ipswich"};
 const quake::GroundStation quake::GroundStation::Cambridge{{52.2053, 0.1218, 0.012}, "Cambridge"};
 const quake::GroundStation quake::GroundStation::York{{53.9600, -1.0873, 0.017}, "York"};
+const quake::GroundStation quake::GroundStation::Belfast{{54.5833, -5.9334, 0.017}, "Belfast"};
 const quake::GroundStation quake::GroundStation::None{{0.0, 0.0, 0.0}, "None"};
 
 const std::vector<quake::GroundStation> quake::GroundStation::All = {
@@ -97,7 +96,8 @@ const quake::GroundStation &quake::GroundStation::FromNameOrNone(const std::stri
             {"bristol",    GroundStation::Bristol},
             {"ipswich",    GroundStation::Ipswich},
             {"cambridge",  GroundStation::Cambridge},
-            {"york",       GroundStation::York}
+            {"york",       GroundStation::York},
+            {"belfast",    GroundStation::Belfast}
     };
 
     const auto name_to_use = boost::to_lower_copy(name);

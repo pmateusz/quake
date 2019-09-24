@@ -27,6 +27,10 @@
 
 #include <glog/logging.h>
 
+#include <pykep/third_party/libsgp4/Eci.h>
+#include <pykep/third_party/libsgp4/Observer.h>
+#include <pykep/third_party/libsgp4/CoordTopocentric.h>
+
 #include "util/resources.h"
 #include "util/hash.h"
 #include "util/constants.h"
@@ -274,18 +278,34 @@ private:
 
 std::unordered_map<quake::GroundStation, std::vector<double> > GetElevationData(const std::vector<quake::GroundStation> &ground_stations,
                                                                                 boost::posix_time::ptime initial_epoch,
-                                                                                boost::posix_time::time_period time_period) {
+                                                                                boost::posix_time::time_period observation_period) {
     static const auto TIME_STEP = boost::posix_time::seconds(1);
+
+    quake::SatelliteTracker tracker{quake::KeplerElements::DEFAULT, initial_epoch, observation_period, TIME_STEP};
+    const auto satellite_positions = tracker.CalculatePositions();
 
     std::unordered_map<quake::GroundStation, std::vector<double>> elevation_angle_data;
     for (const auto &ground_station : ground_stations) {
-        auto elevation = GetElevation(
-                ground_station,
-                quake::KeplerElements::DEFAULT,
-                initial_epoch,
-                time_period,
-                TIME_STEP);
-        std::transform(std::begin(elevation), std::end(elevation), std::begin(elevation), Util::RadiansToDegrees);
+//        auto old_elevation = GetElevation(
+//                ground_station,
+//                quake::KeplerElements::DEFAULT,
+//                initial_epoch,
+//                observation_period,
+//                TIME_STEP);
+//        std::transform(std::begin(old_elevation), std::end(old_elevation), std::begin(old_elevation), Util::RadiansToDegrees);
+
+        Observer ground_station_observer{ground_station.coordinates()};
+
+        std::vector<double> elevation;
+        elevation.reserve(satellite_positions.size());
+
+        for (const auto &satellite_position : satellite_positions) {
+            const auto elevation_radians = ground_station_observer.GetLookAngle(satellite_position).elevation;
+            elevation.emplace_back(Util::RadiansToDegrees(elevation_radians));
+        }
+
+//        CHECK(old_elevation == elevation);
+
         elevation_angle_data.emplace(ground_station, std::move(elevation));
     }
 

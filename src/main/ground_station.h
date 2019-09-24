@@ -45,6 +45,7 @@ namespace quake {
         static const GroundStation Ipswich;
         static const GroundStation Cambridge;
         static const GroundStation York;
+        static const GroundStation Belfast;
         static const GroundStation None;
 
         static const std::vector<GroundStation> All;

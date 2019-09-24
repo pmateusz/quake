@@ -22,14 +22,12 @@
 
 #include <glog/logging.h>
 
-#include <boost/config.hpp>
+#include <utility>
 #include <boost/numeric/ublas/vector.hpp>
 #include <boost/numeric/ublas/matrix.hpp>
 #include <boost/numeric/ublas/io.hpp>
-#include <boost/date_time.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
 
-#include <pykep/epoch.h>
 #include <pykep/core_functions/par2ic.h>
 #include <pykep/third_party/libsgp4/CoordTopocentric.h>
 #include <pykep/third_party/libsgp4/DateTime.h>
@@ -61,12 +59,9 @@ void PropagateOrbitalElements(const quake::KeplerElements &initial_position,
                               const boost::posix_time::time_duration &elapsed_time,
                               boost::numeric::ublas::vector<double> &output_elements) {
     const auto current_ascending_node_longitude = Util::WrapTwoPI(
-            initial_position.AscendingNodeLongitude()
-            + initial_position.AscendingNodeLongitudeVariation()
-              * elapsed_time.total_seconds());
-    const auto current_theta = Util::WrapTwoPI(initial_position.TrueAnomaly()
-                                               + initial_position.CircularOrbitVelocity()
-                                                 * elapsed_time.total_seconds());
+            initial_position.AscendingNodeLongitude() + initial_position.AscendingNodeLongitudeVariation() * elapsed_time.total_seconds());
+    const auto current_theta = Util::WrapTwoPI(
+            initial_position.TrueAnomaly() + initial_position.CircularOrbitVelocity() * elapsed_time.total_seconds());
 
     output_elements(0) = initial_position.SemimajorAxis();
     output_elements(1) = initial_position.Eccentricity();
@@ -203,4 +198,42 @@ std::vector<double> quake::GetMatlabElevation(const quake::GroundStation &ground
     }
 
     return elevations;
+}
+
+quake::SatelliteTracker::SatelliteTracker(quake::KeplerElements initial_satellite_position,
+                                          boost::posix_time::ptime initial_epoch,
+                                          boost::posix_time::time_period observation_period,
+                                          boost::posix_time::time_duration time_step)
+        : initial_satellite_position_{initial_satellite_position},
+          initial_epoch_{initial_epoch},
+          observation_period_{observation_period},
+          time_step_{std::move(time_step)} {}
+
+std::vector<Eci> quake::SatelliteTracker::CalculatePositions() {
+    boost::numeric::ublas::vector<double> orbital_elements(6, 0.0);
+    boost::numeric::ublas::vector<double> cartesian_position(3, 0.0);
+    boost::numeric::ublas::vector<double> cartesian_velocity(3, 0.0);
+
+    CHECK_GE(observation_period_.begin(), initial_epoch_);
+    const auto initial_elapsed_time = observation_period_.begin() - initial_epoch_;
+    const auto observation_time_to_use = observation_period_.length() + initial_elapsed_time;
+
+    std::vector<Eci> positions;
+    positions.reserve(observation_period_.length().total_seconds() / time_step_.total_seconds());
+    for (auto elapsed_time = boost::posix_time::seconds(0); elapsed_time < observation_time_to_use; elapsed_time += time_step_) {
+        const auto current_date_time = initial_epoch_ + elapsed_time;
+        const auto current_astronomic_date_time = CreateDateTime(current_date_time);
+
+        PropagateOrbitalElements(initial_satellite_position_, elapsed_time, orbital_elements);
+        cartesian_position.clear();
+        cartesian_velocity.clear();
+        kep_toolbox::par2ic(orbital_elements, kMU, cartesian_position, cartesian_velocity);
+
+        if (elapsed_time >= initial_elapsed_time) {
+            Eci satellite_eci = CreateEci(current_astronomic_date_time, cartesian_position, cartesian_velocity);
+            positions.emplace_back(satellite_eci);
+        }
+    }
+
+    return positions;
 }
