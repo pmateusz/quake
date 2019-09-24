@@ -63,7 +63,8 @@ const std::unordered_map<std::string, quake::GroundStation> quake::SunsetSunrise
         {"london",     GroundStation::London},
         {"manchester", GroundStation::Manchester},
         {"thurso",     GroundStation::Thurso},
-        {"york",       GroundStation::York}
+        {"york",       GroundStation::York},
+        {"belfast",    GroundStation::Belfast}
 };
 
 quake::SunsetSunriseReader::SunsetSunriseReader(std::string local_time_zone_name)

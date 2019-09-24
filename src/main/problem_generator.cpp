@@ -546,13 +546,13 @@ quake::ExtendedProblem quake::ProblemGenerator::CreateExtendedProblem(const std:
     const auto length_days = time_period.length().hours() / 24;
 
     // TODO: define weights
-    const auto distribution_coefficients = GetLinearDistributionCoefficients(ground_stations);
+    const auto distribution_coefficients = GetDistributionCoefficientsFromHouseholdsWithUltraFastBroadband(ground_stations);
 
     // TODO: define initial buffers
-    const auto initial_buffers = GetInitialBuffers(distribution_coefficients, length_days);
+    const auto initial_buffers = GetFixedInitialBuffers(distribution_coefficients, 64);
 
     // TODO: define key consumption
-    const auto key_consumption = GetDailyKeyConsumption(initial_buffers, length_days);
+    const auto key_consumption = GetNoKeyConsumption(initial_buffers, length_days);
 
     const auto start_time = time_period.begin();
     std::vector<ExtendedProblem::StationData> station_data;

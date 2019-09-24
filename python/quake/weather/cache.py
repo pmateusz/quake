@@ -44,8 +44,8 @@ class WeatherCache:
     HDF_FILE_MODE = 'w'
     HDF_FORMAT = 'fixed'
     PERCENTAGE_MISSING_VALUES_THRESHOLD = 0.10
-    FORECAST_CACHE_FILE = 'forecast.hdf'
-    OBSERVATION_CACHE_FILE = 'observation.hdf'
+    FORECAST_CACHE_FILE = '/home/pmateusz/dev/quake/current_review/forecast.hdf'
+    OBSERVATION_CACHE_FILE = '/home/pmateusz/dev/quake/current_review/observation.hdf'
     ZERO_TIME_DELTA = datetime.timedelta()
 
     def __init__(self, load_historical_observations=False):
@@ -90,9 +90,14 @@ class WeatherCache:
 
             def parse_datetime(text: str) -> datetime.datetime:
                 local_date_time = datetime.datetime.strptime(text, '%Y-%m-%d %H:%M:%S %z %Z')
+
+                assert local_date_time.timetz().tzname() == 'UTC'
+
                 seconds = time.mktime(local_date_time.timetuple())
                 utc_time = time.gmtime(seconds)
-                return utc_time
+                utc_date_time = datetime.datetime(year=utc_time.tm_year, month=utc_time.tm_mon, day=utc_time.tm_mday,
+                                                  hour=utc_time.tm_hour, minute=utc_time.tm_min, second=utc_time.tm_sec)
+                return utc_date_time
 
             data_frame['DateTime'] = data_frame['dt_iso'].apply(parse_datetime)
             data_frame['City'] = data_frame['city_id'].apply(quake.city.from_key)
@@ -159,8 +164,6 @@ class WeatherCache:
 
         if data_frame.empty:
             data_frame = self.__observation_frame.loc[pandas.IndexSlice[start_time:end_time], :].copy()
-            data_frame['DateTime'] = data_frame.index.get_level_values(0)
-            data_frame['City'] = data_frame.index.get_level_values(1)
 
         return self.__pivot_transform(data_frame)
 

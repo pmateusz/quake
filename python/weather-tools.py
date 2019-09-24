@@ -30,6 +30,7 @@ import logging
 import os
 import subprocess
 import warnings
+import re
 
 import matplotlib.colors
 import matplotlib.dates
@@ -82,12 +83,29 @@ class ParseDateAction(argparse.Action):
 
 
 class ParseTimeDeltaAction(argparse.Action):
-    TIME_DELTA_FORMAT = '%H:%M:%S'
+    TIME_DELTA_PATTERN = re.compile(r'^(?:(?P<days>\d+)\s+days?)?\s*(?:(?P<hours>\d+):(?P<minutes>\d+):(?P<seconds>\d+))?$')
 
     def __call__(self, parser: argparse.ArgumentParser, namespace: argparse.Namespace, values, option_string=None):
-        time_point = datetime.datetime.strptime(values, self.TIME_DELTA_FORMAT)
-        time_delta_value = datetime.timedelta(hours=time_point.hour, minutes=time_point.minute, seconds=time_point.second)
-        setattr(namespace, self.dest, time_delta_value)
+        match = self.TIME_DELTA_PATTERN.match(values)
+        if not match:
+            raise ValueError("Pattern '{0}' is not recognized as a timedelta".format(values))
+
+        duration = datetime.timedelta()
+
+        groups = match.groupdict()
+        if 'days' in groups:
+            duration += datetime.timedelta(days=int(groups['days']))
+
+        if 'hours' in groups and groups['hours']:
+            duration += datetime.timedelta(hours=int(groups['hours']))
+
+        if 'minutes' in groups and groups['minutes']:
+            duration += datetime.timedelta(minutes=int(groups['minutes']))
+
+        if 'seconds' in groups and groups['seconds']:
+            duration += datetime.timedelta(seconds=int(groups['seconds']))
+
+        setattr(namespace, self.dest, duration)
 
 
 def parse_args():
@@ -115,7 +133,9 @@ def parse_args():
     generate_parser = sub_parsers.add_parser(GENERATE_COMMAND)
     generate_parser.add_argument('--from', action=ParseDateAction)
     generate_parser.add_argument('--to', action=ParseDateAction)
+    generate_parser.add_argument('--initial-epoch', action=ParseDateAction)
     generate_parser.add_argument('--time-step', action=ParseTimeDeltaAction, default=datetime.timedelta(days=1))
+    generate_parser.add_argument('--time-horizon', action=ParseTimeDeltaAction, default=datetime.timedelta(days=1))
     generate_parser.add_argument('--problem-prefix')
     generate_parser.add_argument('--num-scenarios', default=0, type=int)
 
@@ -374,6 +394,11 @@ def extend_problem_definition(args):
     weather_cache = quake.weather.cache.WeatherCache(load_historical_observations=True)
     weather_cache.load()
 
+    def remove_missing_stations(frame, stations):
+        columns_to_drop = [city for city in frame.columns if city not in stations]
+        result_frame = frame.drop(columns=columns_to_drop)
+        return result_frame.copy()
+
     noon_time = datetime.time(12, 0, 0)
     observation_date_time_series = weather_cache.observation_frame.index.get_level_values(0)
     historical_observation_period \
@@ -385,6 +410,7 @@ def extend_problem_definition(args):
         observation_length = observation_end - observation_start
         real_frame = weather_cache.get_observation_frame(observation_start, observation_length)
         real_frame = weather_cache.fill_missing_values(real_frame)
+        real_frame = remove_missing_stations(real_frame, problem.stations)
 
         updated_problem = copy.deepcopy(problem)
         updated_problem.trim_observation_period(quake.weather.time_period.TimePeriod(observation_start, observation_end))
@@ -403,6 +429,9 @@ def extend_problem_definition(args):
 
         forecast_frame = weather_cache.fill_missing_values(forecast_frame)
         real_frame = weather_cache.fill_missing_values(real_frame)
+
+        real_frame = remove_missing_stations(real_frame, problem.stations)
+        forecast_frame = remove_missing_stations(forecast_frame, problem.stations)
 
         min_time = max(forecast_frame.index.min(), real_frame.index.min())
         max_time = min(forecast_frame.index.max(), real_frame.index.max())
@@ -488,7 +517,8 @@ def generate_command(args):
     num_scenarios = getattr(args, 'num_scenarios')
     generation_model_name = getattr(args, 'scenario_generator')
     time_step = getattr(args, 'time_step')
-    time_horizon = datetime.timedelta(days=5)
+    time_horizon = getattr(args, 'time_horizon')
+    initial_epoch = getattr(args, 'initial_epoch')
 
     configurations = []
     current_date = from_date_arg
@@ -502,7 +532,7 @@ def generate_command(args):
         subprocess.run([GENERATE_PROGRAM_PATH,
                         '--from={0}'.format(from_date.date()),
                         '--to={0}'.format(to_date.date()),
-                        '--initial-epoch={0}'.format(from_date_arg.date()),
+                        '--initial-epoch={0}'.format(initial_epoch.date()),
                         '--output={0}'.format(temp_problem)], check=True)
 
         if not os.path.exists(temp_problem):

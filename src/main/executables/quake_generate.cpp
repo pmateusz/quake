@@ -110,10 +110,18 @@ void Save(const Arguments &arguments, const quake::ExtendedProblem &problem) {
 int main(int argc, char *argv[]) {
     const auto arguments = SetupLogsAndParseArgs(argc, argv);
 
+    std::vector<quake::GroundStation> ground_stations{quake::GroundStation::Belfast,
+                                                      quake::GroundStation::Birmingham,
+                                                      quake::GroundStation::Bristol,
+                                                      quake::GroundStation::Glasgow,
+                                                      quake::GroundStation::Cambridge,
+                                                      quake::GroundStation::Ipswich,
+                                                      quake::GroundStation::Manchester,
+                                                      quake::GroundStation::York,
+                                                      quake::GroundStation::London};
+
     quake::ProblemGenerator generator;
-    const auto problem = generator.CreateExtendedProblem(quake::GroundStation::All,
-                                                         arguments.InitialEpoch,
-                                                         arguments.ObservationTime);
-    Save(arguments, problem.Round(2));
+    const auto problem = generator.CreateExtendedProblem(ground_stations, arguments.InitialEpoch, arguments.ObservationTime);
+    Save(arguments, problem.Round(3));
     return EXIT_SUCCESS;
 }
