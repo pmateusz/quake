@@ -54,8 +54,9 @@ static const int DEFAULT_TRANSFER_RATE = 633;
 void OutputWarningIfDistributionCoefficientIsSmall(
         const std::unordered_map<quake::GroundStation, double> &cumulative_keys) {
     for (const auto &record : cumulative_keys) {
-        LOG_IF(WARNING, record.second < 0.01) << "Distribution coefficient for " << record.first.name()
-                                              << " is very small: " << record.second;
+        LOG_IF(WARNING, record.second < 0.01)
+                        << "Distribution coefficient for " << record.first.name()
+                        << " is very small: " << record.second;
     }
 }
 
@@ -149,8 +150,46 @@ std::unordered_map<quake::GroundStation, double> GetDistributionCoefficientsFrom
     return distribution_coefficients;
 }
 
-std::unordered_map<quake::GroundStation, double> GetDistributionCoefficientsFromPopulation(
+std::unordered_map<quake::GroundStation, double> NormalizeToOne(const std::unordered_map<quake::GroundStation, double> &initial_weights) {
+    double total_weight = 0.0;
+    for (const auto &entry : initial_weights) {
+        CHECK_GE(entry.second, 0.0);
+        total_weight += entry.second;
+    }
+
+    std::unordered_map<quake::GroundStation, double> normalized_weights;
+    for (const auto &entry : initial_weights) {
+        normalized_weights.emplace(entry.first, entry.second / total_weight);
+    }
+
+    OutputWarningIfDistributionCoefficientIsSmall(normalized_weights);
+    return normalized_weights;
+}
+
+std::unordered_map<quake::GroundStation, double> GetDistributionCoefficientsFromHouseholdsWithUltraFastBroadband(
         const std::vector<quake::GroundStation> &ground_stations) {
+    static const std::unordered_map<quake::GroundStation, int64> PremisesWithUltraFastBroadbandAccess = {
+            {quake::GroundStation::London,     5783941},
+            {quake::GroundStation::Thurso,     385},
+            {quake::GroundStation::Cambridge,  454174},
+            {quake::GroundStation::Birmingham, 2512320},
+            {quake::GroundStation::Glasgow,    1774439},
+            {quake::GroundStation::Manchester, 1775340},
+            {quake::GroundStation::Bristol,    1528836},
+            {quake::GroundStation::Ipswich,    316515},
+            {quake::GroundStation::York,       371431},
+            {quake::GroundStation::Belfast,    1265413}
+    };
+
+    std::unordered_map<quake::GroundStation, double> ground_station_weights;
+    for (const auto &ground_station : ground_stations) {
+        ground_station_weights.emplace(ground_station, PremisesWithUltraFastBroadbandAccess.at(ground_station));
+    }
+
+    return NormalizeToOne(ground_station_weights);
+}
+
+std::unordered_map<quake::GroundStation, double> GetDistributionCoefficientsFromPopulation(const std::vector<quake::GroundStation> &ground_stations) {
     static const std::unordered_map<quake::GroundStation, int64> Population = {
             {quake::GroundStation::London,     8825000},
             {quake::GroundStation::Thurso,     7933},
@@ -160,7 +199,8 @@ std::unordered_map<quake::GroundStation, double> GetDistributionCoefficientsFrom
             {quake::GroundStation::Manchester, 545500},
             {quake::GroundStation::Bristol,    459300},
             {quake::GroundStation::Ipswich,    133384},
-            {quake::GroundStation::York,       208200}
+            {quake::GroundStation::York,       208200},
+            {quake::GroundStation::Belfast,    280211}
     };
 
     std::vector<quake::GroundStation> station;
@@ -173,24 +213,13 @@ std::unordered_map<quake::GroundStation, double> GetDistributionCoefficientsFrom
     const auto flow_matrix = flow_engine.ComputeFlow(capacity);
 
     const auto station_size = station.size();
-    std::vector<int64> total_station_flow(station_size, 0);
+    std::unordered_map<quake::GroundStation, double> station_flow;
     for (auto station_index = 0; station_index < station_size; ++station_index) {
-        total_station_flow[station_index] = std::accumulate(std::cbegin(flow_matrix[station_index]),
-                                                            std::cend(flow_matrix[station_index]),
-                                                            static_cast<int64>(0));
-    }
-    int64 total_flow = std::accumulate(std::cbegin(total_station_flow),
-                                       std::cend(total_station_flow),
-                                       static_cast<int64>(0));
-
-    std::unordered_map<quake::GroundStation, double> distribution_coefficients;
-    for (auto station_index = 0; station_index < station_size; ++station_index) {
-        distribution_coefficients[station[station_index]]
-                = static_cast<double>(total_station_flow[station_index]) / total_flow;
+        station_flow.emplace(station.at(station_index),
+                             std::accumulate(std::cbegin(flow_matrix[station_index]), std::cend(flow_matrix[station_index]), static_cast<int64>(0)));
     }
 
-    OutputWarningIfDistributionCoefficientIsSmall(distribution_coefficients);
-    return distribution_coefficients;
+    return NormalizeToOne(station_flow);
 }
 
 std::unordered_map<quake::GroundStation, int> GetInitialBuffers(
@@ -204,6 +233,17 @@ std::unordered_map<quake::GroundStation, int> GetInitialBuffers(
         // make the buffer size divisible by the number of days
         const int buffer_size = static_cast<int>((distribution_coefficient.second * KEY_SCALING_FACTOR) / days) * days;
         initial_buffers.emplace(distribution_coefficient.first, buffer_size);
+    }
+    return initial_buffers;
+}
+
+std::unordered_map<quake::GroundStation, int> GetFixedInitialBuffers(
+        const std::unordered_map<quake::GroundStation, double> &distribution_coefficients, int fixed_size) {
+    CHECK_GT(fixed_size, 0);
+
+    std::unordered_map<quake::GroundStation, int> initial_buffers;
+    for (const auto &distribution_coefficient : distribution_coefficients) {
+        initial_buffers.emplace(distribution_coefficient.first, fixed_size);
     }
     return initial_buffers;
 }
@@ -223,13 +263,25 @@ std::unordered_map<quake::GroundStation, int> GetDailyKeyConsumption(
     return key_consumption;
 }
 
+std::unordered_map<quake::GroundStation, int> GetNoKeyConsumption(
+        const std::unordered_map<quake::GroundStation, int> &initial_buffers,
+        int days) {
+    CHECK_GT(days, 0);
+
+    std::unordered_map<quake::GroundStation, int> key_consumption;
+    for (const auto &initial_buffer : initial_buffers) {
+        key_consumption.emplace(initial_buffer.first, 0);
+    }
+    return key_consumption;
+}
+
 struct ElevationToTransferIndex {
 public:
     static const auto ANGLE_REF = 0;
     static const auto KEY_RATE_REF = 1;
     static const auto BIT_RATE_REF = 2;
 
-    ElevationToTransferIndex(std::vector<std::tuple<double, double, double> > elevation_to_transfer_index)
+    explicit ElevationToTransferIndex(std::vector<std::tuple<double, double, double> > elevation_to_transfer_index)
             : elevation_to_transfer_index_{std::move(elevation_to_transfer_index)} {}
 
     double KeyRate(double elevation) const { return Extract<KEY_RATE_REF>(elevation); }
@@ -479,7 +531,7 @@ quake::Problem quake::ProblemGenerator::Create(std::vector<quake::GroundStation>
             DEFAULT_SWITCH_DURATION};
 }
 
-quake::ExtendedProblem quake::ProblemGenerator::CreateExtendedProblem(std::vector<quake::GroundStation> ground_stations,
+quake::ExtendedProblem quake::ProblemGenerator::CreateExtendedProblem(const std::vector<quake::GroundStation> &ground_stations,
                                                                       boost::posix_time::ptime initial_epoch,
                                                                       boost::posix_time::time_period time_period) const {
     quake::util::Resources resources{"~/dev/quake/data"};
@@ -492,15 +544,20 @@ quake::ExtendedProblem quake::ProblemGenerator::CreateExtendedProblem(std::vecto
     ElevationToTransferIndex elevation_transfer_index(std::move(transfer_rate_data));
 
     const auto length_days = time_period.length().hours() / 24;
+
+    // TODO: define weights
     const auto distribution_coefficients = GetLinearDistributionCoefficients(ground_stations);
+
+    // TODO: define initial buffers
     const auto initial_buffers = GetInitialBuffers(distribution_coefficients, length_days);
+
+    // TODO: define key consumption
     const auto key_consumption = GetDailyKeyConsumption(initial_buffers, length_days);
 
     const auto start_time = time_period.begin();
     std::vector<ExtendedProblem::StationData> station_data;
     station_data.reserve(ground_stations.size());
     for (const auto &ground_station: ground_stations) {
-
         std::vector<ExtendedProblem::CommunicationWindowData> communication_windows;
         const auto &station_elevation_data = elevation_data.at(ground_station);
         for (const auto &transfer_window : communication_window_data.at(ground_station)) {

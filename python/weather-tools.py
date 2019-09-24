@@ -1101,4 +1101,4 @@ if __name__ == '__main__':
         all_premises = total_frame['premises_with_fiber'].sum()
         total_frame['weight'] = total_frame['premises_with_fiber'] / all_premises
 
-        print(tabulate.tabulate(total_frame, tablefmt='psql'))
+        print(tabulate.tabulate(total_frame, tablefmt='latex'))
