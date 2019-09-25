@@ -33,27 +33,29 @@ import re
 import random
 import subprocess
 import warnings
-import sys
+import pathlib
+import typing
 
 import tqdm
 
 import pandas
 
 import quake.city
+import quake.util
 
 
 class Settings:
 
     def __init__(self):
-        self.__solver_path = '/home/pmateusz/dev/quake/build/quake-main'
+        self.__cp_solver_path = '/home/pmateusz/dev/quake/build/quake-main'
         self.__mip_solver_path = '/home/pmateusz/dev/quake/build/quake-mip'
         # self.__solver_path = '/home/pmateusz/dev/quake/cmake-build-debug/quake-main'
         self.__forecast_path = '/home/pmateusz/dev/quake/data/forecasts/ground_station_data_set_filled.csv'
         self.__forecast_frame_path = '/home/pmateusz/dev/quake/.data/ground_station_data_set.hdf'
 
     @property
-    def solver(self):
-        return self.__solver_path
+    def cp_solver(self):
+        return self.__cp_solver_path
 
     @property
     def mip_solver(self):
@@ -85,9 +87,10 @@ def build_parser():
     disturb_command.add_argument('--output')
 
     run_command = sub_parsers.add_parser('run')
-    run_command.add_argument('--data-dir', required=True)
     run_command.add_argument('--problem-dir', required=True)
-    run_command.add_argument('--solution-prefix')
+    run_command.add_argument('--solution-prefix', default='solution')
+    run_command.add_argument('--time-step', default=datetime.timedelta(seconds=30), action=quake.util.ParseTimeDeltaAction)
+    run_command.add_argument('--gap-limit', default=0.05, type=float)
 
     elevation_parser = sub_parsers.add_parser('elevation')
     elevation_parser.add_argument('--data-dir', required=True)
@@ -126,7 +129,7 @@ def get_cloud_cover_data_frame():
         return frame
 
 
-def generate(args):
+def old_generate(args):
     year = int(getattr(args, 'year'))
     raw_output_dir = getattr(args, 'output')
     output_dir = os.path.abspath(raw_output_dir)
@@ -193,20 +196,24 @@ def generate(args):
                 logging.exception('Failed to process work item {0} {1}', start_day, end_day)
 
 
-def get_records(data_dir, prefix):
-    records = collections.defaultdict(dict)
+def get_records(data_dir, prefix) -> typing.Dict[datetime.date, typing.Dict[str, pathlib.Path]]:
+    records = {}
     for file_item in os.listdir(data_dir):
         match = re.match(r'^(?P<prefix>\w+?)_(?P<date>\d+-\d+-\d+).*?\..+$', file_item)
         if not match:
             continue
         date = match.group('date')
         local_prefix = match.group('prefix')
+
+        if date not in records:
+            records[date] = dict()
+
         if local_prefix == prefix:
-            records[date][prefix] = os.path.join(data_dir, file_item)
+            records[date][prefix] = pathlib.Path(os.path.join(data_dir, file_item))
     return records
 
 
-def run_sequence(args):
+def old_run_sequence(args):
     data_dir = getattr(args, 'data_dir')
     data_dir = os.path.abspath(data_dir)
 
@@ -270,6 +277,62 @@ def run_sequence(args):
 
             run(date, problem_records[date]['week'], cloud_cover_records[date]['cloud_cover'], solution_file,
                 prev_solution_file)
+            prev_solution_file = solution_file
+
+
+def run_mip_solver(problem_date: datetime.date,
+                   problem_input_file: pathlib.Path,
+                   solution_output_file: pathlib.Path,
+                   time_step: datetime.timedelta,
+                   gap_limit: float,
+                   previous_solution_input_file: pathlib.Path = None) -> None:
+    process_args = [settings.mip_solver,
+                    '--input={0}'.format(problem_input_file),
+                    '--output={0}'.format(solution_output_file),
+                    '--time-step={0}'.format(time_step),
+                    '--gap-limit={0}'.format(gap_limit)]
+
+    if previous_solution_input_file:
+        if not previous_solution_input_file.exists():
+            logging.fatal('Previous solution file %s does not exist', previous_solution_input_file)
+        process_args.append('--previous-solution={0}'.format(previous_solution_input_file))
+
+    try:
+        with open('out_{0}.log'.format(problem_date), 'w') as output_stream:
+            with open('err_{0}.log'.format(problem_date), 'w') as error_stream:
+                process = subprocess.run(process_args, stdout=output_stream, stderr=error_stream)
+                process.check_returncode()
+    except:
+        logging.exception('Failed to process problem %s. Reproduction arguments: %s', problem_date, process_args)
+
+
+def run_sequence(args) -> None:
+    problem_dir = getattr(args, 'problem_dir')
+    problem_dir = pathlib.Path(os.path.abspath(problem_dir))
+
+    solution_prefix = getattr(args, 'solution_prefix')
+
+    time_step = getattr(args, 'time_step')
+    gap_limit = getattr(args, 'gap_limit')
+
+    problem_records = get_records(problem_dir, 'week')
+    problem_dates = list(problem_records.keys())
+    problem_dates.sort()
+
+    def get_solution_file_path(given_date) -> pathlib.Path:
+        return pathlib.Path(os.path.abspath(solution_prefix + '_{0}.json'.format(given_date)))
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore', '', tqdm.TqdmSynchronisationWarning)
+        prev_solution_file = None
+        for problem_date in tqdm.tqdm(problem_dates, desc='Processing date', leave=False):
+            solution_file = get_solution_file_path(problem_date)
+            if solution_file.is_file():
+                # warm starting simulation from last failure
+                prev_solution_file = solution_file
+                continue
+
+            run_mip_solver(problem_date, problem_records[problem_date]['week'], solution_file, time_step, gap_limit, prev_solution_file)
             prev_solution_file = solution_file
 
 
@@ -484,10 +547,12 @@ if __name__ == '__main__':
     if not command:
         parser_.print_help()
     elif command == 'generate':
-        generate(args_)
+        # old_generate(args_)
+        pass
     elif command == 'run':
         run_sequence(args_)
     elif command == 'elevation':
         elevation(args_)
     elif command == 'disturb':
-        disturb(args_)
+        # disturb(args_)
+        pass

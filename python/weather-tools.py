@@ -30,7 +30,6 @@ import logging
 import os
 import subprocess
 import warnings
-import re
 
 import matplotlib.colors
 import matplotlib.dates
@@ -44,6 +43,7 @@ import tabulate
 import tqdm
 
 import quake.city
+import quake.util
 import quake.weather.cache
 import quake.weather.metadata
 import quake.weather.problem
@@ -74,40 +74,6 @@ class JSONEncoder(json.JSONEncoder):
         return json.JSONEncoder.default(self, obj)
 
 
-class ParseDateAction(argparse.Action):
-    DATE_FORMAT = '%Y-%m-%d'
-
-    def __call__(self, parser: argparse.ArgumentParser, namespace: argparse.Namespace, values, option_string=None):
-        date_time_value = datetime.datetime.strptime(values, self.DATE_FORMAT)
-        setattr(namespace, self.dest, date_time_value)
-
-
-class ParseTimeDeltaAction(argparse.Action):
-    TIME_DELTA_PATTERN = re.compile(r'^(?:(?P<days>\d+)\s+days?)?\s*(?:(?P<hours>\d+):(?P<minutes>\d+):(?P<seconds>\d+))?$')
-
-    def __call__(self, parser: argparse.ArgumentParser, namespace: argparse.Namespace, values, option_string=None):
-        match = self.TIME_DELTA_PATTERN.match(values)
-        if not match:
-            raise ValueError("Pattern '{0}' is not recognized as a timedelta".format(values))
-
-        duration = datetime.timedelta()
-
-        groups = match.groupdict()
-        if 'days' in groups:
-            duration += datetime.timedelta(days=int(groups['days']))
-
-        if 'hours' in groups and groups['hours']:
-            duration += datetime.timedelta(hours=int(groups['hours']))
-
-        if 'minutes' in groups and groups['minutes']:
-            duration += datetime.timedelta(minutes=int(groups['minutes']))
-
-        if 'seconds' in groups and groups['seconds']:
-            duration += datetime.timedelta(seconds=int(groups['seconds']))
-
-        setattr(namespace, self.dest, duration)
-
-
 def parse_args():
     parser = argparse.ArgumentParser()
 
@@ -131,30 +97,30 @@ def parse_args():
     extend_parser.add_argument('--scenario-generator', default='', choices=scenario_generation_models_to_use, required=False)
 
     generate_parser = sub_parsers.add_parser(GENERATE_COMMAND)
-    generate_parser.add_argument('--from', action=ParseDateAction)
-    generate_parser.add_argument('--to', action=ParseDateAction)
-    generate_parser.add_argument('--initial-epoch', action=ParseDateAction)
-    generate_parser.add_argument('--time-step', action=ParseTimeDeltaAction, default=datetime.timedelta(days=1))
-    generate_parser.add_argument('--time-horizon', action=ParseTimeDeltaAction, default=datetime.timedelta(days=1))
+    generate_parser.add_argument('--from', action=quake.util.ParseDateAction)
+    generate_parser.add_argument('--to', action=quake.util.ParseDateAction)
+    generate_parser.add_argument('--initial-epoch', action=quake.util.ParseDateAction)
+    generate_parser.add_argument('--time-step', action=quake.util.ParseTimeDeltaAction, default=datetime.timedelta(days=1))
+    generate_parser.add_argument('--time-horizon', action=quake.util.ParseTimeDeltaAction, default=datetime.timedelta(days=1))
     generate_parser.add_argument('--problem-prefix')
     generate_parser.add_argument('--num-scenarios', default=0, type=int)
 
     generate_parser.add_argument('--scenario-generator', default='', choices=scenario_generation_models_to_use, required=False)
 
     plot_forecast_parser = sub_parsers.add_parser(PLOT_FORECAST_COMMAND)
-    plot_forecast_parser.add_argument('--from', action=ParseDateAction)
-    plot_forecast_parser.add_argument('--to', action=ParseDateAction)
+    plot_forecast_parser.add_argument('--from', action=quake.util.ParseDateAction)
+    plot_forecast_parser.add_argument('--to', action=quake.util.ParseDateAction)
     plot_forecast_parser.add_argument('--output-prefix')
 
     compute_var = sub_parsers.add_parser(VAR_COMMAND)
 
     plot_coregionalization_parser = sub_parsers.add_parser(PLOT_COREGIONALIZATION_COMMAND)
-    plot_coregionalization_parser.add_argument('--observation-start-time', action=ParseDateAction)
-    plot_coregionalization_parser.add_argument('--forecast-start-time', action=ParseDateAction)
+    plot_coregionalization_parser.add_argument('--observation-start-time', action=quake.util.ParseDateAction)
+    plot_coregionalization_parser.add_argument('--forecast-start-time', action=quake.util.ParseDateAction)
     plot_coregionalization_parser.add_argument('--output-prefix')
 
     plot_generated_scenarios_parser = sub_parsers.add_parser(PLOT_GENERATED_SCENARIOS_COMMAND)
-    plot_generated_scenarios_parser.add_argument('--from', action=ParseDateAction)
+    plot_generated_scenarios_parser.add_argument('--from', action=quake.util.ParseDateAction)
     plot_generated_scenarios_parser.add_argument('--num-scenarios', default=0, type=int)
     plot_generated_scenarios_parser.add_argument('--output-prefix')
 
@@ -523,7 +489,7 @@ def generate_command(args):
     configurations = []
     current_date = from_date_arg
     while current_date < to_date_arg:
-        current_end_date = current_date + time_horizon
+        current_end_date = min(to_date_arg, current_date + time_horizon)
         configurations.append((current_date, current_end_date, '{0}_{1}.json'.format(problem_prefix_arg, current_date.date())))
         current_date += time_step
 

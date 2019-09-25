@@ -1,12 +1,7 @@
 #!/usr/bin/env bash
+$SCRIPT=/home/pmateusz/dev/quake/python/year-simulation.py
 
-/home/pmateusz/dev/quake/python/weather-tools.py generate --problem-prefix=week --from=2013-01-01 --to=2014-01-01 --time-horizon="7 days" --initial-epoch=2012-12-22
-
-#/home/pmateusz/dev/quake/python/year-simulation.py generate --year=2014 --output=/home/pmateusz/dev/quake/current_review
-#/home/pmateusz/dev/quake/python/year-simulation.py generate --year=2015 --output=/home/pmateusz/dev/quake/current_review
-#/home/pmateusz/dev/quake/python/year-simulation.py generate --year=2016 --output=/home/pmateusz/dev/quake/current_review
-#/home/pmateusz/dev/quake/python/year-simulation.py generate --year=2017 --output=/home/pmateusz/dev/quake/current_review
-#/home/pmateusz/dev/quake/python/year-simulation.py generate --year=2018 --output=/home/pmateusz/dev/quake/current_review
+$SCRIPT run --problem-dir=/home/pmateusz/dev/quake/current_review --solution-prefix=solution --gap-limit=0.05 --time-step=00:00:15
 
 # generate files with elevation angle
 # /home/pmateusz/dev/quake/python/year-simulation.py elevation --data-dir=/home/pmateusz/dev/quake/data/simulation_upgrade
