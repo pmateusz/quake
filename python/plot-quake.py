@@ -29,29 +29,32 @@ import json
 import math
 import operator
 import os
+import pathlib
 import re
 import statistics
+import typing
 import warnings
-import pathlib
 
+import PIL
+import matplotlib.cm
 import matplotlib.dates
+import matplotlib.gridspec
 import matplotlib.pyplot
 import matplotlib.ticker
-import matplotlib.gridspec
-import matplotlib.cm
 import numpy
 import pandas
-import tqdm
-import PIL
 import tabulate
+import tqdm
 
-import quake.solution
-import quake.minizinc
-import quake.cloud_cover
-import quake.sunset_sunrise
 import quake.city
-import quake.transfer_rate
+import quake.cloud_cover
+import quake.minizinc
 import quake.multistage_simulation
+import quake.solution
+import quake.sunset_sunrise
+import quake.transfer_rate
+import quake.weather.problem
+import quake.weather.time_period
 
 TIME_KEY = 'Time'
 
@@ -406,12 +409,6 @@ def export_solution(args):
         excel_writer.save()
 
 
-def load_sunset_sunrise_index():
-    root_dir = '/home/pmateusz/dev/quake/data/sunset_sunrise'
-    file_paths = [os.path.join(root_dir, file_item) for file_item in os.listdir(root_dir)]
-    return quake.sunset_sunrise.SunsetSunriseIndex.from_files(file_paths)
-
-
 def plot_long_term_performance(args):
     data_dir = getattr(args, 'data_dir')
     solution_dir = getattr(args, 'solution_dir')
@@ -462,9 +459,27 @@ def plot_long_term_performance(args):
 
 
 def load_transfer_index():
-    transfer_index = quake.transfer_rate.TransferRateIndex \
-        .from_odf('/home/pmateusz/dev/quake/network_share/key_rate/data_24_05eff.ods')
-    return transfer_index
+    return quake.transfer_rate.TransferRateIndex.from_odf('/home/pmateusz/dev/quake/network_share/key_rate/data_24_05eff.ods')
+
+
+def load_communication_windows(data_dir: pathlib.Path, station: quake.city.City) -> typing.List[quake.weather.time_period.TimePeriod]:
+    problems = []
+    for file_name in os.listdir(str(data_dir)):
+        if file_name.startswith('week_'):
+            problem_path = os.path.join(str(data_dir), file_name)
+            problems.append(quake.weather.problem.Problem.read_json(problem_path))
+    problems.sort(key=lambda problem: problem.observation_period.begin)
+
+    communication_windows = []
+    for problem in problems:
+        communication_windows.extend(problem.get_communication_windows(station))
+    return communication_windows
+
+
+def load_sunset_sunrise_index():
+    root_dir = '/home/pmateusz/dev/quake/data/sunset_sunrise'
+    file_paths = [os.path.join(root_dir, file_item) for file_item in os.listdir(root_dir)]
+    return quake.sunset_sunrise.SunsetSunriseIndex.from_files(file_paths)
 
 
 def plot_aggregate(args):
@@ -1232,43 +1247,25 @@ def plot_communication_window(args):
     data_directory = getattr(args, 'data_dir')
     city = quake.city.from_name(getattr(args, 'station'))
 
+    communication_windows = load_communication_windows(data_directory, city)
     sunset_sunrise_index = load_sunset_sunrise_index()
 
-    elevation_frame_path = os.path.join(data_directory, 'filtered_elevation_data_frame.hdf')
-    elevation_frame = pandas.read_hdf(elevation_frame_path)
-
-    night_in_city = list(
-        map(lambda x: sunset_sunrise_index.is_night(city, x.to_pydatetime()), elevation_frame.index.tolist()))
-    elevation_frame = elevation_frame[night_in_city].copy()
-
-    date_index = list(set(map(lambda x: pandas.Timestamp(x).date(), elevation_frame.index.values)))
+    date_index = list(set(map(lambda period: period.begin.date(), communication_windows)))
     date_index.sort()
 
-    # matplotlib fill between does not work with timedelta, but supports datetime
-    start_reference_date = datetime.date(year=2018, month=1, day=1)
-    end_reference_date = datetime.date(year=2018, month=1, day=2)
-    start_date_time = datetime.datetime.combine(start_reference_date, datetime.time(hour=12, minute=0))
-    end_date_time = datetime.datetime.combine(end_reference_date, datetime.time(hour=12, minute=0))
+    min_date_time = min(period.begin for period in communication_windows)
+    max_date_time = max(period.end for period in communication_windows)
+    ref_start_date = min_date_time.date()
+    ref_end_date = (min_date_time + datetime.timedelta(days=1)).date()
+    ref_start_date_time = datetime.datetime.combine(ref_start_date, datetime.time(hour=12, minute=0))
+    ref_end_date_time = datetime.datetime.combine(ref_end_date, datetime.time(hour=12, minute=0))
 
-    rows = []
+    sunset_sunrise_data = []
     for date in date_index:
         sunrise_time = sunset_sunrise_index.sunrise(city, date)
         sunset_time = sunset_sunrise_index.sunset(city, date)
-        rows.append([
-            datetime.datetime.combine(end_reference_date,
-                                      datetime.time(hour=sunrise_time.hour,
-                                                    minute=sunrise_time.minute,
-                                                    second=sunrise_time.second)),
-            datetime.datetime.combine(start_reference_date,
-                                      datetime.time(hour=sunset_time.hour,
-                                                    minute=sunset_time.minute,
-                                                    second=sunset_time.second)),
-            start_date_time,
-            end_date_time])
-
-    sunset_sunrise_frame = pandas.DataFrame(columns=['Sunrise', 'Sunset', 'SunriseMin', 'SunsetMax'],
-                                            data=rows,
-                                            index=date_index)
+        sunset_sunrise_data.append([datetime.datetime.combine(ref_end_date, sunrise_time), datetime.datetime.combine(ref_start_date, sunset_time)])
+    sunset_sunrise_frame = pandas.DataFrame(columns=['Sunrise', 'Sunset'], data=sunset_sunrise_data, index=date_index)
 
     figure, axis = matplotlib.pyplot.subplots(1, 1, figsize=(FIGURE_WIDTH_SIZE, FIGURE_HEIGHT_SQUARE_SIZE))
     axis.fill_between(date_index, sunset_sunrise_frame['Sunrise'].values, sunset_sunrise_frame['Sunset'].values,
@@ -1276,73 +1273,21 @@ def plot_communication_window(args):
                       facecolor=BACKGROUND_COLOR,
                       alpha=BACKGROUND_ALPHA)
 
-    # plot transfer windows
-    start_points = []
-    end_points = []
-
-    series = elevation_frame[city.name]
-    filtered_series = series[series >= quake.transfer_rate.MIN_ANGLE]
-    # filtered_series = series
-
-    transfer_date_time_index = filtered_series.index.tolist()
-    transfer_data_time_it = iter(transfer_date_time_index)
-    first_date_time = next(transfer_data_time_it)
-    start_points.append(first_date_time)
-
-    prev_date_time = first_date_time
-    for current_date_time in transfer_data_time_it:
-        if (current_date_time - prev_date_time).seconds > 1:
-            end_points.append(prev_date_time)
-            start_points.append(current_date_time)
-        prev_date_time = current_date_time
-    end_points.append(transfer_date_time_index[-1])
-
-    observation_duration = collections.OrderedDict()
-    number_of_windows = collections.OrderedDict()
-    for start, end in zip(start_points, end_points):
-        duration = end - start
-        if start.date() not in observation_duration:
-            observation_duration[start.date()] = duration
-            number_of_windows[start.date()] = 1
-        else:
-            observation_duration[start.date()] += duration
-            number_of_windows[start.date()] += 1
-
-    # print('Duration of observations', min(observation_duration.values()), max(observation_duration.values()))
-    # print('Number of communication windows', min(number_of_windows.values()), max(number_of_windows.values()))
-
-    # cities = [quake.city.City.from_name(name) for name in elevation_frame.columns.values if
-    #           name not in {'Glasgow', 'Thurso'}]
-    # cities.sort(key=operator.attrgetter('name'))
-
-    # agg_raw_observation_frames = []
-    # for local_city in cities:
-    #     city_frame = elevation_frame[local_city.name].copy()
-    #     city_frame_filtered = city_frame[city_frame >= quake.transfer_rate.MIN_ANGLE].copy()
-    #     night_in_city = list(
-    #         map(lambda x: sunset_sunrise_index.is_night(local_city, x.to_pydatetime()), city_frame_filtered.index.tolist()))
-    #     city_frame_filtered = city_frame_filtered[night_in_city].copy()
-    #     agg_raw_observation_frames.append(city_frame_filtered.to_frame(local_city.name))
-    # agg_observation_frame = pandas.concat(agg_raw_observation_frames, axis=1)
-    # sharing_factor = agg_observation_frame.sum(axis=1, skipna=False).isna().sum() / len(agg_observation_frame.index)
-    # print(sharing_factor)
-
-    # convert to datetime
     def map_datetime(value):
-        if value.time() >= start_date_time.time():
-            reference_date = start_reference_date
+        if value.time() >= datetime.time(hour=12, minute=0):
+            reference_date = ref_start_date
         else:
-            reference_date = end_reference_date
+            reference_date = ref_end_date
         return datetime.datetime.combine(reference_date, value.time())
 
-    for start, end in zip(start_points, end_points):
+    for time_period in communication_windows:
         # the plot is showing night between two days, to maintain line vertical we overwrite date in the second day
-        if start.date() != end.date():
-            axis.plot([start.date(), start.date()], [map_datetime(start), map_datetime(end)], '-',
-                      color=FOREGROUND_COLOR)
+        if time_period.begin.date() != time_period.end.date():
+            axis.plot([time_period.begin.date(), time_period.begin.date()],
+                      [map_datetime(time_period.begin), map_datetime(time_period.end)], '-', color=FOREGROUND_COLOR)
         else:
-            axis.plot([start.date(), end.date()], [map_datetime(start), map_datetime(end)], '-',
-                      color=FOREGROUND_COLOR)
+            axis.plot([time_period.begin.date(), time_period.end.date()],
+                      [map_datetime(time_period.begin), map_datetime(time_period.end)], '-', color=FOREGROUND_COLOR)
 
     def date_time_formatter(x, pos=None):
         try:
@@ -1354,15 +1299,19 @@ def plot_communication_window(args):
     axis.yaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(date_time_formatter))
     axis.set_xlabel('Date')
     axis.set_ylabel('Time [hh:mm]')
-    axis.set_ylim(bottom=start_date_time, top=end_date_time)
-    axis.set_xlim(left=datetime.datetime(2018, 1, 1), right=datetime.datetime(2019, 1, 1))
+    axis.set_ylim(bottom=ref_start_date_time, top=ref_end_date_time)
+    axis.set_xlim(left=min_date_time, right=max_date_time)
+    axis.set_xticks([datetime.date(min_date_time.year, 1, 1),
+                     datetime.date(min_date_time.year, 4, 1),
+                     datetime.date(min_date_time.year, 8, 1),
+                     datetime.date(min_date_time.year, 12, 1)])
     figure.tight_layout()
     save_figure('observation_time_' + city.name)
 
-    axis.set_xlim(left=datetime.date(2018, 7, 1), right=datetime.date(2018, 9, 15))
-    axis.set_xticks([datetime.date(2018, 7, 1), datetime.date(2018, 8, 1), datetime.date(2018, 9, 1)])
-    axis.set_ylim(bottom=datetime.datetime.combine(start_date_time.date(), datetime.time(20, 00)),
-                  top=datetime.datetime.combine(start_date_time.date(), datetime.time(21, 30)))
+    axis.set_xlim(left=datetime.date(min_date_time.year, 7, 1), right=datetime.date(min_date_time.year, 9, 15))
+    axis.set_xticks([datetime.date(min_date_time.year, 7, 1), datetime.date(min_date_time.year, 8, 1), datetime.date(min_date_time.year, 9, 1)])
+    axis.set_ylim(bottom=datetime.datetime.combine(ref_start_date, datetime.time(22, 30)),
+                  top=datetime.datetime.combine(ref_end_date_time, datetime.time(00, 00)))
     figure.tight_layout()
     save_figure('observation_time_magnified_' + city.name)
 

@@ -1,6 +1,7 @@
 import copy
 import datetime
 import json
+import typing
 
 import numpy as np
 import pandas
@@ -211,6 +212,21 @@ class Problem:
             index[station] = communication_frames
 
         return index
+
+    def get_communication_windows(self, station: quake.city.City) -> typing.List[quake.weather.time_period.TimePeriod]:
+        windows = []
+        for station_json in self.__json_object['stations']:
+            local_station_name = station_json['station']
+            local_station = quake.city.City.from_name(local_station_name)
+
+            if local_station != station:
+                continue
+
+            for communication_window_json in station_json['communication_windows']:
+                period_json = communication_window_json['period']
+                window = quake.weather.time_period.TimePeriod.from_json(period_json)
+                windows.append(window)
+        return windows
 
     @property
     def json_object(self):

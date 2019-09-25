@@ -410,9 +410,9 @@ std::unordered_map<quake::GroundStation, std::vector<boost::posix_time::time_per
                        && can_transfer(ground_station_elevation[end_transfer_delta]);
                        ++end_transfer_delta);
 
-                elevation_windows.emplace_back(boost::posix_time::time_period(
-                        start_time + boost::posix_time::seconds(begin_transfer_delta),
-                        boost::posix_time::seconds(end_transfer_delta - begin_transfer_delta)));
+                boost::posix_time::time_period elevation_window{start_time + boost::posix_time::seconds(begin_transfer_delta),
+                                                                boost::posix_time::seconds(end_transfer_delta - begin_transfer_delta)};
+                elevation_windows.emplace_back(elevation_window);
                 begin_transfer_delta = end_transfer_delta;
             }
         }
