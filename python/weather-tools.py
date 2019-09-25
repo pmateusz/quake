@@ -800,13 +800,6 @@ def plot_coregionalization(args):
     matplotlib.pyplot.close(fig)
 
 
-def load_problem(file_path):
-    with open(file_path, 'r') as input_stream:
-        problem_json = json.load(input_stream)
-        problem = quake.weather.problem.Problem(problem_json)
-        return problem
-
-
 def analyze_command(args):
     problem_dir = getattr(args, 'problem_dir')
     solution_dir = getattr(args, 'solution_dir')
@@ -873,7 +866,7 @@ def analyze_command(args):
     problem_files = [os.path.join(problem_dir, problem_file) for problem_file in os.listdir(problem_dir)]
     problem_files = list(filter(is_json_file, problem_files))
     with concurrent.futures.thread.ThreadPoolExecutor() as executor:
-        load_problem_futures = {executor.submit(load_problem, problem_file): problem_file for problem_file in
+        load_problem_futures = {executor.submit(quake.weather.problem.Problem.read_json, problem_file): problem_file for problem_file in
                                 problem_files}
         for future in tqdm.tqdm(concurrent.futures.as_completed(load_problem_futures),
                                 total=len(load_problem_futures), desc='Loading Problem Files', leave=False):

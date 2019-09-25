@@ -1,5 +1,6 @@
 import copy
 import datetime
+import json
 
 import numpy as np
 import pandas
@@ -98,6 +99,22 @@ class Problem:
             model_to_use[city.name] = city_model
 
         self.__json_object['mean_variance_model'] = model_to_use
+
+    def get_key_rate_frame(self) -> pandas.DataFrame:
+        frames = []
+        for station in self.stations:
+            for frame in self.__communication_frames[station]:
+                key_rate_frame = frame['key_rate'].to_frame()
+                key_rate_frame['city'] = station
+                key_rate_frame['date_time'] = key_rate_frame.index
+                key_rate_frame.reset_index(drop=True, inplace=True)
+                frames.append(key_rate_frame)
+        master_frame = pandas.concat(frames)
+        master_pivot_frame = pandas.pivot_table(master_frame, columns=['city'], values=['key_rate'], index=['date_time'])
+        master_pivot_frame.columns = master_pivot_frame.columns.droplevel()
+        master_pivot_frame.fillna(value=0.0, inplace=True)
+        master_pivot_frame = master_pivot_frame / 2.0  # correction from 128 keys to 256 keys
+        return master_pivot_frame
 
     def get_scenario(self, scenario_name):
         forecasts_json = self.__json_object['forecasts']
@@ -212,6 +229,12 @@ class Problem:
     def scenario_generator(self):
         metadata = quake.weather.metadata.from_json(self.__json_object['metadata'])
         return metadata[quake.weather.metadata.SCENARIO_GENERATOR]
+
+    @staticmethod
+    def read_json(file_path: str) -> 'Problem':
+        with open(file_path, 'r') as input_stream:
+            json_body = json.load(input_stream)
+            return Problem(json_body)
 
     @staticmethod
     def __frame_to_dict(frame):

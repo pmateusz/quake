@@ -21,7 +21,6 @@
 # SOFTWARE.
 
 import argparse
-import bisect
 import collections
 import csv
 import datetime
@@ -33,6 +32,7 @@ import os
 import re
 import statistics
 import warnings
+import pathlib
 
 import matplotlib.dates
 import matplotlib.pyplot
@@ -42,7 +42,6 @@ import matplotlib.cm
 import numpy
 import pandas
 import tqdm
-import scipy.stats
 import PIL
 import tabulate
 
@@ -1070,52 +1069,20 @@ def plot_all_service_levels(args):
     # __plot(config_small_perturbed, 'service_level_global_run_small_perturbed')
 
 
-def plot_week_performance_v2(args):
-    solution_pattern = re.compile(r'^solution.*?_(?P<date>\d+-\d+-\d+)\.json$')
+def plot_week_performance(args):
+    problem_file = getattr(args, 'problem-file')
+    solution_file = getattr(args, 'solution-file')
 
-    data_directory = getattr(args, 'data_dir')
-    solution_directory = getattr(args, 'solution_dir')
-    raw_date = getattr(args, 'date')
-    solution_file_path = getattr(args, 'solution_file', None)
+    import quake.weather.problem
+    import quake.weather.solution
 
-    def parse_date(value):
-        local_datetime = datetime.datetime.strptime(value, '%Y-%m-%d')
-        return local_datetime.date()
+    problem = quake.weather.problem.Problem.read_json(problem_file)
+    solution = quake.weather.solution.Solution.read_json(solution_file)
 
-    def to_timestamp(value):
-        return pandas.Timestamp(year=value.year, month=value.month, day=value.day,
-                                hour=value.hour, minute=value.minute, second=value.second)
-
-    date = parse_date(raw_date)
-
-    weather_corrected_frame_path = os.path.join(data_directory, 'weather_corrected_data_frame.hdf')
-    transfer_frame = pandas.read_hdf(weather_corrected_frame_path)
-    cities = get_cities(transfer_frame.columns.values)
-
-    if not solution_file_path:
-        for file_item in os.listdir(os.path.join(data_directory, solution_directory)):
-            match = solution_pattern.match(file_item)
-            if not match:
-                continue
-            local_date = parse_date(match.group('date'))
-            if date == local_date:
-                solution_file_path = os.path.join(data_directory, solution_directory, file_item)
-
-        if not solution_file_path:
-            raise ValueError("Failed to find solution file for the date '{0}'".format(raw_date))
-
-    solution_bundle = load_solution_bundle(solution_file_path)
-    solution = solution_bundle.solutions[0]
-    min_start_time = min(job.start_time for job in solution.jobs)
-    max_end_time = max(job.end_time for job in solution.jobs)
-
-    min_timestamp = to_timestamp(min_start_time)
-    max_timestamp = to_timestamp(max_end_time)
-
-    filtered_transfer_frame = transfer_frame[min_timestamp:max_timestamp]
+    key_rate_frame = problem.get_key_rate_frame()
 
     split_points = []
-    times = filtered_transfer_frame.index.tolist()
+    times = key_rate_frame.index.tolist()
     for position in range(1, len(times)):
         time_delta = times[position] - times[position - 1]
         assert time_delta.seconds >= 1
@@ -1124,23 +1091,25 @@ def plot_week_performance_v2(args):
 
     assert len(split_points) > 1
 
+    cities = problem.stations
+
     split_frames = []
-    split_frames.append(filtered_transfer_frame[:split_points[0] - pandas.Timedelta(seconds=1)])
+    split_frames.append(key_rate_frame[:split_points[0] - pandas.Timedelta(seconds=1)])
     for split_point in range(1, len(split_points)):
-        split_frames.append(filtered_transfer_frame[
+        split_frames.append(key_rate_frame[
                             split_points[split_point - 1]:split_points[split_point] - pandas.Timedelta(seconds=1)])
-    split_frames.append(filtered_transfer_frame[split_points[-1]:])
+    split_frames.append(key_rate_frame[split_points[-1]:])
 
     split_jobs = [list() for _ in split_frames]
-    for job in solution.jobs:
+    for observation in solution.observations:
         for index, frame in enumerate(split_frames):
-            if job.end_time < frame.index.min():
+            if observation.period.end < frame.index.min():
                 break
-            if job.start_time > frame.index.max():
+            if observation.period.begin > frame.index.max():
                 continue
-            if (frame.index.min() <= job.start_time < frame.index.max()) \
-                    or (job.start_time < frame.index.min() < job.end_time):
-                split_jobs[index].append(job)
+            if (frame.index.min() <= observation.period.begin < frame.index.max()) \
+                    or (observation.period.begin < frame.index.min() < observation.period.end):
+                split_jobs[index].append(observation)
 
     frame_ratios = [(frame.index.max() - frame.index.min()).seconds for frame in split_frames]
 
@@ -1157,9 +1126,7 @@ def plot_week_performance_v2(args):
     for city_index, city in enumerate(cities):
         first_row_ax = fig.add_subplot(grid_spec[city_index * len(frame_ratios)])
         for frame_index in range(1, len(frame_ratios)):
-            fig.add_subplot(grid_spec[city_index * len(frame_ratios) + frame_index],
-                            sharey=first_row_ax,
-                            sharex=first_row_ax)
+            fig.add_subplot(grid_spec[city_index * len(frame_ratios) + frame_index], sharey=first_row_ax, sharex=first_row_ax)
 
     def generate_ticks(start, end):
         time_step = pandas.Timedelta(minutes=5)
@@ -1183,7 +1150,7 @@ def plot_week_performance_v2(args):
                                           hour=middle_slot.hour, minute=middle_slot.minute, second=1))
         return ticks
 
-    def setup_y_labels(axis, hide=True):
+    def setup_y_labels(axis: matplotlib.pyplot.axis, hide=True):
         axis.set_ylim(bottom=0, top=40)
         if hide:
             axis.yaxis.set_ticklabels([])
@@ -1191,7 +1158,7 @@ def plot_week_performance_v2(args):
         else:
             axis.set_yticks([0, 25])
 
-    def setup_x_labels(axis, frame, hide=True):
+    def setup_x_labels(axis: matplotlib.pyplot.axis, frame: pandas.DataFrame, hide=True):
         if hide:
             axis.xaxis.set_ticklabels([])
             axis.get_xaxis().set_visible(False)
@@ -1205,38 +1172,36 @@ def plot_week_performance_v2(args):
                 minute_interval = (frame.index.max() - frame.index.min()).seconds // 60
                 axis.xaxis.set_major_locator(matplotlib.dates.MinuteLocator(interval=minute_interval))
 
-    def plot_transfer_rate(ax, data):
-        ax.plot(data, c=FOREGROUND_COLOR, linewidth=1.0, alpha=0.8)
+    def plot_transfer_rate(axis: matplotlib.pyplot.Axes, data):
+        axis.plot(data, c=FOREGROUND_COLOR, linewidth=1.0, alpha=0.8)
 
     for city_index, city in enumerate(cities[:-1]):
         first_row_ax = matplotlib.pyplot.subplot(grid_spec[city_index * len(split_frames)])
-        plot_transfer_rate(first_row_ax,
-                           transfer_frame[city.name][split_frames[0].index.min():split_frames[0].index.max()])
+        plot_transfer_rate(first_row_ax, key_rate_frame[city][split_frames[0].index.min():split_frames[0].index.max()])
         setup_y_labels(first_row_ax, hide=False)
         setup_x_labels(first_row_ax, split_frames[0], hide=True)
         for split_index, frame in enumerate(split_frames[1:], start=1):
             ax = matplotlib.pyplot.subplot(grid_spec[city_index * len(split_frames) + split_index])
-            plot_transfer_rate(ax, transfer_frame[city.name][frame.index.min():frame.index.max()])
+            plot_transfer_rate(ax, key_rate_frame[city][frame.index.min():frame.index.max()])
             setup_x_labels(ax, frame, hide=True)
             setup_y_labels(ax)
 
     last_city = cities[-1]
     last_city_index = len(cities) - 1
     first_row_ax = matplotlib.pyplot.subplot(grid_spec[last_city_index * len(split_frames)])
-    plot_transfer_rate(first_row_ax,
-                       transfer_frame[last_city.name][split_frames[0].index.min():split_frames[0].index.max()])
+    plot_transfer_rate(first_row_ax, key_rate_frame[last_city][split_frames[0].index.min():split_frames[0].index.max()])
     setup_x_labels(first_row_ax, split_frames[0], hide=False)
     setup_y_labels(first_row_ax, hide=False)
 
     for split_index, frame in enumerate(split_frames[1:], start=1):
         ax = matplotlib.pyplot.subplot(grid_spec[last_city_index * len(split_frames) + split_index])
-        plot_transfer_rate(ax, transfer_frame[last_city.name][frame.index.min():frame.index.max()])
+        plot_transfer_rate(ax, key_rate_frame[last_city][frame.index.min():frame.index.max()])
         setup_x_labels(ax, frame, hide=False)
         setup_y_labels(ax)
 
     for city_index, city in enumerate(cities):
         last_ax = matplotlib.pyplot.subplot(grid_spec[city_index * len(split_frames) + len(split_frames) - 1])
-        last_ax.annotate(city.name,
+        last_ax.annotate(city,
                          xy=(1.0, 0.80),
                          xycoords='axes fraction',
                          horizontalalignment='right',
@@ -1244,12 +1209,11 @@ def plot_week_performance_v2(args):
                          bbox=BBOX_STYLE)
 
         for frame_index, frame in enumerate(split_frames):
-            jobs = [job for job in split_jobs[frame_index] if job.station == city.name]
+            jobs = [job for job in split_jobs[frame_index] if job.station == city]
             if jobs:
                 ax = matplotlib.pyplot.subplot(grid_spec[city_index * len(split_frames) + frame_index])
                 for job in jobs:
-                    series = frame[to_timestamp(job.start_time + datetime.timedelta(seconds=30))
-                                   :to_timestamp(job.end_time)][job.station]
+                    series = frame[job.period.begin:job.period.end][job.station]
                     ax.plot(series, c='black', linewidth=2.0)
 
     label_x_index = (len(cities) - 1) * len(split_frames) + len(split_frames) // 2
@@ -1261,170 +1225,7 @@ def plot_week_performance_v2(args):
     ax.set_ylabel('Key Rate [1/s]')
 
     grid_spec.update(left=0.05, right=0.98, bottom=0.25, top=0.98, wspace=0.30, hspace=0.08)
-    save_figure('solution_week_v2_' + raw_date, rotate=270)
-
-
-def plot_week_performance(args):
-    solution_pattern = re.compile(r'^solution.*?_(?P<date>\d+-\d+-\d+)\.json$')
-
-    data_directory = getattr(args, 'data_dir')
-    solution_directory = getattr(args, 'solution_dir')
-    raw_date = getattr(args, 'date')
-
-    def parse_date(value):
-        local_datetime = datetime.datetime.strptime(value, '%Y-%m-%d')
-        return local_datetime.date()
-
-    def to_timestamp(value):
-        return pandas.Timestamp(year=value.year, month=value.month, day=value.day,
-                                hour=value.hour, minute=value.minute, second=value.second)
-
-    date = parse_date(raw_date)
-
-    weather_corrected_frame_path = os.path.join(data_directory, 'weather_corrected_data_frame.hdf')
-    transfer_frame = pandas.read_hdf(weather_corrected_frame_path)
-
-    solution_file_path = None
-    for file_item in os.listdir(os.path.join(data_directory, solution_directory)):
-        match = solution_pattern.match(file_item)
-        if not match:
-            continue
-        local_date = parse_date(match.group('date'))
-        if date == local_date:
-            solution_file_path = os.path.join(data_directory, solution_directory, file_item)
-
-    if not solution_file_path:
-        raise ValueError("Failed to find solution file for the date '{0}'".format(raw_date))
-
-    solution_bundle = load_solution_bundle(solution_file_path)
-    solution = solution_bundle.solutions[0]
-    min_start_time = min(job.start_time for job in solution.jobs)
-    max_end_time = max(job.end_time for job in solution.jobs)
-
-    min_timestamp = to_timestamp(min_start_time)
-    max_timestamp = to_timestamp(max_end_time)
-
-    filtered_transfer_frame = transfer_frame[min_timestamp:max_timestamp]
-
-    split_points = []
-    times = filtered_transfer_frame.index.tolist()
-    for position in range(1, len(times)):
-        time_delta = times[position] - times[position - 1]
-        assert time_delta.seconds >= 1
-        if time_delta.seconds > 1:
-            split_points.append(times[position])
-
-    assert len(split_points) > 1
-
-    split_frames = []
-    split_frames.append(filtered_transfer_frame[:split_points[0] - pandas.Timedelta(seconds=1)])
-    for split_point in range(1, len(split_points)):
-        split_frames.append(filtered_transfer_frame[
-                            split_points[split_point - 1]:split_points[split_point] - pandas.Timedelta(seconds=1)])
-    split_frames.append(filtered_transfer_frame[split_points[-1]:])
-
-    split_jobs = [list() for _ in split_frames]
-    for job in solution.jobs:
-        for index, frame in enumerate(split_frames):
-            if job.end_time < frame.index.min():
-                break
-            if job.start_time > frame.index.max():
-                continue
-            if (frame.index.min() <= job.start_time < frame.index.max()) \
-                    or (job.start_time < frame.index.min() < job.end_time):
-                split_jobs[index].append(job)
-
-    frame_ratios = [(frame.index.max() - frame.index.min()).seconds for frame in split_frames]
-
-    fig = matplotlib.pyplot.figure(figsize=(12, 8))
-    grid_spec = matplotlib.gridspec.GridSpec(1, len(frame_ratios),
-                                             width_ratios=frame_ratios)
-
-    first_axis = fig.add_subplot(grid_spec[0])
-    axes = [first_axis]
-
-    def date_formatter(x, pos=None):
-        try:
-            local_datetime = matplotlib.dates.num2date(x)
-            return local_datetime.strftime('%d-%m %H:%M')
-        except ValueError:
-            return None
-
-    first_axis.set_ylabel('Key Rate')
-    matplotlib.pyplot.setp(first_axis.get_xticklabels(), rotation=90)
-    first_axis.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(date_formatter))
-
-    for index in range(1, len(frame_ratios)):
-        axis = fig.add_subplot(grid_spec[index], sharey=first_axis)
-        axis.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(date_formatter))
-        axes.append(axis)
-        matplotlib.pyplot.setp(axis.get_yticklabels(), visible=False)
-        matplotlib.pyplot.setp(axis.get_xticklabels(), rotation=90)
-
-        if index != 0:
-            axis.get_yaxis().set_visible(False)
-
-    def generate_ticks(start, end):
-        time_step = pandas.Timedelta(minutes=5)
-        ticks = []
-
-        tick = pandas.Timestamp(year=start.year,
-                                month=start.month,
-                                day=start.day,
-                                hour=start.hour,
-                                minute=(start.minute // 5) * 5,
-                                second=0)
-        while tick < end:
-            if tick >= start:
-                ticks.append(tick)
-            tick += time_step
-
-        if not ticks:
-            seconds_to_move = (end - start).seconds // 2
-            middle_slot = start + pandas.Timedelta(seconds=seconds_to_move)
-            ticks.append(pandas.Timestamp(year=middle_slot.year, month=middle_slot.month, day=middle_slot.day,
-                                          hour=middle_slot.hour, minute=middle_slot.minute, second=1))
-        return ticks
-
-    cities = [quake.city.from_name(city_name) for city_name in transfer_frame.columns.values]
-    cities.sort(key=operator.attrgetter('name'))
-
-    color_map = matplotlib.cm.get_cmap('tab10')
-    station_colors = {city.name: color_map.colors[color_index] for color_index, city in enumerate(cities)}
-    station_handles = {}
-    for index, frame in enumerate(split_frames):
-        if not split_jobs[index]:
-            continue
-
-        first_job = split_jobs[index][0]
-        series = frame[max(frame.index.min(), to_timestamp(first_job.start_time)) \
-                       :min(frame.index.max(), to_timestamp(first_job.end_time))][first_job.station]
-        handle = axes[index].plot(series, '-', marker='', color=station_colors[first_job.station], linewidth='1')
-        station_handles[first_job.station] = handle[0]
-
-        for job in split_jobs[index][1:]:
-            series = frame[to_timestamp(job.start_time + datetime.timedelta(seconds=30))
-                           :to_timestamp(job.end_time)][job.station]
-            handle = axes[index].plot(series, '-', marker='', color=station_colors[job.station], linewidth='1')
-            station_handles[job.station] = handle[0]
-
-        generated_ticks = generate_ticks(frame.index.min(), frame.index.max())
-        if len(generated_ticks) >= 1:
-            axes[index].xaxis.set_ticks(generated_ticks, minor=False)
-        else:
-            minutes = (frame.index.max() - frame.index.min()).seconds // 60
-            axes[index].xaxis.set_major_locator(matplotlib.dates.MinuteLocator(interval=minutes))
-    axes[len(axes) // 2].set_xlabel('Time [DD:MM hh:mm]')
-
-    legend_items = list(station_handles.items())
-    legend_items.sort(key=operator.itemgetter(0))
-    axes[len(axes) // 2].legend(map(operator.itemgetter(1), legend_items),
-                                map(operator.itemgetter(0), legend_items),
-                                ncol=int(math.ceil(len(legend_items) / 2)),
-                                loc='upper center',
-                                bbox_to_anchor=(0.5, -0.18))
-    grid_spec.update(left=0.05, right=0.98, bottom=0.20, top=0.98, wspace=0.08, hspace=0.08)
-    save_figure('solution_week_' + raw_date)
+    save_figure('solution_week_' + str(problem.observation_period.begin.date()), rotate=270)
 
 
 def plot_communication_window(args):
@@ -1860,15 +1661,8 @@ def parse_args():
     long_term_performance_parser.add_argument('--solution-dir')
 
     week_performance_parser = subparsers.add_parser('week-performance')
-    week_performance_parser.add_argument('--data-dir')
-    week_performance_parser.add_argument('--solution-dir')
-    week_performance_parser.add_argument('--date')
-
-    week_performance_v2_parser = subparsers.add_parser('week-performance-v2')
-    week_performance_v2_parser.add_argument('--data-dir')
-    week_performance_v2_parser.add_argument('--solution-dir')
-    week_performance_v2_parser.add_argument('--date')
-    week_performance_v2_parser.add_argument('--solution-file')
+    week_performance_parser.add_argument('problem-file', type=pathlib.Path)
+    week_performance_parser.add_argument('solution-file', type=pathlib.Path)
 
     aggregate_parser = subparsers.add_parser('aggregate')
     aggregate_parser.add_argument('--data-dir')
@@ -1932,8 +1726,6 @@ if __name__ == '__main__':
         plot_service_level(args_)
     elif command == 'week-performance':
         plot_week_performance(args_)
-    elif command == 'week-performance-v2':
-        plot_week_performance_v2(args_)
     elif command == 'communication-window':
         plot_communication_window(args_)
     elif command == 'network-traffic':

@@ -1,4 +1,5 @@
 import datetime
+import json
 from typing import List, Dict, Any
 
 import quake.city
@@ -6,20 +7,45 @@ import quake.weather.metadata
 import quake.weather.time_period
 
 
+class Observation:
+
+    def __init__(self, station: quake.city.City, period: quake.weather.time_period.TimePeriod):
+        self.__station = station
+        self.__period = period
+
+    @property
+    def period(self) -> quake.weather.time_period.TimePeriod:
+        return self.__period
+
+    @property
+    def station(self) -> quake.city.City:
+        return self.__station
+
+
 class Solution:
 
     def __init__(self, json_object: Dict[str, Any]):
         self.__json_object = json_object
 
-    def observations(self, station: quake.city.City) -> List[quake.weather.time_period.TimePeriod]:
-        all_observations = [observations for station_name, observations in self.__json_object['observations'] if station_name == station.name]
+    # def observations(self, station: quake.city.City) -> List[quake.weather.time_period.TimePeriod]:
+    #     all_observations = [observations for station_name, observations in self.__json_object['observations'] if station_name == station.name]
+    #
+    #     if not all_observations:
+    #         return []
+    #
+    #     assert len(all_observations) == 1
+    #
+    #     return [quake.weather.time_period.TimePeriod.from_json(json_object) for json_object in all_observations[0]]
 
-        if not all_observations:
-            return []
+    @property
+    def observations(self) -> List[Observation]:
+        all_observations = [Observation(quake.city.from_name(station_name), quake.weather.time_period.TimePeriod.from_json(json_time_period))
+                            for station_name, json_time_periods in self.__json_object['observations']
+                            for json_time_period in json_time_periods]
 
-        assert len(all_observations) == 1
+        all_observations.sort(key=lambda observation: observation.period.begin)
 
-        return [quake.weather.time_period.TimePeriod.from_json(json_object) for json_object in all_observations[0]]
+        return all_observations
 
     @property
     def gap(self) -> float:
@@ -72,3 +98,9 @@ class Solution:
     @property
     def __metadata(self) -> Dict[str, Any]:
         return quake.weather.metadata.from_json(self.__json_object['metadata'])
+
+    @staticmethod
+    def read_json(file_path: str) -> 'Solution':
+        with open(file_path, 'r') as input_stream:
+            json_object = json.load(input_stream)
+            return Solution(json_object)
