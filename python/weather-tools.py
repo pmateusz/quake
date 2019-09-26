@@ -138,15 +138,6 @@ def build_cache_command(args):
     weather_cache.save()
 
 
-def process_parallel_map(data, function):
-    results = []
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        futures = [executor.submit(function, chunk) for chunk in data]
-        for future in tqdm.tqdm(futures):
-            results.append(future.result())
-    return results
-
-
 def covariance_command(args):
     def save_matrix(matrix, file_name):
         csv_file = file_name + '.csv'

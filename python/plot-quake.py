@@ -33,7 +33,6 @@ import pathlib
 import re
 import statistics
 import typing
-import warnings
 
 import PIL
 import matplotlib.cm
@@ -44,7 +43,6 @@ import matplotlib.ticker
 import numpy
 import pandas
 import tabulate
-import tqdm
 
 import quake.city
 import quake.cloud_cover
@@ -53,6 +51,7 @@ import quake.multistage_simulation
 import quake.solution
 import quake.sunset_sunrise
 import quake.transfer_rate
+import quake.util
 import quake.weather.problem
 import quake.weather.time_period
 
@@ -285,7 +284,7 @@ def save_figure(filename_no_ext, rotate=None):
     # TODO: increase dpi for publication
     matplotlib.pyplot.savefig(filename, bbox_inches='tight', format=FORMAT, transparent=True, dpi=300)
 
-    if rotate:
+    if rotate and FORMAT != 'pdf':
         image = PIL.Image.open(filename)
         rotated_image = image.rotate(rotate, expand=True)
         rotated_image.save(filename)
@@ -376,12 +375,6 @@ def plot_bundle(args):
     save_figure(output_file + '_auto_scale')
 
 
-def get_cities(names):
-    cities = [quake.city.City.from_name(name) for name in names]
-    cities.sort(key=operator.attrgetter('latitude'), reverse=True)
-    return cities
-
-
 def export_solution(args):
     output_file_no_ext = getattr(args, 'output')
     forecast_input_file = getattr(args, 'forecast_input')
@@ -462,18 +455,54 @@ def load_transfer_index():
     return quake.transfer_rate.TransferRateIndex.from_odf('/home/pmateusz/dev/quake/network_share/key_rate/data_24_05eff.ods')
 
 
-def load_communication_windows(data_dir: pathlib.Path, station: quake.city.City) -> typing.List[quake.weather.time_period.TimePeriod]:
-    problems = []
-    for file_name in os.listdir(str(data_dir)):
-        if file_name.startswith('week_'):
-            problem_path = os.path.join(str(data_dir), file_name)
-            problems.append(quake.weather.problem.Problem.read_json(problem_path))
-    problems.sort(key=lambda problem: problem.observation_period.begin)
+class ProblemBundle:
 
-    communication_windows = []
-    for problem in problems:
-        communication_windows.extend(problem.get_communication_windows(station))
-    return communication_windows
+    def __init__(self, problems: typing.List[quake.weather.problem.Problem]):
+        self.__problems = problems
+
+    def get_communication_windows(self, station: quake.city.City) -> typing.List[quake.weather.time_period.TimePeriod]:
+        communication_windows = []
+        for problem in self.__problems:
+            communication_windows.extend(problem.get_communication_windows(station))
+        return communication_windows
+
+    def get_cloud_cover_frame(self) -> pandas.DataFrame:
+        return pandas.concat([problem.get_cloud_cover_frame() for problem in self.__problems])
+
+    def get_aggregated_observation_frame(self) -> pandas.DataFrame:
+        data = []
+        for problem in self.__problems:
+            for station in problem.stations:
+                for period in problem.get_communication_windows(station):
+                    data.append({'station': station, 'date': period.begin.date(), 'length': period.length})
+        frame = pandas.DataFrame(data=data)
+        agg_frame = frame.groupby(['date', 'station'])['length'].sum().to_frame()
+        agg_frame.reset_index(inplace=True)
+        pivot_frame = agg_frame.pivot_table(index=['date'], columns=['station'], values=['length'], aggfunc='sum')
+        pivot_frame.columns = pivot_frame.columns.get_level_values(1)
+        return pivot_frame
+
+    def get_cloud_cover_frame(self) -> pandas.DataFrame:
+        return pandas.concat([problem.get_cloud_cover_frame() for problem in self.__problems])
+
+    def get_key_rate_frame(self) -> pandas.DataFrame:
+        return pandas.concat([problem.get_key_rate_frame(scenario_name='real') for problem in self.__problems])
+
+    @property
+    def stations(self) -> typing.List[quake.city.City]:
+        return self.__problems[0].stations
+
+    @staticmethod
+    def read_from_dir(data_dir: str) -> 'ProblemBundle':
+        problem_files = []
+        for file_name in os.listdir(str(data_dir)):
+            if file_name.startswith('week_'):
+                problem_path = os.path.join(str(data_dir), file_name)
+                problem_files.append(problem_path)
+
+        problems = quake.util.process_parallel_map(problem_files, quake.weather.problem.Problem.read_json)
+        problems.sort(key=lambda problem: problem.observation_period.begin)
+        return ProblemBundle(problems)
 
 
 def load_sunset_sunrise_index():
@@ -483,162 +512,25 @@ def load_sunset_sunrise_index():
 
 
 def plot_aggregate(args):
-    data_directory = getattr(args, 'data_dir')
+    data_dir = getattr(args, 'data_dir')
+    problem_bundle = ProblemBundle.read_from_dir(data_dir)
 
-    elevation_data_frame_path = os.path.join(data_directory, 'filtered_elevation_data_frame.hdf')
-    cloud_cover_data_frame_path = os.path.join(data_directory, 'cloud_cover_data_frame.hdf')
-    transfer_frame_path = os.path.join(data_directory, 'transfer_data_frame.hdf')
-    weather_corrected_frame_path = os.path.join(data_directory, 'weather_corrected_data_frame.hdf')
+    cities = problem_bundle.stations
+    weather_corrected_key_rate_frame = problem_bundle.get_key_rate_frame()
+    agg_weather_corrected_key_rate_frame = weather_corrected_key_rate_frame.resample('D').sum()
 
-    sunset_sunrise_index = load_sunset_sunrise_index()
+    cloud_cover_frame = problem_bundle.get_cloud_cover_frame()
+    agg_cloud_cover_frame = cloud_cover_frame.resample('D').agg(numpy.nanmean)
 
-    if not os.path.isfile(elevation_data_frame_path):
-        def get_hdf_file(directory, date):
-            return os.path.join(directory, 'elevation_frame_' + date.strftime('%Y-%m-%d') + '.hdf')
-
-        def reload_hdf_files(directory):
-            filename_match = re.compile(r'^elevation_(?P<date>\d+-\d+-\d+).csv$')
-            elevation_files = []
-            for file_name in os.listdir(directory):
-                match = filename_match.match(file_name)
-                if not match:
-                    continue
-
-                date_time = datetime.datetime.strptime(match.group('date'), '%Y-%m-%d')
-                file_path = os.path.join(directory, file_name)
-                elevation_files.append((date_time, file_path))
-                elevation_files.sort(key=operator.itemgetter(0))
-
-            with warnings.catch_warnings():
-                warnings.filterwarnings('ignore', category=tqdm.TqdmSynchronisationWarning)
-                for date, file_path in tqdm.tqdm(elevation_files):
-                    hdf_file_path = get_hdf_file(directory, date)
-                    if not os.path.isfile(hdf_file_path):
-                        data_frame = load_elevation(file_path)
-                        data_frame.to_hdf(hdf_file_path, key='df', mode='w')
-
-            ordered_dates = [date for date, file_path in elevation_files]
-            return ordered_dates
-
-        file_dates = reload_hdf_files(data_directory)
-        filtered_data_frames = []
-        for date in tqdm.tqdm(file_dates):
-            data_frame = pandas.read_hdf(get_hdf_file(data_directory, date))
-            cities = [quake.city.City.from_name(name) for name in data_frame.columns.values[1:]]
-
-            def is_night(date_time):
-                return any(sunset_sunrise_index.is_night(city, date_time) for city in cities)
-
-            result_frame = data_frame[data_frame.max(axis=1) >= quake.transfer_rate.MIN_ANGLE]
-            filtered_data_frames.append(result_frame[result_frame['Time'].apply(is_night)].copy())
-        elevation_data_frame = pandas.concat(filtered_data_frames)
-        elevation_data_frame.drop_duplicates('Time', inplace=True)
-        elevation_data_frame.set_index('Time', inplace=True)
-        elevation_data_frame.to_hdf(elevation_data_frame_path, key='df', mode='w')
-    else:
-        elevation_data_frame = pandas.read_hdf(elevation_data_frame_path)
-
-    cities = get_cities(elevation_data_frame.columns.values)
-
-    if not os.path.isfile(cloud_cover_data_frame_path):
-        def load_cloud_cover(data_dir):
-            filename_match = re.compile(r'^cloud_cover_(?P<date>\d+-\d+-\d+).csv$')
-
-            cloud_cover_files = []
-            for file_name in os.listdir(data_dir):
-                match = filename_match.match(file_name)
-                if not match:
-                    continue
-
-                date_time = datetime.datetime.strptime(match.group('date'), '%Y-%m-%d')
-                file_path = os.path.join(data_dir, file_name)
-                cloud_cover_files.append((date_time, file_path))
-                cloud_cover_files.sort(key=operator.itemgetter(0))
-
-            cloud_covers = []
-            for date, file_path in cloud_cover_files:
-                cloud_covers.append(quake.cloud_cover.CloudCoverIndex.from_csv(file_path))
-            return quake.cloud_cover.CloudCoverIndex.merge(cloud_covers)
-
-        cloud_cover_index = load_cloud_cover(data_directory)
-        cloud_cover_rows = []
-        for timestamp in elevation_data_frame.index.tolist():
-            date_time = timestamp.to_pydatetime()
-
-            row = []
-            for city in cities:
-                row.append(cloud_cover_index(city, date_time))
-
-            cloud_cover_rows.append(row)
-        cloud_cover_data_frame = pandas.DataFrame(columns=elevation_data_frame.columns.values,
-                                                  data=cloud_cover_rows,
-                                                  index=elevation_data_frame.index.values)
-        cloud_cover_data_frame.to_hdf(cloud_cover_data_frame_path, key='df', mode='w')
-    else:
-        cloud_cover_data_frame = pandas.read_hdf(cloud_cover_data_frame_path)
-
-    if not os.path.isfile(transfer_frame_path):
-        transfer_index = load_transfer_index()
-
-        transfer_rows = []
-        for timestamp in tqdm.tqdm(elevation_data_frame.index.tolist(), desc='Building transfer data frame'):
-            row = []
-            for city in cities:
-                elevation = elevation_data_frame.at[timestamp, city.name]
-                row.append(transfer_index(elevation))
-
-            transfer_rows.append(row)
-        transfer_data_frame = pandas.DataFrame(columns=elevation_data_frame.columns.values,
-                                               data=transfer_rows,
-                                               index=elevation_data_frame.index.values)
-        transfer_data_frame.to_hdf(transfer_frame_path, key='df', mode='w')
-    else:
-        transfer_data_frame = pandas.read_hdf(transfer_frame_path)
-
-    if not os.path.isfile(weather_corrected_frame_path):
-        weather_corrected_rows = []
-        for timestamp in tqdm.tqdm(elevation_data_frame.index.tolist(), desc='Building weather corrected data frame'):
-            row = []
-            for city in cities:
-                effective_transfer = (100.0 - cloud_cover_data_frame.at[timestamp, city.name]) / 100.0 \
-                                     * transfer_data_frame.at[timestamp, city.name]
-                assert effective_transfer >= 0.0
-                row.append(effective_transfer)
-
-            weather_corrected_rows.append(row)
-        weather_corrected_transfer_frame = pandas.DataFrame(columns=elevation_data_frame.columns.values,
-                                                            data=weather_corrected_rows,
-                                                            index=elevation_data_frame.index.values)
-        weather_corrected_transfer_frame.to_hdf(weather_corrected_frame_path, key='df', mode='w')
-    else:
-        weather_corrected_transfer_frame = pandas.read_hdf(weather_corrected_frame_path)
-
-    agg_weather_corrected_transfer_frame = weather_corrected_transfer_frame.resample('D').sum()
-    agg_cloud_cover_frame = cloud_cover_data_frame.resample('D').mean()
-
-    agg_raw_observation_frames = []
-    for city in cities:
-        city_frame = elevation_data_frame[city.name].copy()
-        city_frame_filtered = city_frame[city_frame >= quake.transfer_rate.MIN_ANGLE].copy()
-        night_in_city = list(
-            map(lambda x: sunset_sunrise_index.is_night(city, x.to_pydatetime()), city_frame_filtered.index.tolist()))
-        city_frame_filtered = city_frame_filtered[night_in_city].copy()
-        agg_raw_observation_frames.append(city_frame_filtered
-                                          .resample('D')
-                                          .count()
-                                          .map(lambda v: pandas.Timedelta(seconds=v))
-                                          .to_frame(city.name))
-
-    agg_observation_frame = pandas.concat(agg_raw_observation_frames, axis=1)
+    agg_observation_frame = problem_bundle.get_aggregated_observation_frame()
 
     HSPACE_ADJUST = 0.25
 
     # plot observation time
     last_city_index = len(cities) - 1
-    fig, axis = matplotlib.pyplot.subplots(len(cities), 1, sharex=True,
-                                           figsize=(FIGURE_WIDTH_SIZE, FIGURE_HEIGHT_SIZE))
+    fig, axis = matplotlib.pyplot.subplots(len(cities), 1, sharex=True, figsize=(FIGURE_WIDTH_SIZE, FIGURE_HEIGHT_SIZE))
     for index, city in enumerate(cities):
-        axis[index].plot(agg_observation_frame[city.name], color=FOREGROUND_COLOR)
+        axis[index].plot(agg_observation_frame[city], color=FOREGROUND_COLOR)
         axis[index].yaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(PandasTimeDeltaConverter()))
         axis[index].set_yticks([0, 15 * 60 * 10 ** 9, 30 * 60 * 10 ** 9])
         axis[index].set_ylim(0, 40 * 60 * 10 ** 9)
@@ -657,12 +549,11 @@ def plot_aggregate(args):
     save_figure('observation_time')
 
     # plot average cloud cover
-    fig, axis = matplotlib.pyplot.subplots(len(cities), 1, sharex=True,
-                                           figsize=(FIGURE_WIDTH_SIZE, FIGURE_HEIGHT_SIZE))
+    fig, axis = matplotlib.pyplot.subplots(len(cities), 1, sharex=True, figsize=(FIGURE_WIDTH_SIZE, FIGURE_HEIGHT_SIZE))
     for index, city in enumerate(cities):
-        axis[index].plot(agg_cloud_cover_frame[city.name], color=FOREGROUND_COLOR)
+        axis[index].plot(agg_cloud_cover_frame[city], color=FOREGROUND_COLOR)
         axis[index].set_yticks([0, 50, 100])
-        axis[index].annotate(city.name,
+        axis[index].annotate(city,
                              xy=(1.0, 0.80),
                              xycoords='axes fraction',
                              horizontalalignment='right',
@@ -677,14 +568,13 @@ def plot_aggregate(args):
     save_figure('average_cloud_cover')
 
     # plot cloud cover
-    cloud_cover_correlation_frame = cloud_cover_data_frame.corr()
+    cloud_cover_correlation_frame = cloud_cover_frame.corr()
     fig, axis = matplotlib.pyplot.subplots()
     axis.imshow(cloud_cover_correlation_frame, cmap='cividis')
 
     for row, city_row in enumerate(cities):
         for column, city_column in enumerate(cities):
-            axis.text(row, column, round(cloud_cover_correlation_frame.at[city_row.name, city_column.name], 2),
-                      ha="center", va="center", color="w")
+            axis.text(row, column, round(cloud_cover_correlation_frame.at[city_row, city_column], 2), ha="center", va="center", color="w")
     axis.set_xticks(numpy.arange(len(cities)))
     axis.set_yticks(numpy.arange(len(cities)))
     axis.set_xticklabels(cities)
@@ -696,15 +586,13 @@ def plot_aggregate(args):
     axis.set_yticks(numpy.arange(len(cities) + 1) - 0.5, minor=True)
     axis.tick_params(which='minor', bottom=False, left=False)
     fig.tight_layout()
-
     save_figure('cloud_cover_correlation')
 
     # plot max keys transferred
-    fig, axis = matplotlib.pyplot.subplots(len(cities), 1, sharex=True,
-                                           figsize=(FIGURE_WIDTH_SIZE, FIGURE_HEIGHT_SIZE))
+    fig, axis = matplotlib.pyplot.subplots(len(cities), 1, sharex=True, figsize=(FIGURE_WIDTH_SIZE, FIGURE_HEIGHT_SIZE))
     for index, city in enumerate(cities):
-        axis[index].plot(agg_weather_corrected_transfer_frame[city.name], color=FOREGROUND_COLOR)
-        axis[index].set_yticks([0, 5000, 10000, 15000])
+        axis[index].plot(agg_weather_corrected_key_rate_frame[city], color=FOREGROUND_COLOR)
+        axis[index].set_yticks([0, 2000, 4000])
         axis[index].annotate(city.name,
                              xy=(1.0, 0.80),
                              xycoords='axes fraction',
@@ -719,14 +607,13 @@ def plot_aggregate(args):
     fig.subplots_adjust(hspace=HSPACE_ADJUST)
     save_figure('maximum_keys_received')
 
-    max_key_correlation_frame = agg_weather_corrected_transfer_frame.corr()
+    max_key_correlation_frame = agg_weather_corrected_key_rate_frame.corr()
     fig, axis = matplotlib.pyplot.subplots()
     axis.imshow(max_key_correlation_frame, cmap='cividis', aspect='equal')
 
     for row, city_row in enumerate(cities):
         for column, city_column in enumerate(cities):
-            axis.text(row, column, round(max_key_correlation_frame.at[city_row.name, city_column.name], 2),
-                      ha="center", va="center", color="w")
+            axis.text(row, column, round(max_key_correlation_frame.at[city_row, city_column], 2), ha="center", va="center", color="w")
     axis.set_xticks(numpy.arange(len(cities)))
     axis.set_yticks(numpy.arange(len(cities)))
     axis.set_xticklabels(cities)
@@ -742,8 +629,7 @@ def plot_aggregate(args):
     save_figure('maximum_keys_correlation')
 
     # Transform to total seconds
-    cumulative_index = pandas.date_range(start=agg_observation_frame.index.min(),
-                                         end=agg_observation_frame.index.max()).values
+    cumulative_index = pandas.date_range(start=agg_observation_frame.index.min(), end=agg_observation_frame.index.max()).values
     cumulative_min = agg_observation_frame.transpose().min().values / numpy.timedelta64(1, 's')
     cumulative_max = agg_observation_frame.transpose().max().values / numpy.timedelta64(1, 's')
 
@@ -752,9 +638,8 @@ def plot_aggregate(args):
 
         # for other_city in cities:
         #     axis.plot(agg_observation_frame[other_city.name], c=gray_color)
-        axis.fill_between(cumulative_index, cumulative_min, cumulative_max,
-                          facecolor=FOREGROUND_COLOR, alpha=FOREGROUND_ALPHA)
-        cumulative_city = agg_observation_frame[city.name].values / numpy.timedelta64(1, 's')
+        axis.fill_between(cumulative_index, cumulative_min, cumulative_max, facecolor=FOREGROUND_COLOR, alpha=FOREGROUND_ALPHA)
+        cumulative_city = agg_observation_frame[city].values / numpy.timedelta64(1, 's')
 
         axis.plot(cumulative_index, cumulative_city, c=FOREGROUND_COLOR)
         axis.yaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(NumpyTimeDeltaConverter()))
@@ -1240,14 +1125,15 @@ def plot_week_performance(args):
     ax.set_ylabel('Key Rate [1/s]')
 
     grid_spec.update(left=0.05, right=0.98, bottom=0.25, top=0.98, wspace=0.30, hspace=0.08)
-    save_figure('solution_week_' + str(problem.observation_period.begin.date()), rotate=270)
+    save_figure('solution_week_' + str(problem.observation_period.begin.date()))
 
 
 def plot_communication_window(args):
     data_directory = getattr(args, 'data_dir')
     city = quake.city.from_name(getattr(args, 'station'))
 
-    communication_windows = load_communication_windows(data_directory, city)
+    problem_bundle = ProblemBundle.read_from_dir(data_directory)
+    communication_windows = problem_bundle.get_communication_windows(city)
     sunset_sunrise_index = load_sunset_sunrise_index()
 
     date_index = list(set(map(lambda period: period.begin.date(), communication_windows)))
@@ -1310,8 +1196,8 @@ def plot_communication_window(args):
 
     axis.set_xlim(left=datetime.date(min_date_time.year, 7, 1), right=datetime.date(min_date_time.year, 9, 15))
     axis.set_xticks([datetime.date(min_date_time.year, 7, 1), datetime.date(min_date_time.year, 8, 1), datetime.date(min_date_time.year, 9, 1)])
-    axis.set_ylim(bottom=datetime.datetime.combine(ref_start_date, datetime.time(22, 30)),
-                  top=datetime.datetime.combine(ref_end_date_time, datetime.time(00, 00)))
+    axis.set_ylim(bottom=datetime.datetime.combine(ref_start_date, datetime.time(21, 00)),
+                  top=datetime.datetime.combine(ref_start_date, datetime.time(22, 30)))
     figure.tight_layout()
     save_figure('observation_time_magnified_' + city.name)
 
@@ -1654,7 +1540,7 @@ if __name__ == '__main__':
     matplotlib.rcParams['pdf.fonttype'] = 42
     matplotlib.rcParams['font.size'] = 12
     matplotlib.rcParams['font.family'] = 'sans-serif'
-    # matplotlib.rcParams['font.sans-serif'] = ['Roboto']
+    matplotlib.rcParams['font.sans-serif'] = ['Roboto']
 
     command = getattr(args_, 'command')
     if command == 'switch-time-performance':

@@ -1,6 +1,9 @@
 import argparse
+import concurrent.futures
 import datetime
 import re
+
+import tqdm
 
 
 class ParseDateAction(argparse.Action):
@@ -35,3 +38,12 @@ class ParseTimeDeltaAction(argparse.Action):
             duration += datetime.timedelta(seconds=int(groups['seconds']))
 
         setattr(namespace, self.dest, duration)
+
+
+def process_parallel_map(data, function):
+    results = []
+    with concurrent.futures.ProcessPoolExecutor() as executor:
+        futures = [executor.submit(function, chunk) for chunk in data]
+        for future in tqdm.tqdm(futures, leave=False):
+            results.append(future.result())
+    return results

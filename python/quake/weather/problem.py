@@ -1,6 +1,7 @@
 import copy
 import datetime
 import json
+import operator
 import typing
 
 import numpy as np
@@ -101,23 +102,49 @@ class Problem:
 
         self.__json_object['mean_variance_model'] = model_to_use
 
-    def get_key_rate_frame(self) -> pandas.DataFrame:
+    def get_key_rate_frame(self, scenario_name=None) -> pandas.DataFrame:
+
+        forecast = None
+        if scenario_name is not None:
+            forecast = self.get_scenario(scenario_name=scenario_name)
+
         frames = []
         for station in self.stations:
             for frame in self.__communication_frames[station]:
                 key_rate_frame = frame['key_rate'].to_frame()
+
+                if forecast:
+                    cloud_cover = np.array(list(map(lambda date_time: float(forecast(station, date_time)), key_rate_frame.index.to_pydatetime())))
+                    cloud_cover_coefficients = np.ones(len(key_rate_frame)) - cloud_cover / 100.0
+                    key_rate_frame['effective_key_rate'] = np.multiply(key_rate_frame['key_rate'].values, cloud_cover_coefficients)
+                else:
+                    key_rate_frame['effective_key_rate'] = key_rate_frame['key_rate']
+
                 key_rate_frame['city'] = station
                 key_rate_frame['date_time'] = key_rate_frame.index
                 key_rate_frame.reset_index(drop=True, inplace=True)
                 frames.append(key_rate_frame)
         master_frame = pandas.concat(frames)
-        master_pivot_frame = pandas.pivot_table(master_frame, columns=['city'], values=['key_rate'], index=['date_time'])
+        master_pivot_frame = pandas.pivot_table(master_frame, columns=['city'], values=['effective_key_rate'], index=['date_time'])
         master_pivot_frame.columns = master_pivot_frame.columns.droplevel()
         master_pivot_frame.fillna(value=0.0, inplace=True)
         master_pivot_frame = master_pivot_frame / 2.0  # correction from 128 keys to 256 keys
         return master_pivot_frame
 
-    def get_scenario(self, scenario_name):
+    def get_cloud_cover_frame(self, scenario='real') -> pandas.DataFrame:
+        forecast = self.get_scenario(scenario)
+        data = []
+        for station in self.stations:
+            for period in self.get_communication_windows(station):
+                for delay in range(0, int(period.length.total_seconds())):
+                    date_time = period.begin + datetime.timedelta(seconds=delay)
+                    data.append({'station': station, 'date_time': date_time, 'cloud_cover': forecast(station, date_time)})
+        frame = pandas.DataFrame(data=data)
+        pivot_frame = frame.pivot_table(index=['date_time'], columns=['station'], values=['cloud_cover'])
+        pivot_frame.columns = pivot_frame.columns.get_level_values(1)
+        return pivot_frame
+
+    def get_scenario(self, scenario_name) -> quake.cloud_cover.CloudCoverIndex:
         forecasts_json = self.__json_object['forecasts']
         forecast_json = forecasts_json[scenario_name]
 
@@ -148,7 +175,7 @@ class Problem:
             if frame_period.is_before(observation_period):
                 continue
 
-            overlap_period = frame_period.intersect(observation_period)
+            # overlap_period = frame_period.intersect(observation_period)
 
             # last time point of the time period is not included
             observation_end_adjusted = observation_period.end - datetime.timedelta(seconds=1)
@@ -234,7 +261,9 @@ class Problem:
 
     @property
     def stations(self):
-        return [quake.city.from_name(station_data['station']) for station_data in self.__json_object['stations']]
+        cities = [quake.city.from_name(station_data['station']) for station_data in self.__json_object['stations']]
+        cities.sort(key=operator.attrgetter('latitude'), reverse=True)
+        return cities
 
     @property
     def observation_period(self) -> quake.weather.time_period.TimePeriod:

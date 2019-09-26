@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 pushd ../plots
-/home/pmateusz/dev/quake/python/plot-quake.py aggregate --data-dir=/home/pmateusz/dev/quake/network_share/simulation_upgrade
+/home/pmateusz/dev/quake/python/plot-quake.py aggregate --data-dir=/home/pmateusz/dev/quake/network_share/simulation_upgrade # ported
 /home/pmateusz/dev/quake/python/plot-quake.py communication-window communication-window --data-dir=/home/pmateusz/dev/quake/current_review/2013 --station=London # ported
 /home/pmateusz/dev/quake/python/plot-quake.py week-performance /home/pmateusz/dev/quake/current_review/2013/week_2013-01-01.json /home/pmateusz/dev/quake/current_review/2013/solutions/solution_2013-01-01.json # ported
 /home/pmateusz/dev/quake/python/plot-quake.py long-term-performance --data-dir=/home/pmateusz/dev/quake/network_share/simulation_upgrade --solution-dir=/home/pmateusz/dev/quake/network_share/simulation_upgrade/run_1
