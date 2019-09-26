@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 SCRIPT=/home/pmateusz/dev/quake/python/year-tools.py
 
-pushd /home/pmateusz/dev/quake/current_review/2013/solutions
-$SCRIPT run --problem-dir=/home/pmateusz/dev/quake/current_review --solution-prefix=solution --gap-limit=0.05 --time-step=00:00:15
+#pushd /home/pmateusz/dev/quake/current_review/2013/solutions
+#$SCRIPT run --problem-dir=/home/pmateusz/dev/quake/current_review/2013 --solution-prefix=solution --gap-limit=0.05 --time-step=00:00:15
+#popd
+
+pushd /home/pmateusz/dev/quake/current_review/2014/solutions
+$SCRIPT run --problem-dir=/home/pmateusz/dev/quake/current_review/2014 --solution-prefix=solution --gap-limit=0.05 --time-step=00:00:15
 popd
 
 # generate files with elevation angle
