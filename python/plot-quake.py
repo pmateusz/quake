@@ -761,21 +761,19 @@ def plot_bottleneck(args):
 def plot_network_traffic(args):
     data_dir = getattr(args, 'data_dir')
     solution_dir = getattr(args, 'solution_dir')
-    simulation = quake.multistage_simulation.MultistageSimulation.load_from_dir(data_dir, solution_dir)
-    cities = get_cities(map(operator.attrgetter('name'), simulation.stations))
-    data_frame = simulation.to_frame()
+
+    solution_bundle = SolutionBundle.read_from_dir(data_dir, solution_dir)
+
+    cities = solution_bundle.stations
+    frame = solution_bundle.to_frame()
 
     data = []
     for city in cities:
-        city_frame = data_frame[data_frame['Station'] == city.name].copy()
-        min_week = city_frame['Week'].min()
-        max_week = city_frame['Week'].max()
-        filtered_city_frame = city_frame[(city_frame['Week'] < max_week) & (city_frame['Week'] > min_week)]
-
-        data.append(filtered_city_frame['KeyTransferred'])
+        city_frame = frame.loc[city]
+        data.append(city_frame['keys_transferred'])
 
     fig, ax = matplotlib.pyplot.subplots(figsize=(FIGURE_WIDTH_SQUARE_SIZE, FIGURE_HEIGHT_SQUARE_SIZE))
-    boxplot = ax.boxplot(data, flierprops=dict(marker='.'), medianprops=dict(color=FOREGROUND_COLOR))
+    ax.boxplot(data, flierprops=dict(marker='.'), medianprops=dict(color=FOREGROUND_COLOR))
     ax.set_xlabel('City')
     ax.set_ylabel('Weekly Keys Received')
     ax.set_xticklabels([city.name for city in cities], rotation=90)
@@ -844,9 +842,42 @@ def compute_global_service_frame(city_date_rate_failure, simulation):
 
 
 def plot_service_level(args):
-    data_dir = getattr(args, 'data_dir')
-    solution_dir = getattr(args, 'solution_dir')
-    simulation = quake.multistage_simulation.MultistageSimulation.load_from_dir(data_dir, solution_dir)
+    # data_dir = getattr(args, 'data_dir')
+    # solution_dir = getattr(args, 'solution_dir')
+    #
+    # solution_bundle = SolutionBundle.read_from_dir(data_dir, solution_dir)
+    # frame = solution_bundle.to_frame()
+    # frame.to_hdf('prototype.hdf', key='a')
+
+    frame = pandas.read_hdf('prototype.hdf')
+    stations = frame.index.get_level_values(0).unique()
+
+    data = []
+    for station in stations:
+        print(station)
+        keys_transferred = frame.loc[station]['keys_transferred'].values
+
+        weekly_consumption = 0
+        while True:
+            local_deltas = keys_transferred - weekly_consumption
+            local_balance = numpy.cumsum(local_deltas)
+            negative_balance_weeks = local_balance[local_balance < 0]
+
+            data.append({'station': station,
+                         'weekly_consumption': weekly_consumption,
+                         'negative_balance_weeks': negative_balance_weeks.size,
+                         'total_weeks': local_deltas.size})
+
+            local_positive_deltas = local_deltas[local_deltas > 0]
+            if local_positive_deltas.size == 0:
+                break
+
+            weekly_consumption += local_positive_deltas.min()
+
+    frame = pandas.DataFrame(data=data)
+    frame.set_index(['station', 'weekly_consumption'], inplace=True)
+    frame.sort_index(level=0, inplace=True)
+    frame.sort_index(level=1, inplace=True)
 
     match = re.match('[^\d\s]+_(?P<number>\d+)', solution_dir)
     run_number = int(match.group('number'))
@@ -1037,13 +1068,11 @@ def plot_week_performance(args):
     problem_file = getattr(args, 'problem-file')
     solution_file = getattr(args, 'solution-file')
 
-    import quake.weather.problem
-    import quake.weather.solution
-
     problem = quake.weather.problem.Problem.read_json(problem_file)
     solution = quake.weather.solution.Solution.read_json(solution_file)
 
-    key_rate_frame = problem.get_key_rate_frame()
+    scenario = problem.get_scenario('real')
+    key_rate_frame = problem.get_key_rate_frame(scenario)
 
     split_points = []
     times = key_rate_frame.index.tolist()

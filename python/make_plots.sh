@@ -5,7 +5,8 @@ pushd ../plots
 /home/pmateusz/dev/quake/python/plot-quake.py communication-window communication-window --data-dir=/home/pmateusz/dev/quake/current_review/2013 --station=London # ported
 /home/pmateusz/dev/quake/python/plot-quake.py week-performance /home/pmateusz/dev/quake/current_review/2013/week_2013-01-01.json /home/pmateusz/dev/quake/current_review/2013/solutions/solution_2013-01-01.json # ported
 /home/pmateusz/dev/quake/python/plot-quake.py long-term-performance --data-dir=/home/pmateusz/dev/quake/current_review/2013 --solution-dir=/home/pmateusz/dev/quake/current_review/2013/solutions # ported
-/home/pmateusz/dev/quake/python/plot-quake.py network-traffic --data-dir=/home/pmateusz/dev/quake/network_share/simulation_upgrade --solution-dir=/home/pmateusz/dev/quake/network_share/simulation_upgrade/run_1
+/home/pmateusz/dev/quake/python/plot-quake.py network-traffic --data-dir=/home/pmateusz/dev/quake/current_review/2013 --solution-dir=/home/pmateusz/dev/quake/current_review/2013/solutions # ported
+/home/pmateusz/dev/quake/python/plot-quake.py service-level --data-dir=/home/pmateusz/dev/quake/network_share/simulation_upgrade --solution-dir=/home/pmateusz/dev/quake/network_share/simulation_upgrade/run_1
 #/home/pmateusz/dev/quake/python/plot-quake.py long-term-performance --data-dir=/home/pmateusz/dev/quake/data/simulation --solution-dir=/home/pmateusz/dev/quake/data/simulation/run_11_mip
 #/home/pmateusz/dev/quake/python/plot-quake.py long-term-performance --data-dir=/home/pmateusz/dev/quake/data/simulation --solution-dir=/home/pmateusz/dev/quake/data/simulation/run_12
 #/home/pmateusz/dev/quake/python/plot-quake.py long-term-performance --data-dir=/home/pmateusz/dev/quake/data/simulation --solution-dir=/home/pmateusz/dev/quake/data/simulation/run_13
@@ -20,7 +21,6 @@ pushd ../plots
 #/home/pmateusz/dev/quake/python/plot-quake.py long-term-performance --data-dir=/home/pmateusz/dev/quake/data/simulation_disturbed_3 --solution-dir=/home/pmateusz/dev/quake/data/simulation/run_23_disturbed
 #/home/pmateusz/dev/quake/python/plot-quake.py long-term-performance --data-dir=/home/pmateusz/dev/quake/data/simulation_disturbed_4 --solution-dir=/home/pmateusz/dev/quake/data/simulation/run_24_disturbed
 #/home/pmateusz/dev/quake/python/plot-quake.py long-term-performance --data-dir=/home/pmateusz/dev/quake/data/simulation_disturbed_5 --solution-dir=/home/pmateusz/dev/quake/data/simulation/run_25_disturbed
-/home/pmateusz/dev/quake/python/plot-quake.py service-level --data-dir=/home/pmateusz/dev/quake/network_share/simulation_upgrade --solution-dir=/home/pmateusz/dev/quake/network_share/simulation_upgrade/run_1
 #/home/pmateusz/dev/quake/python/plot-quake.py service-level --data-dir=/home/pmateusz/dev/quake/data/simulation --solution-dir=/home/pmateusz/dev/quake/data/simulation/run_12
 #/home/pmateusz/dev/quake/python/plot-quake.py service-level --data-dir=/home/pmateusz/dev/quake/data/simulation --solution-dir=/home/pmateusz/dev/quake/data/simulation/run_13
 #/home/pmateusz/dev/quake/python/plot-quake.py service-level --data-dir=/home/pmateusz/dev/quake/data/simulation --solution-dir=/home/pmateusz/dev/quake/data/simulation/run_14
