@@ -53,6 +53,7 @@ import quake.sunset_sunrise
 import quake.transfer_rate
 import quake.util
 import quake.weather.problem
+import quake.weather.solution
 import quake.weather.time_period
 
 TIME_KEY = 'Time'
@@ -277,6 +278,128 @@ BBOX_STYLE = {'boxstyle': 'square,pad=0.0', 'lw': 0, 'fc': 'w', 'alpha': 0.8}
 LABEL_STYLE = {'fontname': 'Roboto', 'weight': 'normal'}
 
 
+class ProblemBundle:
+
+    def __init__(self, problems: typing.List[quake.weather.problem.Problem]):
+        self.__problems = problems
+
+    def get_communication_windows(self, station: quake.city.City) -> typing.List[quake.weather.time_period.TimePeriod]:
+        communication_windows = []
+        for problem in self.__problems:
+            communication_windows.extend(problem.get_communication_windows(station))
+        return communication_windows
+
+    def get_cloud_cover_frame(self) -> pandas.DataFrame:
+        return pandas.concat([problem.get_cloud_cover_frame() for problem in self.__problems])
+
+    def get_aggregated_observation_frame(self) -> pandas.DataFrame:
+        data = []
+        for problem in self.__problems:
+            for station in problem.stations:
+                for period in problem.get_communication_windows(station):
+                    data.append({'station': station, 'date': period.begin.date(), 'length': period.length})
+        frame = pandas.DataFrame(data=data)
+        agg_frame = frame.groupby(['date', 'station'])['length'].sum().to_frame()
+        agg_frame.reset_index(inplace=True)
+        pivot_frame = agg_frame.pivot_table(index=['date'], columns=['station'], values=['length'], aggfunc='sum')
+        pivot_frame.columns = pivot_frame.columns.get_level_values(1)
+        return pivot_frame
+
+    def get_cloud_cover_frame(self) -> pandas.DataFrame:
+        frames = []
+        for problem in self.__problems:
+            scenario = problem.get_scenario('real')
+            frame = problem.get_cloud_cover_frame(scenario)
+            frames.append(frame)
+        return pandas.concat(frames)
+
+    def get_key_rate_frame(self) -> pandas.DataFrame:
+        frames = []
+        for problem in self.__problems:
+            scenario = problem.get_scenario('real')
+            frame = problem.get_key_rate_frame(scenario)
+            frames.append(frame)
+        return pandas.concat(frames)
+
+    @property
+    def stations(self) -> typing.List[quake.city.City]:
+        return self.__problems[0].stations
+
+    @property
+    def problems(self) -> typing.List[quake.weather.problem.Problem]:
+        return self.__problems
+
+    @staticmethod
+    def read_from_dir(data_dir: str) -> 'ProblemBundle':
+        problem_files = []
+        for file_name in os.listdir(str(data_dir)):
+            if file_name.startswith('week_'):
+                problem_path = os.path.join(str(data_dir), file_name)
+                problem_files.append(problem_path)
+
+        problems = quake.util.process_parallel_map(problem_files, quake.weather.problem.Problem.read_json)
+        problems.sort(key=lambda problem: problem.observation_period.begin)
+        return ProblemBundle(problems)
+
+
+class SolutionBundle:
+    def __init__(self, problems: typing.List[quake.weather.problem.Problem], solutions: typing.List[quake.weather.solution.Solution]):
+        problem_by_date = {problem.observation_period.begin.date(): problem for problem in problems}
+        solution_by_date = {solution.observation_period.begin.date(): solution for solution in solutions}
+
+        dates = list(problem_by_date.keys())
+        dates.extend(solution_by_date.keys())
+        dates = list(set(dates))
+        dates.sort()
+
+        self.__problem_by_date = collections.OrderedDict()
+        self.__solution_by_date = collections.OrderedDict()
+
+        for date in dates:
+            self.__problem_by_date[date] = problem_by_date[date]
+            self.__solution_by_date[date] = solution_by_date[date]
+
+    @property
+    def stations(self) -> typing.List[quake.city.City]:
+        first_date = list(self.__problem_by_date)[0]
+        first_problem = self.__problem_by_date[first_date]
+        return first_problem.stations
+
+    def to_frame(self) -> pandas.DataFrame:
+        data = []
+        for date in self.__problem_by_date:
+            problem = self.__problem_by_date[date]
+            scenario = problem.get_scenario('real')
+            solution = self.__solution_by_date[date]
+            for station in problem.stations:
+                local_keys_transferred = 0
+                for observation in solution.get_observations(station):
+                    local_keys_transferred += problem.get_transferred_keys(station, observation, scenario)
+                local_final_buffer = solution.get_final_buffer(station)
+                local_initial_buffer = local_final_buffer - local_keys_transferred
+                assert local_initial_buffer >= 0
+
+                data.append({'station': station, 'date': date, 'initial_buffer': local_initial_buffer, 'keys_transferred': local_keys_transferred})
+        frame = pandas.DataFrame(data=data)
+        frame.set_index(['station', 'date'], inplace=True)
+        frame.sort_index(level=1, inplace=True)
+        return frame
+
+    @staticmethod
+    def read_from_dir(problem_directory_path: str, solution_directory_path: str) -> 'SolutionBundle':
+        problem_bundle = ProblemBundle.read_from_dir(problem_directory_path)
+
+        solution_files = []
+        for file_name in os.listdir(solution_directory_path):
+            if file_name.startswith('solution_'):
+                solution_path = os.path.join(solution_directory_path, file_name)
+                solution_files.append(solution_path)
+
+        solutions = quake.util.process_parallel_map(solution_files, quake.weather.solution.Solution.read_json)
+        solutions.sort(key=lambda solution: solution.observation_period.begin)
+        return SolutionBundle(problem_bundle.problems, solutions)
+
+
 def save_figure(filename_no_ext, rotate=None):
     filename = filename_no_ext + '.' + FORMAT
 
@@ -406,18 +529,17 @@ def plot_long_term_performance(args):
     data_dir = getattr(args, 'data_dir')
     solution_dir = getattr(args, 'solution_dir')
 
-    simulation = quake.multistage_simulation.MultistageSimulation.load_from_dir(data_dir, solution_dir)
-    frame = simulation.to_frame()
+    solutions = SolutionBundle.read_from_dir(data_dir, solution_dir)
+    cities = solutions.stations
+    frame = solutions.to_frame()
 
-    cities = get_cities(map(operator.attrgetter('name'), simulation.stations))
     last_city_index = len(cities) - 1
-    fig, axis = matplotlib.pyplot.subplots(len(cities), 1,
-                                           sharex=True, figsize=(FIGURE_WIDTH_SIZE, FIGURE_HEIGHT_LARGE_SIZE))
+    fig, axis = matplotlib.pyplot.subplots(len(cities), 1, sharex=True, figsize=(FIGURE_WIDTH_SIZE, FIGURE_HEIGHT_LARGE_SIZE))
     for index, city in enumerate(cities):
-        station_frame = frame[frame[quake.multistage_simulation.STATION_KEY] == city.name]
-        axis[index].plot(station_frame['Week'], station_frame['KeyTransferred'], color=FOREGROUND_COLOR)
+        station_frame = frame.loc[city]
+        axis[index].plot(station_frame.index.values, station_frame['keys_transferred'], color=FOREGROUND_COLOR)
         axis[index].annotate(city.name,
-                             xy=(1.0, 0.80),
+                             xy=(0.99, 0.80),
                              xycoords='axes fraction',
                              horizontalalignment='right',
                              verticalalignment='center',
@@ -428,81 +550,23 @@ def plot_long_term_performance(args):
     axis[len(cities) // 2].set_ylabel('Keys Received')
     axis[-1].set_xlabel('Date')
     fig.tight_layout()
-    fig.subplots_adjust(hspace=0.08)
+    fig.subplots_adjust(hspace=0.12)
     save_figure('long_term_performance_' + os.path.basename(solution_dir))
 
     fig, axis = matplotlib.pyplot.subplots(1, 1)
     for index, city in enumerate(cities):
-        station_frame = frame[frame[quake.multistage_simulation.STATION_KEY] == city.name]
-        axis.plot(station_frame['Week'], station_frame['KeyTransferred'], label=city.name)
+        station_frame = frame.loc[city]
+        axis.plot(station_frame.index.values, station_frame['keys_transferred'], label=city.name)
     axis.set_xlabel('Date')
     axis.set_ylabel('Keys Received')
     fig.tight_layout()
     fig.subplots_adjust(bottom=0.30)
     fig.legend(loc='lower center', ncol=3, bbox_to_anchor=(0.5, 0.0))
-    save_figure('long_term_performance_v2_' + os.path.basename(solution_dir))
-
-    min_lambda_series = frame.groupby(['Week'])['KeyRatio'].min()
-    fig, axis = matplotlib.pyplot.subplots(1, 1)
-    axis.plot(min_lambda_series)
-    axis.set_xlabel('Date')
-    axis.set_ylabel('Traffic Index')
-    fig.tight_layout()
-    save_figure('long_term_lambda_' + os.path.basename(solution_dir))
+    save_figure('long_term_performance_combined_' + os.path.basename(solution_dir))
 
 
 def load_transfer_index():
     return quake.transfer_rate.TransferRateIndex.from_odf('/home/pmateusz/dev/quake/network_share/key_rate/data_24_05eff.ods')
-
-
-class ProblemBundle:
-
-    def __init__(self, problems: typing.List[quake.weather.problem.Problem]):
-        self.__problems = problems
-
-    def get_communication_windows(self, station: quake.city.City) -> typing.List[quake.weather.time_period.TimePeriod]:
-        communication_windows = []
-        for problem in self.__problems:
-            communication_windows.extend(problem.get_communication_windows(station))
-        return communication_windows
-
-    def get_cloud_cover_frame(self) -> pandas.DataFrame:
-        return pandas.concat([problem.get_cloud_cover_frame() for problem in self.__problems])
-
-    def get_aggregated_observation_frame(self) -> pandas.DataFrame:
-        data = []
-        for problem in self.__problems:
-            for station in problem.stations:
-                for period in problem.get_communication_windows(station):
-                    data.append({'station': station, 'date': period.begin.date(), 'length': period.length})
-        frame = pandas.DataFrame(data=data)
-        agg_frame = frame.groupby(['date', 'station'])['length'].sum().to_frame()
-        agg_frame.reset_index(inplace=True)
-        pivot_frame = agg_frame.pivot_table(index=['date'], columns=['station'], values=['length'], aggfunc='sum')
-        pivot_frame.columns = pivot_frame.columns.get_level_values(1)
-        return pivot_frame
-
-    def get_cloud_cover_frame(self) -> pandas.DataFrame:
-        return pandas.concat([problem.get_cloud_cover_frame() for problem in self.__problems])
-
-    def get_key_rate_frame(self) -> pandas.DataFrame:
-        return pandas.concat([problem.get_key_rate_frame(scenario_name='real') for problem in self.__problems])
-
-    @property
-    def stations(self) -> typing.List[quake.city.City]:
-        return self.__problems[0].stations
-
-    @staticmethod
-    def read_from_dir(data_dir: str) -> 'ProblemBundle':
-        problem_files = []
-        for file_name in os.listdir(str(data_dir)):
-            if file_name.startswith('week_'):
-                problem_path = os.path.join(str(data_dir), file_name)
-                problem_files.append(problem_path)
-
-        problems = quake.util.process_parallel_map(problem_files, quake.weather.problem.Problem.read_json)
-        problems.sort(key=lambda problem: problem.observation_period.begin)
-        return ProblemBundle(problems)
 
 
 def load_sunset_sunrise_index():
@@ -535,7 +599,7 @@ def plot_aggregate(args):
         axis[index].set_yticks([0, 15 * 60 * 10 ** 9, 30 * 60 * 10 ** 9])
         axis[index].set_ylim(0, 40 * 60 * 10 ** 9)
         axis[index].annotate(city.name,
-                             xy=(1.0, 0.80),
+                             xy=(0.99, 0.80),
                              xycoords='axes fraction',
                              horizontalalignment='right',
                              verticalalignment='center',
@@ -554,7 +618,7 @@ def plot_aggregate(args):
         axis[index].plot(agg_cloud_cover_frame[city], color=FOREGROUND_COLOR)
         axis[index].set_yticks([0, 50, 100])
         axis[index].annotate(city,
-                             xy=(1.0, 0.80),
+                             xy=(0.99, 0.80),
                              xycoords='axes fraction',
                              horizontalalignment='right',
                              verticalalignment='center',
@@ -594,7 +658,7 @@ def plot_aggregate(args):
         axis[index].plot(agg_weather_corrected_key_rate_frame[city], color=FOREGROUND_COLOR)
         axis[index].set_yticks([0, 2000, 4000])
         axis[index].annotate(city.name,
-                             xy=(1.0, 0.80),
+                             xy=(0.99, 0.80),
                              xycoords='axes fraction',
                              horizontalalignment='right',
                              verticalalignment='center',
@@ -1102,7 +1166,7 @@ def plot_week_performance(args):
     for city_index, city in enumerate(cities):
         last_ax = matplotlib.pyplot.subplot(grid_spec[city_index * len(split_frames) + len(split_frames) - 1])
         last_ax.annotate(city,
-                         xy=(1.0, 0.80),
+                         xy=(0.99, 0.80),
                          xycoords='axes fraction',
                          horizontalalignment='right',
                          verticalalignment='center',

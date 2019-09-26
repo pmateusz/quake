@@ -1,5 +1,6 @@
 import datetime
 import json
+import operator
 from typing import List, Dict, Any
 
 import quake.city
@@ -36,6 +37,15 @@ class Solution:
     #     assert len(all_observations) == 1
     #
     #     return [quake.weather.time_period.TimePeriod.from_json(json_object) for json_object in all_observations[0]]
+
+    def get_observations(self, station: quake.city.City) -> List[quake.weather.time_period.TimePeriod]:
+        return [observation.period for observation in self.observations if observation.station == station]
+
+    def get_final_buffer(self, station: quake.city.City) -> float:
+        for city_name, final_buffer in self.__json_object['final_buffers']:
+            if quake.city.City.from_name(city_name) == station:
+                return final_buffer
+        return 0.0
 
     @property
     def observations(self) -> List[Observation]:
@@ -81,7 +91,9 @@ class Solution:
 
     @property
     def stations(self) -> List[quake.city.City]:
-        return [quake.city.City.from_name(station_name) for station_name, observations in self.__json_object['observations']]
+        stations = [quake.city.City.from_name(station_name) for station_name, observations in self.__json_object['observations']]
+        stations.sort(key=operator.attrgetter('latitude'), reverse=True)
+        return stations
 
     @property
     def time_limit(self) -> datetime.timedelta:
