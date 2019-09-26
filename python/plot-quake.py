@@ -359,11 +359,12 @@ class SolutionBundle:
             self.__problem_by_date[date] = problem_by_date[date]
             self.__solution_by_date[date] = solution_by_date[date]
 
+    def get_transfer_share(self, station: quake.city.City) -> float:
+        return self.__sample_problem.get_transfer_share(station)
+
     @property
     def stations(self) -> typing.List[quake.city.City]:
-        first_date = list(self.__problem_by_date)[0]
-        first_problem = self.__problem_by_date[first_date]
-        return first_problem.stations
+        return self.__sample_problem.stations
 
     def to_frame(self) -> pandas.DataFrame:
         data = []
@@ -398,6 +399,12 @@ class SolutionBundle:
         solutions = quake.util.process_parallel_map(solution_files, quake.weather.solution.Solution.read_json)
         solutions.sort(key=lambda solution: solution.observation_period.begin)
         return SolutionBundle(problem_bundle.problems, solutions)
+
+    @property
+    def __sample_problem(self) -> quake.weather.problem.Problem:
+        first_date = list(self.__problem_by_date)[0]
+        first_problem = self.__problem_by_date[first_date]
+        return first_problem
 
 
 def save_figure(filename_no_ext, rotate=None):
@@ -842,42 +849,67 @@ def compute_global_service_frame(city_date_rate_failure, simulation):
 
 
 def plot_service_level(args):
-    # data_dir = getattr(args, 'data_dir')
-    # solution_dir = getattr(args, 'solution_dir')
-    #
-    # solution_bundle = SolutionBundle.read_from_dir(data_dir, solution_dir)
-    # frame = solution_bundle.to_frame()
-    # frame.to_hdf('prototype.hdf', key='a')
+    data_dir = getattr(args, 'data_dir')
+    solution_dir = getattr(args, 'solution_dir')
 
-    frame = pandas.read_hdf('prototype.hdf')
-    stations = frame.index.get_level_values(0).unique()
+    solution_bundle = SolutionBundle.read_from_dir(data_dir, solution_dir)
 
-    data = []
-    for station in stations:
-        print(station)
-        keys_transferred = frame.loc[station]['keys_transferred'].values
+    def local_service_level(bundle_frame: pandas.DataFrame) -> pandas.DataFrame:
+        stations = bundle_frame.index.get_level_values(0).unique()
 
-        weekly_consumption = 0
+        data = []
+        for station in stations:
+            keys_transferred = bundle_frame.loc[station]['keys_transferred'].values
+
+            weekly_consumption = 0
+            while True:
+                local_deltas = keys_transferred - weekly_consumption
+                local_balance = numpy.cumsum(local_deltas)
+                negative_balance_weeks = local_balance[local_balance < 0]
+
+                data.append({'station': station,
+                             'weekly_consumption': weekly_consumption,
+                             'negative_balance_weeks': negative_balance_weeks.size,
+                             'total_weeks': local_deltas.size})
+
+                local_positive_deltas = local_deltas[local_deltas > 0]
+                if local_positive_deltas.size == 0:
+                    break
+
+                weekly_consumption += local_positive_deltas.min()
+
+        master_frame = pandas.DataFrame(data=data)
+        master_frame.set_index(['station', 'weekly_consumption'], inplace=True)
+        master_frame.sort_index(level=0, inplace=True)
+        master_frame.sort_index(level=1, inplace=True)
+        return master_frame
+
+    def global_service_level(solution_bundle: SolutionBundle) -> pandas.DataFrame:
+        # TODO: number of dates for which at least one ground station has negative balance
+        bundle_frame = solution_bundle.to_frame()
+        stations = bundle_frame.index.get_level_values(0).unique()
+
+        data = []
+        traffic_index = 0.0
         while True:
-            local_deltas = keys_transferred - weekly_consumption
-            local_balance = numpy.cumsum(local_deltas)
-            negative_balance_weeks = local_balance[local_balance < 0]
+            total_negative_balance_pos = set()
+            total_pos = 0
+            for station in stations:
+                transfer_share = solution_bundle.get_transfer_share(station)
+                keys_transferred = bundle_frame.loc[station]['keys_transferred'].values
+                balance = keys_transferred - traffic_index * transfer_share
+                cum_balance = numpy.cumsum(balance)
+                negative_balance_pos = numpy.argwhere(cum_balance < 0)
+                total_negative_balance_pos = total_negative_balance_pos.union(negative_balance_pos)
+                total_pos = len(keys_transferred)
+            data.append({'traffic_index': traffic_index,
+                         'negative_balance_weeks': len(total_negative_balance_pos),
+                         'total_weeks': total_pos})
+            traffic_index += 100.0
 
-            data.append({'station': station,
-                         'weekly_consumption': weekly_consumption,
-                         'negative_balance_weeks': negative_balance_weeks.size,
-                         'total_weeks': local_deltas.size})
+        pass
 
-            local_positive_deltas = local_deltas[local_deltas > 0]
-            if local_positive_deltas.size == 0:
-                break
-
-            weekly_consumption += local_positive_deltas.min()
-
-    frame = pandas.DataFrame(data=data)
-    frame.set_index(['station', 'weekly_consumption'], inplace=True)
-    frame.sort_index(level=0, inplace=True)
-    frame.sort_index(level=1, inplace=True)
+    global_service_level(solution_bundle)
 
     match = re.match('[^\d\s]+_(?P<number>\d+)', solution_dir)
     run_number = int(match.group('number'))

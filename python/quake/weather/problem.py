@@ -23,12 +23,12 @@ class Problem:
         self.__json_object = json_object
         self.__communication_frames = self.__get_communication_frames()
 
-    def add_forecast(self, name, frame):
+    def add_forecast(self, name, frame: pandas.DataFrame) -> None:
         if self.FORECASTS_KEY not in self.__json_object:
             self.__json_object[self.FORECASTS_KEY] = {}
         self.__json_object[self.FORECASTS_KEY][name] = self.__frame_to_dict(frame)
 
-    def trim_observation_period(self, new_observation_period: quake.weather.time_period.TimePeriod):
+    def trim_observation_period(self, new_observation_period: quake.weather.time_period.TimePeriod) -> None:
         self.set_metadata(quake.weather.metadata.OBSERVATION_PERIOD, new_observation_period)
 
         updated_stations = []
@@ -48,12 +48,12 @@ class Problem:
             updated_stations.append(updated_station_dict)
         self.__json_object['stations'] = updated_stations
 
-    def set_metadata(self, key, value):
+    def set_metadata(self, key, value) -> None:
         metadata = quake.weather.metadata.from_json(self.__json_object['metadata'])
         metadata[key] = value
         self.__json_object['metadata'] = quake.weather.metadata.to_json(metadata)
 
-    def set_var_model(self, var_model):
+    def set_var_model(self, var_model) -> None:
         var_model_to_use = []
         for station in var_model:
             station_object = dict()
@@ -75,7 +75,7 @@ class Problem:
 
         self.__json_object['var_model'] = var_model_to_use
 
-    def set_mean_variance(self, mean_variance_result: quake.weather.scenarios.MeanVarianceResult):
+    def set_mean_variance(self, mean_variance_result: quake.weather.scenarios.MeanVarianceResult) -> None:
         model_to_use = dict()
         model_to_use['confidence'] = mean_variance_result.confidence_interval
         model_to_use['index'] = [str(value) for value in mean_variance_result.mean.index.values]
@@ -136,7 +136,7 @@ class Problem:
         pivot_frame.columns = pivot_frame.columns.get_level_values(1)
         return pivot_frame
 
-    def get_scenario(self, scenario_name) -> typing.Callable[[quake.city.City, datetime.datetime], float]:
+    def get_scenario(self, scenario_name: str) -> typing.Callable[[quake.city.City, datetime.datetime], float]:
         forecasts_json = self.__json_object['forecasts']
         forecast_json = forecasts_json[scenario_name]
 
@@ -187,50 +187,9 @@ class Problem:
             keys_transferred += keys_transferred_locally
         return int(math.floor(keys_transferred))
 
-    def transfer_share(self, station: quake.city.City) -> float:
+    def get_transfer_share(self, station: quake.city.City) -> float:
         transfer_shares = self.__get_transfer_shares()
         return transfer_shares[station]
-
-    def __get_transfer_shares(self):
-        return {quake.city.City.from_name(station_json['station']): station_json['transfer_share'] for station_json in self.__json_object['stations']}
-
-    def __get_communication_frames(self):
-        index = {}
-
-        def __period_to_series(time_period: quake.weather.time_period.TimePeriod, time_step: datetime.timedelta):
-            series = []
-            current_time = time_period.begin
-            while current_time < time_period.end:
-                series.append(current_time)
-                current_time += time_step
-            return series
-
-        for station_json in self.__json_object['stations']:
-            station_name = station_json['station']
-            station = quake.city.City.from_name(station_name)
-
-            communication_frames = []
-            for communication_window_json in station_json['communication_windows']:
-                elevation_json = communication_window_json['elevation']
-                key_rate_json = communication_window_json['key_rate']
-                period_json = communication_window_json['period']
-                assert len(elevation_json) == len(key_rate_json)
-
-                period = quake.weather.time_period.TimePeriod.from_json(period_json)
-                assert len(key_rate_json) == period.length.total_seconds()
-
-                time_index = __period_to_series(period, datetime.timedelta(seconds=1))
-                assert len(key_rate_json) == len(time_index)
-
-                communication_frame = pandas.DataFrame(index=time_index)
-                communication_frame['elevation'] = elevation_json
-                communication_frame['key_rate'] = key_rate_json
-                communication_frames.append(communication_frame)
-
-            assert station not in index
-            index[station] = communication_frames
-
-        return index
 
     def get_communication_windows(self, station: quake.city.City) -> typing.List[quake.weather.time_period.TimePeriod]:
         windows = []
@@ -272,6 +231,48 @@ class Problem:
         with open(file_path, 'r') as input_stream:
             json_body = json.load(input_stream)
             return Problem(json_body)
+
+    def __get_transfer_shares(self):
+        return {quake.city.City.from_name(station_json['station']): station_json['transfer_share'] for station_json in
+                self.__json_object['stations']}
+
+    def __get_communication_frames(self):
+        index = {}
+
+        def __period_to_series(time_period: quake.weather.time_period.TimePeriod, time_step: datetime.timedelta):
+            series = []
+            current_time = time_period.begin
+            while current_time < time_period.end:
+                series.append(current_time)
+                current_time += time_step
+            return series
+
+        for station_json in self.__json_object['stations']:
+            station_name = station_json['station']
+            station = quake.city.City.from_name(station_name)
+
+            communication_frames = []
+            for communication_window_json in station_json['communication_windows']:
+                elevation_json = communication_window_json['elevation']
+                key_rate_json = communication_window_json['key_rate']
+                period_json = communication_window_json['period']
+                assert len(elevation_json) == len(key_rate_json)
+
+                period = quake.weather.time_period.TimePeriod.from_json(period_json)
+                assert len(key_rate_json) == period.length.total_seconds()
+
+                time_index = __period_to_series(period, datetime.timedelta(seconds=1))
+                assert len(key_rate_json) == len(time_index)
+
+                communication_frame = pandas.DataFrame(index=time_index)
+                communication_frame['elevation'] = elevation_json
+                communication_frame['key_rate'] = key_rate_json
+                communication_frames.append(communication_frame)
+
+            assert station not in index
+            index[station] = communication_frames
+
+        return index
 
     @staticmethod
     def __frame_to_dict(frame):
