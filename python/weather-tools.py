@@ -361,12 +361,12 @@ def extend_problem_definition(args):
     historical_observation_period \
         = quake.weather.time_period.TimePeriod(datetime.datetime.combine(observation_date_time_series.min().date(), datetime.time()),
                                                datetime.datetime.combine(observation_date_time_series.max().date(), datetime.time()))
-    if historical_observation_period.contains(problem.observation_period):
+    if historical_observation_period.intersect(problem.observation_period):
         observation_start = datetime.datetime.combine(problem.observation_period.begin.date(), noon_time)
-        observation_end = datetime.datetime.combine(problem.observation_period.end.date(), noon_time)
+        observation_end = min(historical_observation_period.end, datetime.datetime.combine(problem.observation_period.end.date(), noon_time))
         observation_length = observation_end - observation_start
         real_frame = weather_cache.get_observation_frame(observation_start, observation_length)
-        real_frame = weather_cache.fill_missing_values(real_frame)
+        real_frame = weather_cache.fill_missing_values(real_frame, datetime.timedelta(hours=1))
         real_frame = remove_missing_stations(real_frame, problem.stations)
 
         updated_problem = copy.deepcopy(problem)
@@ -1025,60 +1025,60 @@ if __name__ == '__main__':
                                            & (local_frame['DateTime'] <= max_date_time)])
 
 
-    with open('/home/pmateusz/dev/quake/network_share/ofcom/201809_fixed_pc_coverage_r01.csv', 'r') as input_stream:
-        import csv
-        import math
-
-        dialect = csv.Sniffer().sniff(input_stream.read(4096))
-        input_stream.seek(0, 0)
-        reader = csv.reader(input_stream, dialect)
-
-
-        def replace_illegal_characters(label):
-            label_to_use = label.replace('%', 'percent')
-            label_to_use = label_to_use.replace('/', ' per ')
-            label_to_use = label_to_use.replace(' ', '_')
-            return label_to_use
-
-
-        columns = list(map(replace_illegal_characters, next(reader)))
-        content = list(reader)
-
-        frame = pandas.DataFrame(columns=columns, data=content)
-
-        postal_areas = {
-            quake.city.LONDON: [
-                'WC',  # Western Central London
-                'W',  # West London
-                'SW',  # South West London
-                'SE',  # South East London
-                'NW',  # North West London
-                'N',  # North London
-                'E',  # East London
-                'EC',  # East Central London
-            ],
-            quake.city.GLASGOW: ['G'],
-            quake.city.BELFAST: ['BT'],
-            quake.city.THURSO: ['KW'],
-            quake.city.BRISTOL: ['BS'],
-            quake.city.CAMBRIDGE: ['CB'],
-            quake.city.IPSWICH: ['IP'],
-            quake.city.BIRMINGHAM: ['B'],
-            quake.city.MANCHESTER: ['M'],
-            quake.city.YORK: ['YO']
-        }
-
-        total_data = []
-        for city in postal_areas.keys():
-            sub_frame = frame[frame['pca'].isin(postal_areas[city])][['All_Matched_Premises', 'UFBB_availability_(percent_premises)']].copy()
-            sub_frame['premises'] = sub_frame['All_Matched_Premises'].apply(float)
-            sub_frame['fiber_to_premises'] = sub_frame['UFBB_availability_(percent_premises)'].apply(float)
-            sub_frame['fiber_premises'] = sub_frame['fiber_to_premises'] * sub_frame['fiber_to_premises']
-            all_fiber_premises = sub_frame['fiber_to_premises'].sum()
-            total_data.append({'city': city, 'premises_with_fiber': int(math.floor(all_fiber_premises))})
-
-        total_frame = pandas.DataFrame(data=total_data)
-        all_premises = total_frame['premises_with_fiber'].sum()
-        total_frame['weight'] = total_frame['premises_with_fiber'] / all_premises
-
-        print(tabulate.tabulate(total_frame, tablefmt='latex'))
+    # with open('/home/pmateusz/dev/quake/network_share/ofcom/201809_fixed_pc_coverage_r01.csv', 'r') as input_stream:
+    #     import csv
+    #     import math
+    #
+    #     dialect = csv.Sniffer().sniff(input_stream.read(4096))
+    #     input_stream.seek(0, 0)
+    #     reader = csv.reader(input_stream, dialect)
+    #
+    #
+    #     def replace_illegal_characters(label):
+    #         label_to_use = label.replace('%', 'percent')
+    #         label_to_use = label_to_use.replace('/', ' per ')
+    #         label_to_use = label_to_use.replace(' ', '_')
+    #         return label_to_use
+    #
+    #
+    #     columns = list(map(replace_illegal_characters, next(reader)))
+    #     content = list(reader)
+    #
+    #     frame = pandas.DataFrame(columns=columns, data=content)
+    #
+    #     postal_areas = {
+    #         quake.city.LONDON: [
+    #             'WC',  # Western Central London
+    #             'W',  # West London
+    #             'SW',  # South West London
+    #             'SE',  # South East London
+    #             'NW',  # North West London
+    #             'N',  # North London
+    #             'E',  # East London
+    #             'EC',  # East Central London
+    #         ],
+    #         quake.city.GLASGOW: ['G'],
+    #         quake.city.BELFAST: ['BT'],
+    #         quake.city.THURSO: ['KW'],
+    #         quake.city.BRISTOL: ['BS'],
+    #         quake.city.CAMBRIDGE: ['CB'],
+    #         quake.city.IPSWICH: ['IP'],
+    #         quake.city.BIRMINGHAM: ['B'],
+    #         quake.city.MANCHESTER: ['M'],
+    #         quake.city.YORK: ['YO']
+    #     }
+    #
+    #     total_data = []
+    #     for city in postal_areas.keys():
+    #         sub_frame = frame[frame['pca'].isin(postal_areas[city])][['All_Matched_Premises', 'UFBB_availability_(percent_premises)']].copy()
+    #         sub_frame['premises'] = sub_frame['All_Matched_Premises'].apply(float)
+    #         sub_frame['fiber_to_premises'] = sub_frame['UFBB_availability_(percent_premises)'].apply(float)
+    #         sub_frame['fiber_premises'] = sub_frame['fiber_to_premises'] * sub_frame['fiber_to_premises']
+    #         all_fiber_premises = sub_frame['fiber_to_premises'].sum()
+    #         total_data.append({'city': city, 'premises_with_fiber': int(math.floor(all_fiber_premises))})
+    #
+    #     total_frame = pandas.DataFrame(data=total_data)
+    #     all_premises = total_frame['premises_with_fiber'].sum()
+    #     total_frame['weight'] = total_frame['premises_with_fiber'] / all_premises
+    #
+    #     print(tabulate.tabulate(total_frame, tablefmt='latex'))

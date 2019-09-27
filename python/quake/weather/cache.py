@@ -44,8 +44,8 @@ class WeatherCache:
     HDF_FILE_MODE = 'w'
     HDF_FORMAT = 'fixed'
     PERCENTAGE_MISSING_VALUES_THRESHOLD = 0.10
-    FORECAST_CACHE_FILE = '/home/pmateusz/dev/quake/current_review/forecast.hdf'
-    OBSERVATION_CACHE_FILE = '/home/pmateusz/dev/quake/current_review/observation.hdf'
+    FORECAST_CACHE_FILE = '/home/pmateusz/dev/quake/cache/forecast.hdf'
+    OBSERVATION_CACHE_FILE = '/home/pmateusz/dev/quake/cache/observation.hdf'
     ZERO_TIME_DELTA = datetime.timedelta()
 
     def __init__(self, load_historical_observations=False):
@@ -265,7 +265,7 @@ class WeatherCache:
         return covariance.values
 
     @staticmethod
-    def fill_missing_values(frame):
+    def fill_missing_values(frame, inferred_feq: datetime.timedelta = None):
         if len(frame) == 1:
             return frame
 
@@ -275,19 +275,19 @@ class WeatherCache:
                 frame.set_index(pandas.DatetimeIndex(frame.index.values, freq=freq), inplace=True)
             return frame
 
-        counter = collections.Counter()
-        index_it = iter(frame.index)
-        prev_value = next(index_it, None)
-        if prev_value:
-            for current_value in index_it:
-                time_distance = current_value - prev_value
-                counter[time_distance] += 1
-                prev_value = current_value
+        if not inferred_feq:
+            counter = collections.Counter()
+            index_it = iter(frame.index)
+            prev_value = next(index_it, None)
+            if prev_value:
+                for current_value in index_it:
+                    time_distance = current_value - prev_value
+                    counter[time_distance] += 1
+                    prev_value = current_value
+            inferred_feq = counter.most_common(1)[0][0]
 
-        inferred_feq = counter.most_common(1)[0][0]
         start_index = frame.index.min()
         end_index = frame.index.max()
-
         missing_values = []
         current_index = start_index
         while current_index < end_index:

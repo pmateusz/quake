@@ -24,14 +24,11 @@ import argparse
 import collections
 import csv
 import datetime
-import glob
+import itertools
 import json
 import math
-import operator
 import os
 import pathlib
-import re
-import statistics
 import typing
 
 import PIL
@@ -289,9 +286,6 @@ class ProblemBundle:
             communication_windows.extend(problem.get_communication_windows(station))
         return communication_windows
 
-    def get_cloud_cover_frame(self) -> pandas.DataFrame:
-        return pandas.concat([problem.get_cloud_cover_frame() for problem in self.__problems])
-
     def get_aggregated_observation_frame(self) -> pandas.DataFrame:
         data = []
         for problem in self.__problems:
@@ -386,6 +380,70 @@ class SolutionBundle:
         frame.sort_index(level=1, inplace=True)
         return frame
 
+    def to_local_service_level_frame(self) -> pandas.DataFrame:
+        bundle_frame = self.to_frame()
+        stations = bundle_frame.index.get_level_values(0).unique()
+
+        data = []
+        for station in stations:
+            keys_transferred = bundle_frame.loc[station]['keys_transferred'].values
+
+            weekly_consumption = 0
+            while True:
+                local_deltas = keys_transferred - weekly_consumption
+                local_balance = numpy.cumsum(local_deltas)
+                negative_balance_weeks = local_balance[local_balance < 0]
+
+                data.append({'station': station,
+                             'weekly_consumption': weekly_consumption,
+                             'negative_balance_weeks': negative_balance_weeks.size,
+                             'total_weeks': local_deltas.size})
+
+                if len(negative_balance_weeks) == len(keys_transferred):
+                    break
+
+                weekly_consumption += 1.0
+
+        master_frame = pandas.DataFrame(data=data)
+        master_frame.sort_values(by=['station', 'weekly_consumption'], inplace=True)
+        master_frame.set_index(['station', 'weekly_consumption'], inplace=True)
+        return master_frame
+
+    def to_global_service_level_frame(self) -> pandas.DataFrame:
+        bundle_frame = self.to_frame()
+        stations = bundle_frame.index.get_level_values(0).unique()
+
+        data = []
+        traffic_index = 0.0
+        while True:
+            total_negative_balance_pos = set()
+            total_pos = 0
+            for station in stations:
+                transfer_share = self.get_transfer_share(station)
+                keys_transferred = bundle_frame.loc[station]['keys_transferred'].values
+                total_pos = len(keys_transferred)
+                delta = keys_transferred - traffic_index * transfer_share
+
+                local_balance = numpy.cumsum(delta)
+                positive_balance = local_balance[local_balance > 0]
+                negative_balance_pos = numpy.argwhere(local_balance < 0).flatten()
+                if negative_balance_pos.size == 0:
+                    continue
+
+                total_negative_balance_pos = total_negative_balance_pos.union(set(negative_balance_pos.tolist()))
+                if positive_balance.size == 0:
+                    break
+
+            data.append({'traffic_index': traffic_index,
+                         'negative_balance_weeks': len(total_negative_balance_pos),
+                         'total_weeks': total_pos})
+
+            if len(total_negative_balance_pos) == total_pos:
+                break
+
+            traffic_index += 10.0
+        return pandas.DataFrame(data=data)
+
     @staticmethod
     def read_from_dir(problem_directory_path: str, solution_directory_path: str) -> 'SolutionBundle':
         problem_bundle = ProblemBundle.read_from_dir(problem_directory_path)
@@ -420,116 +478,116 @@ def save_figure(filename_no_ext, rotate=None):
         rotated_image.save(filename)
 
 
-def plot_switch_performance(args):
-    input_files_pattern = getattr(args, 'input-files-pattern')
-    output_file = getattr(args, 'output', 'output')
-
-    solution_bundles = [load_solution_bundle(file_system_item)
-                        for file_system_item in glob.glob(input_files_pattern, recursive=False)]
-
-    total_key_rate_ub = max(
-        solution_bundle.metadata.total_keys_transferred.upper_bound for solution_bundle in solution_bundles)
-
-    data = []
-    for bundle in solution_bundles:
-        for solution in bundle.solutions:
-            data.append([bundle.metadata.switch_duration, solution.total_keys_transferred])
-    data_frame = pandas.DataFrame(columns=['SwitchDuration', 'TotalKeyRate'], data=data)
-
-    figure, axis = matplotlib.pyplot.subplots()
-    points_handle = axis.scatter(data_frame.SwitchDuration, data_frame.TotalKeyRate, s=2)
-    axis.set_ylim(bottom=0, top=1.1 * total_key_rate_ub)
-    axis.grid(which='major', axis='y', linestyle='--')
-    axis.set_xticks([0, 15, 30, 45, 60])
-    axis.set_xlabel('Switch Duration')
-    axis.set_ylabel('Total Keys')
-    ub_handle = axis.axhline(y=total_key_rate_ub, linestyle='--')
-    figure.tight_layout()
-    axis.legend([points_handle, ub_handle], ['Example Solution', 'Upper Bound'],
-                ncol=2,
-                loc='upper center',
-                bbox_to_anchor=(0.5, -0.12))
-    figure.subplots_adjust(bottom=0.18)
-    save_figure(output_file)
-
-    matplotlib.pyplot.autoscale()
-    save_figure(output_file + '_auto_scale')
-
-
-def plot_bundle(args):
-    input_file = getattr(args, 'input')
-    output_file = getattr(args, 'output')
-    raw_max_jobs = getattr(args, 'max_jobs')
-
-    bundles = [load_solution_bundle(file_item) for file_item in glob.glob(input_file)]
-
-    data = []
-    for bundle in bundles:
-        for solution in bundle.solutions:
-            used_jobs_count = len([job for job in solution.jobs if job.keys_transferred > 0])
-            data.append([used_jobs_count, solution.total_keys_transferred])
-
-    if raw_max_jobs:
-        max_jobs = int(raw_max_jobs)
-    else:
-        max_jobs = max(map(operator.itemgetter(0), data))
-    min_jobs = min(map(operator.itemgetter(0), data))
-
-    total_key_rate_ub = max(bundle.metadata.total_keys_transferred.upper_bound for bundle in bundles)
-
-    data_frame = pandas.DataFrame(columns=['Jobs', 'TotalKeyRate'], data=data)
-
-    figure, axis = matplotlib.pyplot.subplots()
-
-    points_handle = axis.scatter(data_frame.Jobs, data_frame.TotalKeyRate, s=2)
-
-    ub_handle = axis.axhline(y=total_key_rate_ub, linestyle='--')
-
-    axis.set_ylim(bottom=0, top=1.1 * total_key_rate_ub)
-    axis.grid(which='major', axis='y', linestyle='--')
-    axis.set_xlim(left=min_jobs - 1, right=max_jobs + 1)
-    axis.set_xticks(numpy.arange(min_jobs, max_jobs + 1, 1))
-    axis.xaxis.set_major_formatter(matplotlib.ticker.StrMethodFormatter("{x}"))
-    axis.set_xlabel('Data Transfers')
-    axis.set_ylabel('Total Keys')
-    axis.legend([points_handle, ub_handle], ['Example Solutions', 'Upper Bound'],
-                ncol=2,
-                loc='upper center',
-                bbox_to_anchor=(0.5, -0.12))
-
-    figure.tight_layout()
-    figure.subplots_adjust(bottom=0.18)
-
-    save_figure(output_file)
-    matplotlib.pyplot.autoscale()
-    save_figure(output_file + '_auto_scale')
-
-
-def export_solution(args):
-    output_file_no_ext = getattr(args, 'output')
-    forecast_input_file = getattr(args, 'forecast_input')
-    solution_input_file = getattr(args, 'solution_input')
-
-    solution_bundle = load_solution_bundle(solution_input_file)
-    cloud_cover = quake.cloud_cover.CloudCoverIndex.from_csv(forecast_input_file)
-
-    columns = ['start_date', 'station', 'transfer_start', 'transfer_duration', 'transferred_keys', 'cloud_cover']
-    records = []
-
-    assert len(solution_bundle.solutions) == 1
-    solution = solution_bundle.solutions[0]
-
-    for job in solution.jobs:
-        records.append([job.start_time.date(),
-                        job.station,
-                        job.start_time.time(),
-                        str(job.end_time - job.start_time),
-                        float(job.key_rate) / 100.0,
-                        cloud_cover(job.station, job.start_time)])
-    data_frame = pandas.DataFrame(columns=columns, data=records)
-    with pandas.ExcelWriter(output_file_no_ext + '.xlsx') as excel_writer:
-        data_frame.to_excel(excel_writer)
-        excel_writer.save()
+# def plot_switch_performance(args):
+#     input_files_pattern = getattr(args, 'input-files-pattern')
+#     output_file = getattr(args, 'output', 'output')
+#
+#     solution_bundles = [load_solution_bundle(file_system_item)
+#                         for file_system_item in glob.glob(input_files_pattern, recursive=False)]
+#
+#     total_key_rate_ub = max(
+#         solution_bundle.metadata.total_keys_transferred.upper_bound for solution_bundle in solution_bundles)
+#
+#     data = []
+#     for bundle in solution_bundles:
+#         for solution in bundle.solutions:
+#             data.append([bundle.metadata.switch_duration, solution.total_keys_transferred])
+#     data_frame = pandas.DataFrame(columns=['SwitchDuration', 'TotalKeyRate'], data=data)
+#
+#     figure, axis = matplotlib.pyplot.subplots()
+#     points_handle = axis.scatter(data_frame.SwitchDuration, data_frame.TotalKeyRate, s=2)
+#     axis.set_ylim(bottom=0, top=1.1 * total_key_rate_ub)
+#     axis.grid(which='major', axis='y', linestyle='--')
+#     axis.set_xticks([0, 15, 30, 45, 60])
+#     axis.set_xlabel('Switch Duration')
+#     axis.set_ylabel('Total Keys')
+#     ub_handle = axis.axhline(y=total_key_rate_ub, linestyle='--')
+#     figure.tight_layout()
+#     axis.legend([points_handle, ub_handle], ['Example Solution', 'Upper Bound'],
+#                 ncol=2,
+#                 loc='upper center',
+#                 bbox_to_anchor=(0.5, -0.12))
+#     figure.subplots_adjust(bottom=0.18)
+#     save_figure(output_file)
+#
+#     matplotlib.pyplot.autoscale()
+#     save_figure(output_file + '_auto_scale')
+#
+#
+# def plot_bundle(args):
+#     input_file = getattr(args, 'input')
+#     output_file = getattr(args, 'output')
+#     raw_max_jobs = getattr(args, 'max_jobs')
+#
+#     bundles = [load_solution_bundle(file_item) for file_item in glob.glob(input_file)]
+#
+#     data = []
+#     for bundle in bundles:
+#         for solution in bundle.solutions:
+#             used_jobs_count = len([job for job in solution.jobs if job.keys_transferred > 0])
+#             data.append([used_jobs_count, solution.total_keys_transferred])
+#
+#     if raw_max_jobs:
+#         max_jobs = int(raw_max_jobs)
+#     else:
+#         max_jobs = max(map(operator.itemgetter(0), data))
+#     min_jobs = min(map(operator.itemgetter(0), data))
+#
+#     total_key_rate_ub = max(bundle.metadata.total_keys_transferred.upper_bound for bundle in bundles)
+#
+#     data_frame = pandas.DataFrame(columns=['Jobs', 'TotalKeyRate'], data=data)
+#
+#     figure, axis = matplotlib.pyplot.subplots()
+#
+#     points_handle = axis.scatter(data_frame.Jobs, data_frame.TotalKeyRate, s=2)
+#
+#     ub_handle = axis.axhline(y=total_key_rate_ub, linestyle='--')
+#
+#     axis.set_ylim(bottom=0, top=1.1 * total_key_rate_ub)
+#     axis.grid(which='major', axis='y', linestyle='--')
+#     axis.set_xlim(left=min_jobs - 1, right=max_jobs + 1)
+#     axis.set_xticks(numpy.arange(min_jobs, max_jobs + 1, 1))
+#     axis.xaxis.set_major_formatter(matplotlib.ticker.StrMethodFormatter("{x}"))
+#     axis.set_xlabel('Data Transfers')
+#     axis.set_ylabel('Total Keys')
+#     axis.legend([points_handle, ub_handle], ['Example Solutions', 'Upper Bound'],
+#                 ncol=2,
+#                 loc='upper center',
+#                 bbox_to_anchor=(0.5, -0.12))
+#
+#     figure.tight_layout()
+#     figure.subplots_adjust(bottom=0.18)
+#
+#     save_figure(output_file)
+#     matplotlib.pyplot.autoscale()
+#     save_figure(output_file + '_auto_scale')
+#
+#
+# def export_solution(args):
+#     output_file_no_ext = getattr(args, 'output')
+#     forecast_input_file = getattr(args, 'forecast_input')
+#     solution_input_file = getattr(args, 'solution_input')
+#
+#     solution_bundle = load_solution_bundle(solution_input_file)
+#     cloud_cover = quake.cloud_cover.CloudCoverIndex.from_csv(forecast_input_file)
+#
+#     columns = ['start_date', 'station', 'transfer_start', 'transfer_duration', 'transferred_keys', 'cloud_cover']
+#     records = []
+#
+#     assert len(solution_bundle.solutions) == 1
+#     solution = solution_bundle.solutions[0]
+#
+#     for job in solution.jobs:
+#         records.append([job.start_time.date(),
+#                         job.station,
+#                         job.start_time.time(),
+#                         str(job.end_time - job.start_time),
+#                         float(job.key_rate) / 100.0,
+#                         cloud_cover(job.station, job.start_time)])
+#     data_frame = pandas.DataFrame(columns=columns, data=records)
+#     with pandas.ExcelWriter(output_file_no_ext + '.xlsx') as excel_writer:
+#         data_frame.to_excel(excel_writer)
+#         excel_writer.save()
 
 
 def plot_long_term_performance(args):
@@ -723,46 +781,46 @@ def plot_aggregate(args):
     matplotlib.pyplot.close("all")
 
 
-def plot_bottleneck(args):
-    run_pattern = re.compile(r'^run_(?P<number>\d+)(:?_disturbed10)?$')
-
-    data_dir = getattr(args, 'data_dir')
-    solution_dirs = []
-
-    min_run_number = int(getattr(args, 'min_run'))
-
-    for file_item in os.listdir(data_dir):
-        file_path = os.path.join(data_dir, file_item)
-        if os.path.isdir(file_path):
-            match = run_pattern.match(file_item)
-            if match:
-                run_number = int(match.group('number'))
-                if run_number >= min_run_number:
-                    solution_dirs.append((run_number, file_path))
-    solution_dirs.sort(key=operator.itemgetter(0))
-
-    city_rank = collections.defaultdict(list)
-    for run_number, solution_dir in solution_dirs:
-        simulation = quake.multistage_simulation.MultistageSimulation.load_from_dir(data_dir, solution_dir)
-        bottleneck_counter = collections.Counter()
-        bottlenecks = simulation.compute_bottlenecks()
-        cities = set()
-        for row_dict in bottlenecks:
-            for city, rank in row_dict.items():
-                cities.add(city)
-                if rank == 0:
-                    bottleneck_counter[city] += 1
-        for city in cities:
-            city_rank[city].append(bottleneck_counter[city] if city in bottleneck_counter else 0)
-
-    for city in city_rank:
-        samples = city_rank[city]
-        median = statistics.median(samples)
-        medians = [median] * len(samples)
-
-        print(city, median, samples)
-        # else:
-        #     print(city, median, samples, scipy.stats.wilcoxon(samples, medians))
+# def plot_bottleneck(args):
+#     run_pattern = re.compile(r'^run_(?P<number>\d+)(:?_disturbed10)?$')
+#
+#     data_dir = getattr(args, 'data_dir')
+#     solution_dirs = []
+#
+#     min_run_number = int(getattr(args, 'min_run'))
+#
+#     for file_item in os.listdir(data_dir):
+#         file_path = os.path.join(data_dir, file_item)
+#         if os.path.isdir(file_path):
+#             match = run_pattern.match(file_item)
+#             if match:
+#                 run_number = int(match.group('number'))
+#                 if run_number >= min_run_number:
+#                     solution_dirs.append((run_number, file_path))
+#     solution_dirs.sort(key=operator.itemgetter(0))
+#
+#     city_rank = collections.defaultdict(list)
+#     for run_number, solution_dir in solution_dirs:
+#         simulation = quake.multistage_simulation.MultistageSimulation.load_from_dir(data_dir, solution_dir)
+#         bottleneck_counter = collections.Counter()
+#         bottlenecks = simulation.compute_bottlenecks()
+#         cities = set()
+#         for row_dict in bottlenecks:
+#             for city, rank in row_dict.items():
+#                 cities.add(city)
+#                 if rank == 0:
+#                     bottleneck_counter[city] += 1
+#         for city in cities:
+#             city_rank[city].append(bottleneck_counter[city] if city in bottleneck_counter else 0)
+#
+#     for city in city_rank:
+#         samples = city_rank[city]
+#         median = statistics.median(samples)
+#         medians = [median] * len(samples)
+#
+#         print(city, median, samples)
+#         # else:
+#         #     print(city, median, samples, scipy.stats.wilcoxon(samples, medians))
 
 
 def plot_network_traffic(args):
@@ -790,198 +848,243 @@ def plot_network_traffic(args):
     save_figure('network_traffic')
 
 
-def compute_local_service_frame(frame, city):
-    city_data_frame = frame[frame['Station'] == city.name].copy()
-    city_data_frame.set_index('Week', inplace=True)
-    city_data_frame.sort_index(inplace=True)
+# def compute_local_service_frame(frame, city):
+#     city_data_frame = frame[frame['Station'] == city.name].copy()
+#     city_data_frame.set_index('Week', inplace=True)
+#     city_data_frame.sort_index(inplace=True)
+#
+#     failure_dates = dict()
+#     cumulative_key_buffer = 0
+#     data = []
+#     for index in city_data_frame.index:
+#         key_transferred = city_data_frame.at[index, 'KeyTransferred']
+#         cumulative_key_buffer += key_transferred
+#         data.append((index, cumulative_key_buffer))
+#
+#     consumption_failures = []
+#     current_step_consumption = 0
+#     current_failures = 0
+#     while current_failures < len(data):
+#         cumulative_consumption = 0
+#         current_failures = 0
+#         for date, buffer_size in data:
+#             cumulative_consumption += current_step_consumption
+#             if cumulative_consumption > buffer_size:
+#                 current_failures += 1
+#                 if date not in failure_dates:
+#                     failure_dates[date] = current_step_consumption
+#         consumption_failures.append((current_step_consumption, current_failures))
+#         current_step_consumption += 1
+#
+#     service_data_frame = pandas.DataFrame(columns=['Consumption', 'Failures'], data=consumption_failures)
+#     days_length_vector = numpy.full(len(service_data_frame), float(len(data)))
+#     service_data_frame['SuccessRate'] \
+#         = (days_length_vector - service_data_frame['Failures']) / days_length_vector
+#     return service_data_frame, failure_dates
 
-    failure_dates = dict()
-    cumulative_key_buffer = 0
-    data = []
-    for index in city_data_frame.index:
-        key_transferred = city_data_frame.at[index, 'KeyTransferred']
-        cumulative_key_buffer += key_transferred
-        data.append((index, cumulative_key_buffer))
 
-    consumption_failures = []
-    current_step_consumption = 0
-    current_failures = 0
-    while current_failures < len(data):
-        cumulative_consumption = 0
-        current_failures = 0
-        for date, buffer_size in data:
-            cumulative_consumption += current_step_consumption
-            if cumulative_consumption > buffer_size:
-                current_failures += 1
-                if date not in failure_dates:
-                    failure_dates[date] = current_step_consumption
-        consumption_failures.append((current_step_consumption, current_failures))
-        current_step_consumption += 1
-
-    service_data_frame = pandas.DataFrame(columns=['Consumption', 'Failures'], data=consumption_failures)
-    days_length_vector = numpy.full(len(service_data_frame), float(len(data)))
-    service_data_frame['SuccessRate'] \
-        = (days_length_vector - service_data_frame['Failures']) / days_length_vector
-    return service_data_frame, failure_dates
+# def compute_global_service_frame(city_date_rate_failure, simulation):
+#     dates = set()
+#     for city in city_date_rate_failure:
+#         for date in city_date_rate_failure[city]:
+#             dates.add(date)
+#     dates = list(dates)
+#     dates.sort()
+#
+#     lambda_growth_rate = 0
+#     data = []
+#     dates_failed = set()
+#     while len(dates_failed) < len(dates):
+#         dates_failed = set()
+#         for city in city_date_rate_failure:
+#             for date in dates:
+#                 if city_date_rate_failure[city][date] <= lambda_growth_rate * simulation.transfer_rates[city]:
+#                     dates_failed.add(date)
+#         data.append(
+#             (lambda_growth_rate, len(dates_failed), (float(len(dates)) - float(len(dates_failed))) / len(dates)))
+#         lambda_growth_rate += 10
+#     return pandas.DataFrame(columns=['Consumption', 'Failures', 'SuccessRate'], data=data)
 
 
-def compute_global_service_frame(city_date_rate_failure, simulation):
-    dates = set()
-    for city in city_date_rate_failure:
-        for date in city_date_rate_failure[city]:
-            dates.add(date)
-    dates = list(dates)
-    dates.sort()
+class ResultsSet:
+    class SolutionBundleEntry:
+        def __init__(self, cache_dir: str, problem_dir: str, solution_dir: str, year: int, tag: str = None):
+            self.__cache_dir = cache_dir
+            self.__problem_dir = problem_dir
+            self.__solution_dir = solution_dir
+            self.__year = year
+            self.__tag = tag
 
-    lambda_growth_rate = 0
-    data = []
-    dates_failed = set()
-    while len(dates_failed) < len(dates):
-        dates_failed = set()
-        for city in city_date_rate_failure:
-            for date in dates:
-                if city_date_rate_failure[city][date] <= lambda_growth_rate * simulation.transfer_rates[city]:
-                    dates_failed.add(date)
-        data.append(
-            (lambda_growth_rate, len(dates_failed), (float(len(dates)) - float(len(dates_failed))) / len(dates)))
-        lambda_growth_rate += 10
-    return pandas.DataFrame(columns=['Consumption', 'Failures', 'SuccessRate'], data=data)
+            self.__solution_bundle = None
+
+        @property
+        def local_frame(self):
+            local_frame_path = self.local_cached_frame_path
+            if local_frame_path.exists():
+                return pandas.read_hdf(local_frame_path)
+
+            solution_bundle = self.solution_bundle
+            local_frame = solution_bundle.to_local_service_level_frame()
+            local_frame.to_hdf(str(local_frame_path), key='a')
+            return local_frame
+
+        @property
+        def global_frame(self):
+            global_frame_path = self.global_cached_frame_path
+            if global_frame_path.exists():
+                return pandas.read_hdf(str(global_frame_path))
+
+            solution_bundle = self.solution_bundle
+            global_frame = solution_bundle.to_global_service_level_frame()
+            global_frame.to_hdf(str(global_frame_path), key='a')
+            return global_frame
+
+        @property
+        def solution_bundle(self):
+            if self.__solution_bundle is not None:
+                return self.__solution_bundle
+
+            self.__solution_bundle = SolutionBundle.read_from_dir(self.__problem_dir, self.__solution_dir)
+            return self.__solution_bundle
+
+        @property
+        def local_cached_frame_path(self) -> pathlib.Path:
+            return self.cached_frame_path('local')
+
+        @property
+        def global_cached_frame_path(self) -> pathlib.Path:
+            return self.cached_frame_path('global')
+
+        def cached_frame_path(self, prefix):
+            if self.__tag:
+                file_name = '{0}_{1}_{2}.hdf'.format(prefix, self.__year, self.__tag)
+            else:
+                file_name = '{0}_{1}.hdf'.format(prefix, self.__year)
+            return pathlib.Path(os.path.join(self.__cache_dir, file_name))
+
+    def __init__(self):
+        self.__results = [ResultsSet.SolutionBundleEntry('/home/pmateusz/dev/quake/cache',
+                                                         '/home/pmateusz/dev/quake/current_review/{0}'.format(year),
+                                                         '/home/pmateusz/dev/quake/current_review/{0}/solutions'.format(year),
+                                                         year) for year in range(2013, 2019, 1)]
+
+    def get_transfer_share(self, station: quake.city.City) -> float:
+        solution_bundle = self.__results[0].solution_bundle
+        return solution_bundle.get_transfer_share(station)
+
+    @property
+    def local_frame(self) -> pandas.DataFrame:
+        return self.__concat_local_frames([result.local_frame for result in self.__results])
+
+    @property
+    def global_frame(self) -> pandas.DataFrame:
+        return self.__concat_global_frames([result.global_frame for result in self.__results])
+
+    @property
+    def stations(self) -> typing.List[quake.city.City]:
+        solution_bundle = self.__results[0].solution_bundle
+        return solution_bundle.stations
+
+    def get_service_level_summary(self) -> pandas.DataFrame:
+        global_traffic_index_100 = self.get_global_traffic_index_at_level(1.0)
+        global_traffic_index_99 = self.get_global_traffic_index_at_level(0.99)
+        data = []
+        for station in self.stations:
+            transfer_share = self.get_transfer_share(station)
+            local_consumption_100 = self.get_local_consumption_at_level(station, 1.0)
+            local_consumption_99 = self.get_local_consumption_at_level(station, 0.99)
+            global_consumption_100 = int(math.floor(global_traffic_index_100 * transfer_share))
+            global_consumption_99 = int(math.floor(global_traffic_index_99 * transfer_share))
+            data.append({'station': station,
+                         'weight': transfer_share,
+                         'local_100': local_consumption_100,
+                         'local_99': local_consumption_99,
+                         'global_100': global_consumption_100,
+                         'global_99': global_consumption_99})
+        return pandas.DataFrame(data=data)
+
+    def get_station_frame(self, station: quake.city.City) -> pandas.DataFrame:
+        local_frame = self.local_frame
+        station_frame = local_frame.loc[station].copy()
+        station_frame['level'] = (station_frame['total_weeks'] - station_frame['negative_balance_weeks']) / station_frame['total_weeks']
+        return station_frame
+
+    def get_global_traffic_index_at_level(self, level: float) -> float:
+        global_frame = self.global_frame
+        levels = (global_frame['total_weeks'] - global_frame['negative_balance_weeks']) / global_frame['total_weeks']
+        distance = numpy.abs(levels - level)
+        min_distance = numpy.min(distance)
+        index_level = int(numpy.argwhere(distance == min_distance).flatten()[-1])
+        return global_frame.index[index_level]
+
+    def get_local_consumption_at_level(self, station: quake.city.City, level: float) -> int:
+        station_frame = self.get_station_frame(station)
+        distance = numpy.abs(station_frame['level'] - level)
+        min_distance = numpy.min(distance)
+        index_level = int(numpy.argwhere(distance == min_distance).flatten()[-1])
+        return int(station_frame.index[index_level])
+
+    @staticmethod
+    def __concat_local_frames(local_frames) -> pandas.DataFrame:
+        index_frames = [local_frame.index.to_frame().reset_index(drop=True) for local_frame in local_frames]
+        master_index_frame = pandas.concat(index_frames)
+        master_index_frame.sort_values(by=['station', 'weekly_consumption'], inplace=True)
+        master_index_frame.drop_duplicates(inplace=True)
+        master_index = pandas.MultiIndex.from_frame(master_index_frame, sortorder=True)
+
+        filled_frames = []
+        for frame in local_frames:
+            local_frame = frame.reindex(master_index)
+            local_frame = local_frame.ffill()
+            filled_frames.append(local_frame)
+
+        master_frame = filled_frames[0]
+        for frame in filled_frames[1:]:
+            master_frame += frame
+        return master_frame
+
+    @staticmethod
+    def __concat_global_frames(global_frames) -> pandas.DataFrame:
+        index_values = list(set(itertools.chain.from_iterable(global_frame['traffic_index'].to_list() for global_frame in global_frames)))
+        index_values.sort()
+        master_index = pandas.Index(index_values)
+
+        filled_frames = []
+        for frame in global_frames:
+            frame_to_reindex = frame.set_index('traffic_index')
+            global_frame = frame_to_reindex.reindex(master_index)
+            global_frame = global_frame.ffill()
+            filled_frames.append(global_frame)
+
+        master_frame = filled_frames[0]
+        for frame in filled_frames[1:]:
+            master_frame += frame
+        return master_frame
 
 
 def plot_service_level(args):
-    data_dir = getattr(args, 'data_dir')
-    solution_dir = getattr(args, 'solution_dir')
+    result_set = ResultsSet()
 
-    solution_bundle = SolutionBundle.read_from_dir(data_dir, solution_dir)
-
-    def local_service_level(bundle_frame: pandas.DataFrame) -> pandas.DataFrame:
-        stations = bundle_frame.index.get_level_values(0).unique()
-
-        data = []
-        for station in stations:
-            keys_transferred = bundle_frame.loc[station]['keys_transferred'].values
-
-            weekly_consumption = 0
-            while True:
-                local_deltas = keys_transferred - weekly_consumption
-                local_balance = numpy.cumsum(local_deltas)
-                negative_balance_weeks = local_balance[local_balance < 0]
-
-                data.append({'station': station,
-                             'weekly_consumption': weekly_consumption,
-                             'negative_balance_weeks': negative_balance_weeks.size,
-                             'total_weeks': local_deltas.size})
-
-                local_positive_deltas = local_deltas[local_deltas > 0]
-                if local_positive_deltas.size == 0:
-                    break
-
-                weekly_consumption += local_positive_deltas.min()
-
-        master_frame = pandas.DataFrame(data=data)
-        master_frame.set_index(['station', 'weekly_consumption'], inplace=True)
-        master_frame.sort_index(level=0, inplace=True)
-        master_frame.sort_index(level=1, inplace=True)
-        return master_frame
-
-    def global_service_level(solution_bundle: SolutionBundle) -> pandas.DataFrame:
-        # TODO: number of dates for which at least one ground station has negative balance
-        bundle_frame = solution_bundle.to_frame()
-        stations = bundle_frame.index.get_level_values(0).unique()
-
-        data = []
-        traffic_index = 0.0
-        while True:
-            total_negative_balance_pos = set()
-            total_pos = 0
-            for station in stations:
-                transfer_share = solution_bundle.get_transfer_share(station)
-                keys_transferred = bundle_frame.loc[station]['keys_transferred'].values
-                balance = keys_transferred - traffic_index * transfer_share
-                cum_balance = numpy.cumsum(balance)
-                negative_balance_pos = numpy.argwhere(cum_balance < 0)
-                total_negative_balance_pos = total_negative_balance_pos.union(negative_balance_pos)
-                total_pos = len(keys_transferred)
-            data.append({'traffic_index': traffic_index,
-                         'negative_balance_weeks': len(total_negative_balance_pos),
-                         'total_weeks': total_pos})
-            traffic_index += 100.0
-
-        pass
-
-    global_service_level(solution_bundle)
-
-    match = re.match('[^\d\s]+_(?P<number>\d+)', solution_dir)
-    run_number = int(match.group('number'))
-    data_frame = simulation.to_frame()
-    min_week = data_frame['Week'].min()
-    filtered_frame = data_frame[(data_frame['Week'] > min_week)]
-
-    def __plot_service_level(data_frame):
-        frame_to_use = data_frame.copy()
-
-        frame_to_use['Difference99'] = (frame_to_use['SuccessRate'] - 0.99).abs()
-        best_99point_difference = frame_to_use['Difference99'].min()
-        max_consumption_at_99service_level = frame_to_use[
-            frame_to_use['Difference99'] == best_99point_difference].sort_values('Consumption', ascending=False)
-
-        point_99success_rate = max_consumption_at_99service_level['SuccessRate'].iloc[0]
-        point_99consumption = max_consumption_at_99service_level['Consumption'].iloc[0]
-
-        frame_to_use['Difference100'] = (frame_to_use['SuccessRate'] - 1.0).abs()
-        best_100point_difference = frame_to_use['Difference100'].min()
-        max_consumption_at_100service_level = frame_to_use[
-            frame_to_use['Difference100'] == best_100point_difference].sort_values('Consumption', ascending=False)
-
-        point_100success_rate = max_consumption_at_100service_level['SuccessRate'].iloc[0]
-        point_100consumption = max_consumption_at_100service_level['Consumption'].iloc[0]
-
+    for station in result_set.stations:
+        station_frame = result_set.get_station_frame(station)
         fig, axis = matplotlib.pyplot.subplots(figsize=(FIGURE_WIDTH_SQUARE_SIZE, FIGURE_HEIGHT_SQUARE_SIZE))
-        axis.plot(frame_to_use['Consumption'], frame_to_use['SuccessRate'])
+        axis.plot(station_frame.index.values, station_frame['level'])
 
-        if point_99consumption != point_100consumption:
-            axis.plot([point_99consumption], [point_99success_rate], '.', c=FOREGROUND_COLOR)
-            axis.annotate('({0}, {1:.3f})'.format(point_99consumption, point_99success_rate),
-                          xy=(point_99consumption, point_99success_rate), textcoords='figure fraction',
-                          xytext=(0.4, 0.75),
-                          arrowprops=dict(facecolor='black', arrowstyle="->", connectionstyle="arc3"))
+        level = 0.99
+        consumption_level = result_set.get_local_consumption_at_level(station, level)
+        axis.plot([consumption_level], [level], '.', c=FOREGROUND_COLOR)
+        axis.annotate('({0}, {1:.2f})'.format(consumption_level, level),
+                      xy=(consumption_level, level),
+                      textcoords='figure fraction', xytext=(0.3, 0.8),
+                      arrowprops=dict(facecolor='black', arrowstyle="->", connectionstyle="arc3"))
 
-            axis.plot([point_100consumption], [point_100success_rate], '.', c=FOREGROUND_COLOR)
-            axis.annotate('({0}, {1:.3f})'.format(point_100consumption, point_100success_rate),
-                          xy=(point_100consumption, point_100success_rate), textcoords='figure fraction',
-                          xytext=(0.2, 0.8),
-                          arrowprops=dict(facecolor='black', arrowstyle="->", connectionstyle="arc3"))
-        else:
-            axis.plot([point_100consumption], [point_100success_rate], '.', c=FOREGROUND_COLOR)
-            axis.annotate('({0}, {1:.3f})'.format(point_100consumption, point_100success_rate),
-                          xy=(point_100consumption, point_100success_rate), textcoords='figure fraction',
-                          xytext=(0.4, 0.75),
-                          arrowprops=dict(facecolor='black', arrowstyle="->", connectionstyle="arc3"))
-
-        return fig, axis
-
-    city_date_keyrate_failure = dict()
-    for city in simulation.stations:
-        service_data_frame, city_date_failures = compute_local_service_frame(filtered_frame, city)
-        city_date_keyrate_failure[city] = city_date_failures
-        fig, axis = __plot_service_level(service_data_frame)
         axis.set_xlabel('Weekly Key Consumption')
         axis.set_ylabel('Service Level')
         axis.set_xlim(left=0)
         axis.set_ylim(bottom=0)
         fig.tight_layout()
-        save_figure('service_level_' + city.name + '_run' + str(run_number))
+        save_figure('service_level_' + station.name)
         matplotlib.pyplot.close(fig)
-
-    service_level_frame = compute_global_service_frame(city_date_keyrate_failure, simulation)
-    fig, axis = __plot_service_level(service_level_frame)
-    axis.set_xlabel('Traffic Index')
-    axis.set_ylabel('Global Service Level')
-    axis.set_xlim(left=0)
-    axis.set_ylim(bottom=0)
-    fig.tight_layout()
-    save_figure('service_level_global_run' + str(run_number))
-    matplotlib.pyplot.close(fig)
 
 
 def plot_all_service_levels(args):
@@ -1534,40 +1637,40 @@ class ModelWrapper:
         return pandas.Timestamp(transfer_end_to_use)
 
 
-def plot_compare(args):
-    problem_path = getattr(args, 'problem')
-    weather_path = getattr(args, 'weather')
-    baseline_solution_path = getattr(args, 'baseline_solution')
-    other_solution_path = getattr(args, 'other_solution')
-
-    data_loader = quake.minizinc.MiniZincLoader()
-    with open(problem_path, 'r') as file_stream:
-        data_model = data_loader.load(file_stream)
-
-    weather_index = quake.cloud_cover.CloudCoverIndex.from_csv(weather_path)
-
-    model = ModelWrapper(data_model, weather_index)
-
-    baseline_solution = load_solution_bundle(baseline_solution_path).solutions[0]
-    other_solution = load_solution_bundle(other_solution_path).solutions[0]
-
-    regular_stations = [station for station in model.stations if station != quake.city.NONE]
-
-    columns = ['Traffic Index']
-    for station in regular_stations:
-        columns.append(station.name)
-
-    def get_solution_metrics(solution):
-        traffic_indices = [model.traffic_index(solution, station) for station in regular_stations]
-        traffic_index = min(traffic_indices)
-        metrics = [traffic_index]
-        for station in regular_stations:
-            metrics.append(solution.keys_transferred(station))
-        return metrics
-
-    data = [get_solution_metrics(baseline_solution), get_solution_metrics(other_solution)]
-    frame = pandas.DataFrame(data=data, columns=columns)
-    print(tabulate.tabulate(frame, headers='keys', tablefmt='psql'))
+# def plot_compare(args):
+#     problem_path = getattr(args, 'problem')
+#     weather_path = getattr(args, 'weather')
+#     baseline_solution_path = getattr(args, 'baseline_solution')
+#     other_solution_path = getattr(args, 'other_solution')
+#
+#     data_loader = quake.minizinc.MiniZincLoader()
+#     with open(problem_path, 'r') as file_stream:
+#         data_model = data_loader.load(file_stream)
+#
+#     weather_index = quake.cloud_cover.CloudCoverIndex.from_csv(weather_path)
+#
+#     model = ModelWrapper(data_model, weather_index)
+#
+#     baseline_solution = load_solution_bundle(baseline_solution_path).solutions[0]
+#     other_solution = load_solution_bundle(other_solution_path).solutions[0]
+#
+#     regular_stations = [station for station in model.stations if station != quake.city.NONE]
+#
+#     columns = ['Traffic Index']
+#     for station in regular_stations:
+#         columns.append(station.name)
+#
+#     def get_solution_metrics(solution):
+#         traffic_indices = [model.traffic_index(solution, station) for station in regular_stations]
+#         traffic_index = min(traffic_indices)
+#         metrics = [traffic_index]
+#         for station in regular_stations:
+#             metrics.append(solution.keys_transferred(station))
+#         return metrics
+#
+#     data = [get_solution_metrics(baseline_solution), get_solution_metrics(other_solution)]
+#     frame = pandas.DataFrame(data=data, columns=columns)
+#     print(tabulate.tabulate(frame, headers='keys', tablefmt='psql'))
 
 
 def plot_key_rate(args):
@@ -1587,34 +1690,40 @@ def plot_key_rate(args):
     save_figure('key_rate')
 
 
+def print_service_levels(args):
+    result_set = ResultsSet()
+    frame = result_set.get_service_level_summary()
+    print(tabulate.tabulate(frame, tablefmt='psql', headers='keys', showindex=False))
+
+
 def parse_args():
     parser = argparse.ArgumentParser(prog='quake-plot')
     subparsers = parser.add_subparsers(title='commands', dest='command')
 
-    optics_performance_parser = subparsers.add_parser('switch-time-performance')
-    optics_performance_parser.add_argument('input-files-pattern', help='A glob pattern for input files.')
-    optics_performance_parser.add_argument('--output', help='The output file name without extension.')
+    # optics_performance_parser = subparsers.add_parser('switch-time-performance')
+    # optics_performance_parser.add_argument('input-files-pattern', help='A glob pattern for input files.')
+    # optics_performance_parser.add_argument('--output', help='The output file name without extension.')
+    #
+    # bundle_parser = subparsers.add_parser('jobs-performance')
+    # bundle_parser.add_argument('input', help='The input file.')
+    # bundle_parser.add_argument('--output', help='The output file name without extension.')
+    # bundle_parser.add_argument('--max-jobs', help='Maximum number of transfer jobs considered.')
 
-    bundle_parser = subparsers.add_parser('jobs-performance')
-    bundle_parser.add_argument('input', help='The input file.')
-    bundle_parser.add_argument('--output', help='The output file name without extension.')
-    bundle_parser.add_argument('--max-jobs', help='Maximum number of transfer jobs considered.')
-
-    solution_parser = subparsers.add_parser('solution')
-    solution_parser.add_argument('solution_input', help='The input file with solution.')
-    solution_parser.add_argument('model_input', help='The input file with the model.')
-    solution_parser.add_argument('elevation_input', help='The input file with elevation angles.')
-    solution_parser.add_argument('key_rate_input', help='The input file with key rates.')
-    solution_parser.add_argument('--output', help='The output file name without extension.')
-    solution_parser.add_argument('--min-jobs',
-                                 type=int,
-                                 default=0,
-                                 help='Filter out solutions with smaller number of transfer actions')
-
-    export_parser = subparsers.add_parser('export')
-    export_parser.add_argument('solution_input', help='The input file with solution.')
-    export_parser.add_argument('forecast_input', help='The input file with weather forecast.')
-    export_parser.add_argument('--output', help='The output file name without extension.')
+    # solution_parser = subparsers.add_parser('solution')
+    # solution_parser.add_argument('solution_input', help='The input file with solution.')
+    # solution_parser.add_argument('model_input', help='The input file with the model.')
+    # solution_parser.add_argument('elevation_input', help='The input file with elevation angles.')
+    # solution_parser.add_argument('key_rate_input', help='The input file with key rates.')
+    # solution_parser.add_argument('--output', help='The output file name without extension.')
+    # solution_parser.add_argument('--min-jobs',
+    #                              type=int,
+    #                              default=0,
+    #                              help='Filter out solutions with smaller number of transfer actions')
+    #
+    # export_parser = subparsers.add_parser('export')
+    # export_parser.add_argument('solution_input', help='The input file with solution.')
+    # export_parser.add_argument('forecast_input', help='The input file with weather forecast.')
+    # export_parser.add_argument('--output', help='The output file name without extension.')
 
     long_term_performance_parser = subparsers.add_parser('long-term-performance')
     long_term_performance_parser.add_argument('--data-dir')
@@ -1627,9 +1736,9 @@ def parse_args():
     aggregate_parser = subparsers.add_parser('aggregate')
     aggregate_parser.add_argument('--data-dir')
 
-    bottleneck_parser = subparsers.add_parser('bottleneck')
-    bottleneck_parser.add_argument('--data-dir')
-    bottleneck_parser.add_argument('--min-run', default=0)
+    # bottleneck_parser = subparsers.add_parser('bottleneck')
+    # bottleneck_parser.add_argument('--data-dir')
+    # bottleneck_parser.add_argument('--min-run', default=0)
 
     service_level_parser = subparsers.add_parser('service-level')
     service_level_parser.add_argument('--data-dir')
@@ -1648,13 +1757,15 @@ def parse_args():
     weights_disturbed_parser = subparsers.add_parser('weights-disturbed')
     weights_disturbed_parser.add_argument('--data-dir')
 
-    compare_parser = subparsers.add_parser('compare')
-    compare_parser.add_argument('--problem')
-    compare_parser.add_argument('--weather')
-    compare_parser.add_argument('--baseline-solution')
-    compare_parser.add_argument('--other-solution')
+    # compare_parser = subparsers.add_parser('compare')
+    # compare_parser.add_argument('--problem')
+    # compare_parser.add_argument('--weather')
+    # compare_parser.add_argument('--baseline-solution')
+    # compare_parser.add_argument('--other-solution')
 
-    key_rate_parser = subparsers.add_parser('key-rate')
+    subparsers.add_parser('key-rate')
+
+    subparsers.add_parser('print-service-levels')
 
     return parser.parse_args()
 
@@ -1668,20 +1779,20 @@ if __name__ == '__main__':
     matplotlib.rcParams['font.sans-serif'] = ['Roboto']
 
     command = getattr(args_, 'command')
-    if command == 'switch-time-performance':
-        plot_switch_performance(args_)
-    elif command == 'jobs-performance':
-        plot_bundle(args_)
+    # if command == 'switch-time-performance':
+    #     plot_switch_performance(args_)
+    # elif command == 'jobs-performance':
+    #     plot_bundle(args_)
     # elif command == 'solution':
     #     plot_solution(args_)
-    elif command == 'export':
-        export_solution(args_)
-    elif command == 'long-term-performance':
+    # elif command == 'export':
+    #     export_solution(args_)
+    if command == 'long-term-performance':
         plot_long_term_performance(args_)
     elif command == 'aggregate':
         plot_aggregate(args_)
-    elif command == 'bottleneck':
-        plot_bottleneck(args_)
+    # elif command == 'bottleneck':
+    #     plot_bottleneck(args_)
     elif command == 'service-level':
         plot_service_level(args_)
     elif command == 'week-performance':
@@ -1694,7 +1805,9 @@ if __name__ == '__main__':
         plot_weights_disturbed(args_)
     elif command == 'all-service-level':
         plot_all_service_levels(args_)
-    elif command == 'compare':
-        plot_compare(args_)
+    # elif command == 'compare':
+    #     plot_compare(args_)
     elif command == 'key-rate':
         plot_key_rate(args_)
+    elif command == 'print-service-levels':
+        print_service_levels(args_)

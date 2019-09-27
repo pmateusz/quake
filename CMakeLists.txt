@@ -49,6 +49,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules/")
 
 get_filename_component(GUROBI_ROOT_DIR /opt/gurobi811 REALPATH)
 get_filename_component(ORTOOLS_ROOT_DIR ~/dev/or-tools-7.1 REALPATH)
+get_filename_component(SPICE_ROOT_DIR ~/dev/cspice REALPATH)
 get_filename_component(Protobuf_LIBRARY ${ORTOOLS_ROOT_DIR}/dependencies/install/lib REALPATH)
 get_filename_component(Protobuf_PROTOC_EXECUTABLE ${ORTOOLS_ROOT_DIR}/dependencies/install/bin/protoc REALPATH)
 get_filename_component(Protobuf_SRC_ROOT_FOLDER ${ORTOOLS_ROOT_DIR}/dependencies/sources/protobuf-3.6.1/src REALPATH)
@@ -71,6 +72,7 @@ find_package(Threads REQUIRED)
 find_package(Boost REQUIRED COMPONENTS date_time filesystem regex graph)
 find_package(Gurobi REQUIRED)
 find_package(ortools REQUIRED)
+find_package(spice REQUIRED)
 
 set(HEADER_DEP ${Boost_INCLUDE_DIR}
         ${DATE_INCLUDE_DIR}

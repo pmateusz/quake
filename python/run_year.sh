@@ -5,8 +5,24 @@ SCRIPT=/home/pmateusz/dev/quake/python/year-tools.py
 #$SCRIPT run --problem-dir=/home/pmateusz/dev/quake/current_review/2013 --solution-prefix=solution --gap-limit=0.05 --time-step=00:00:15
 #popd
 
-pushd /home/pmateusz/dev/quake/current_review/2014/solutions
-$SCRIPT run --problem-dir=/home/pmateusz/dev/quake/current_review/2014 --solution-prefix=solution --gap-limit=0.05 --time-step=00:00:15
+#pushd /home/pmateusz/dev/quake/current_review/2014/solutions
+#$SCRIPT run --problem-dir=/home/pmateusz/dev/quake/current_review/2014 --solution-prefix=solution --gap-limit=0.05 --time-step=00:00:15
+#popd
+
+#pushd /home/pmateusz/dev/quake/current_review/2015/solutions
+#$SCRIPT run --problem-dir=/home/pmateusz/dev/quake/current_review/2015 --solution-prefix=solution --gap-limit=0.05 --time-step=00:00:15
+#popd
+
+#pushd /home/pmateusz/dev/quake/current_review/2016/solutions
+#$SCRIPT run --problem-dir=/home/pmateusz/dev/quake/current_review/2016 --solution-prefix=solution --gap-limit=0.05 --time-step=00:00:15
+#popd
+
+pushd /home/pmateusz/dev/quake/current_review/2017/solutions
+$SCRIPT run --problem-dir=/home/pmateusz/dev/quake/current_review/2017 --solution-prefix=solution --gap-limit=0.05 --time-step=00:00:15
+popd
+
+pushd /home/pmateusz/dev/quake/current_review/2018/solutions
+$SCRIPT run --problem-dir=/home/pmateusz/dev/quake/current_review/2018 --solution-prefix=solution --gap-limit=0.05 --time-step=00:00:15
 popd
 
 # generate files with elevation angle
