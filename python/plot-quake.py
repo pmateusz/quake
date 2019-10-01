@@ -26,10 +26,10 @@ import datetime
 import itertools
 import json
 import math
+import operator
 import os
 import pathlib
 import typing
-import operator
 
 import PIL
 import matplotlib.cm
@@ -1175,18 +1175,17 @@ def plot_communication_window(args):
     communication_windows = problem_bundle.get_communication_windows(city)
     sunset_sunrise_index = load_sunset_sunrise_index()
 
-    date_index = list(set(map(lambda period: period.begin.date(), communication_windows)))
-    date_index.sort()
-
     min_date_time = min(period.begin for period in communication_windows)
     max_date_time = max(period.end for period in communication_windows)
+    date_index = pandas.date_range(min_date_time.date(), max_date_time.date())
     ref_start_date = min_date_time.date()
     ref_end_date = (min_date_time + datetime.timedelta(days=1)).date()
     ref_start_date_time = datetime.datetime.combine(ref_start_date, datetime.time(hour=12, minute=0))
     ref_end_date_time = datetime.datetime.combine(ref_end_date, datetime.time(hour=12, minute=0))
 
     sunset_sunrise_data = []
-    for date in date_index:
+    for time_stamp in date_index:
+        date = pandas.to_datetime(time_stamp).date()
         sunrise_time = sunset_sunrise_index.sunrise(city, date)
         sunset_time = sunset_sunrise_index.sunset(city, date)
         sunset_sunrise_data.append([datetime.datetime.combine(ref_end_date, sunrise_time), datetime.datetime.combine(ref_start_date, sunset_time)])
@@ -1253,7 +1252,8 @@ def plot_weights_disturbed(args):
         keys_transferred_by_weight = []
         for solution_bundle in solution_bundles:
             data_frame = solution_bundle.to_frame()
-            keys_transferred_by_weight.append((solution_bundle.get_transfer_share(station), data_frame.loc[station]['keys_transferred'].values.tolist()))
+            keys_transferred_by_weight.append(
+                (solution_bundle.get_transfer_share(station), data_frame.loc[station]['keys_transferred'].values.tolist()))
         keys_transferred_by_weight.sort(key=operator.itemgetter(0))
         data = [keys_transferred for _, keys_transferred in keys_transferred_by_weight]
 
