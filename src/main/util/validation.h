@@ -36,6 +36,8 @@ namespace quake {
 
         bool validate_date(const char *flagname, const std::string &date);
 
+        bool validate_datetime(const char *flagname, const std::string &date_time);
+
         template<typename ValueType>
         class IntervalConstraintedValue {
         public:

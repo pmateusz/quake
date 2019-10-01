@@ -32,13 +32,12 @@ else ()
     set(_SPICE_LIB_LOCATIONS "")
 endif ()
 
-find_path(SPICE_INCLUDE_DIR f2c.h
+find_path(SPICE_INCLUDE_DIR SpiceUsr.h
         HINTS "${_SPICE_INCLUDE_LOCATIONS}")
-#
-#find_library(PYKEPLIBRARY pykep
-#        HINTS  "${_PYKEP_LIB_LOCATIONS}"
-#        PATHS "/usr/local/lib/pykep"
-#        PATH_SUFFIXES lib)
-#
-#include(FindPackageHandleStandardArgs)
-#find_package_handle_standard_args(PYKEP DEFAULT_MSG PYKEP_INCLUDE_DIR PYKEP_LIBRARY)
+
+find_library(SPICE_LIBRARY cspice.a csupport.a
+        HINTS "${_SPICE_LIB_LOCATIONS}"
+        PATH_SUFFIXES lib)
+
+include(FindPackageHandleStandardArgs)
+find_package_handle_standard_args(SPICE DEFAULT_MSG SPICE_INCLUDE_DIR SPICE_LIBRARY)

@@ -26,6 +26,14 @@ WEATHER_TOOLS_EXEC=/home/pmateusz/dev/quake/python/weather-tools.py
 #$WEATHER_TOOLS_EXEC generate --problem-prefix=week --from=2018-01-01 --to=2019-01-01 --time-horizon="7 days" --time-step="7 days" --initial-epoch=2017-12-22
 #popd
 
+#pushd /home/pmateusz/dev/quake/current_review/test_sma500_raan112_ta51
+#$WEATHER_TOOLS_EXEC generate --problem-prefix=week --from=2013-01-01 --to=2014-01-01 --time-horizon="7 days" --time-step="7 days" --initial-epoch=2013-01-01
+#popd
+
+pushd /home/pmateusz/dev/quake/current_review/test_sma674_raan110_ta0
+$WEATHER_TOOLS_EXEC generate --problem-prefix=week --from=2013-01-01 --to=2014-01-01 --time-horizon="7 days" --time-step="7 days" --initial-epoch="2013-01-01 00:00:00"
+popd
+
 #for scenario_generator in past_error_replication
 #do
 #$WEATHER_TOOLS_EXEC generate --from=2019-07-01 --to=2019-09-1 --num-scenarios=256 --problem-prefix=problem --scenario-generator=$scenario_generator

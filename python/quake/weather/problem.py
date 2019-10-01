@@ -1,15 +1,17 @@
 import copy
 import datetime
 import json
-import operator
-import typing
 import math
+import operator
+import os
+import typing
 
 import numpy as np
 import pandas
 
 import quake.city
 import quake.cloud_cover
+import quake.util
 import quake.weather.metadata
 import quake.weather.scenarios
 import quake.weather.time_period
@@ -75,7 +77,7 @@ class Problem:
 
         self.__json_object['var_model'] = var_model_to_use
 
-    def set_mean_variance(self, mean_variance_result: quake.weather.scenarios.MeanVarianceResult) -> None:
+    def set_mean_variance_model(self, mean_variance_result: quake.weather.scenarios.MeanVarianceResult) -> None:
         model_to_use = dict()
         model_to_use['confidence'] = mean_variance_result.confidence_interval
         model_to_use['index'] = [str(value) for value in mean_variance_result.mean.index.values]
@@ -102,6 +104,11 @@ class Problem:
             model_to_use[city.name] = city_model
 
         self.__json_object['mean_variance_model'] = model_to_use
+
+    def set_transfer_share_model(self, transfer_share_model: typing.Dict[quake.city.City, float]) -> None:
+        for station_json in self.__json_object['stations']:
+            station = quake.city.City.from_name(station_json['station'])
+            station_json['transfer_share'] = transfer_share_model[station]
 
     def get_key_rate_frame(self, scenario: typing.Callable[[quake.city.City, datetime.datetime], float]) -> pandas.DataFrame:
         frames = []
@@ -284,3 +291,67 @@ class Problem:
 
         index_values = [value.strftime(quake.weather.time_period.TimePeriod.DATETIME_FORMAT) for value in frame.index]
         return {'index': index_values, 'stations': station_data}
+
+
+class ProblemBundle:
+
+    def __init__(self, problems: typing.List[Problem]):
+        self.__problems = problems
+
+    def get_communication_windows(self, station: quake.city.City) -> typing.List[quake.weather.time_period.TimePeriod]:
+        communication_windows = []
+        for problem in self.__problems:
+            communication_windows.extend(problem.get_communication_windows(station))
+        return communication_windows
+
+    def get_aggregated_observation_frame(self) -> pandas.DataFrame:
+        data = []
+        for problem in self.__problems:
+            for station in problem.stations:
+                for period in problem.get_communication_windows(station):
+                    data.append({'station': station, 'date': period.begin.date(), 'length': period.length})
+        frame = pandas.DataFrame(data=data)
+        agg_frame = frame.groupby(['date', 'station'])['length'].sum().to_frame()
+        agg_frame.reset_index(inplace=True)
+        pivot_frame = agg_frame.pivot_table(index=['date'], columns=['station'], values=['length'], aggfunc='sum')
+        pivot_frame.columns = pivot_frame.columns.get_level_values(1)
+        return pivot_frame
+
+    def get_cloud_cover_frame(self) -> pandas.DataFrame:
+        frames = []
+        for problem in self.__problems:
+            scenario = problem.get_scenario('real')
+            frame = problem.get_cloud_cover_frame(scenario)
+            frames.append(frame)
+        return pandas.concat(frames)
+
+    def get_key_rate_frame(self) -> pandas.DataFrame:
+        frames = []
+        for problem in self.__problems:
+            scenario = problem.get_scenario('real')
+            frame = problem.get_key_rate_frame(scenario)
+            frames.append(frame)
+        return pandas.concat(frames)
+
+    def get_transfer_share(self, station: quake.city.City) -> float:
+        return self.__problems[0].get_transfer_share(station)
+
+    @property
+    def stations(self) -> typing.List[quake.city.City]:
+        return self.__problems[0].stations
+
+    @property
+    def problems(self) -> typing.List[Problem]:
+        return self.__problems
+
+    @staticmethod
+    def read_from_dir(data_dir: str) -> 'ProblemBundle':
+        problem_files = []
+        for file_name in os.listdir(str(data_dir)):
+            if file_name.startswith('week_'):
+                problem_path = os.path.join(str(data_dir), file_name)
+                problem_files.append(problem_path)
+
+        problems = quake.util.process_parallel_map(problem_files, Problem.read_json)
+        problems.sort(key=lambda problem: problem.observation_period.begin)
+        return ProblemBundle(problems)

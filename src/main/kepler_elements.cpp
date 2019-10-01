@@ -25,17 +25,17 @@
 
 #include "kepler_elements.h"
 
-quake::KeplerElements::KeplerElements(double semimajor_axis,
+quake::KeplerElements::KeplerElements(double semi_major_axis,
                                       double eccentricity,
                                       double inclination,
-                                      double ascending_node_longitude,
-                                      double periapsis_argument,
+                                      double right_ascension_ascending_node,
+                                      double argument_of_perigee,
                                       double true_anomaly)
-        : semimajor_axis_{semimajor_axis},
+        : semimajor_axis_{semi_major_axis},
           eccentricity_{eccentricity},
           inclination_{inclination},
-          ascending_node_longitude_{ascending_node_longitude},
-          periapsis_argument_{periapsis_argument},
+          ascending_node_longitude_{right_ascension_ascending_node},
+          periapsis_argument_{argument_of_perigee},
           true_anomaly_{true_anomaly},
           mean_motion_{sqrt(util::EARTH_STANDARD_GRAVITATIONAL_PARAM / pow(semimajor_axis_, 3.0))},
           orbital_period_{2 * M_PI / mean_motion_},
@@ -47,11 +47,13 @@ quake::KeplerElements::KeplerElements(double semimajor_axis,
                                               * pow(util::EARTH_EQUATORIAL_RADIUS_KM / semilatus_rectum_, 2.0)
                                               * cos(inclination_)} {}
 
+                                              // altitude 500, raan 110, inclination 97.4
+
 // parameters of the Sun Synchronous Orbit
 const quake::KeplerElements quake::KeplerElements::DEFAULT{
         util::EARTH_EQUATORIAL_RADIUS_KM + 674,
         0,
         98.0 * M_PI / 180.0,
-        M_PI / 2.0,
-        0,
-        0};
+        110 * M_PI / 180.0,
+        0.0,
+        0.0};

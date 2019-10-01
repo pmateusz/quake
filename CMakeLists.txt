@@ -72,7 +72,6 @@ find_package(Threads REQUIRED)
 find_package(Boost REQUIRED COMPONENTS date_time filesystem regex graph)
 find_package(Gurobi REQUIRED)
 find_package(ortools REQUIRED)
-find_package(spice REQUIRED)
 
 set(HEADER_DEP ${Boost_INCLUDE_DIR}
         ${DATE_INCLUDE_DIR}

@@ -150,23 +150,24 @@ std::unordered_map<quake::GroundStation, double> GetDistributionCoefficientsFrom
     return distribution_coefficients;
 }
 
-std::unordered_map<quake::GroundStation, double> NormalizeToOne(const std::unordered_map<quake::GroundStation, double> &initial_weights) {
-    double total_weight = 0.0;
+std::unordered_map<quake::GroundStation, double> NormalizeToWeight(const std::unordered_map<quake::GroundStation, double> &initial_weights,
+                                                                   double normalized_weight) {
+    double items_raw_weight = 0.0;
     for (const auto &entry : initial_weights) {
         CHECK_GE(entry.second, 0.0);
-        total_weight += entry.second;
+        items_raw_weight += entry.second;
     }
 
     std::unordered_map<quake::GroundStation, double> normalized_weights;
     for (const auto &entry : initial_weights) {
-        normalized_weights.emplace(entry.first, entry.second / total_weight);
+        normalized_weights.emplace(entry.first, entry.second / items_raw_weight * normalized_weight);
     }
 
     OutputWarningIfDistributionCoefficientIsSmall(normalized_weights);
     return normalized_weights;
 }
 
-std::unordered_map<quake::GroundStation, double> GetDistributionCoefficientsFromHouseholdsWithUltraFastBroadband(
+std::unordered_map<quake::GroundStation, double> GetDistributionCoefficientsFromHouseholdsWithUltraFastBroadbandWithOverride(
         const std::vector<quake::GroundStation> &ground_stations) {
     static const std::unordered_map<quake::GroundStation, int64> PremisesWithUltraFastBroadbandAccess = {
             {quake::GroundStation::London,     5783941},
@@ -181,12 +182,34 @@ std::unordered_map<quake::GroundStation, double> GetDistributionCoefficientsFrom
             {quake::GroundStation::Belfast,    1265413}
     };
 
-    std::unordered_map<quake::GroundStation, double> ground_station_weights;
+    static const std::unordered_map<quake::GroundStation, double> PremisesWithWeightOverride{
+            {quake::GroundStation::Thurso, 0.01}
+    };
+
+    double total_overwrite_weight = 0.0;
+    std::unordered_map<quake::GroundStation, double> ground_station_raw_weights;
     for (const auto &ground_station : ground_stations) {
-        ground_station_weights.emplace(ground_station, PremisesWithUltraFastBroadbandAccess.at(ground_station));
+        const auto find_it = PremisesWithWeightOverride.find(ground_station);
+        if (find_it != std::cend(PremisesWithWeightOverride)) {
+            total_overwrite_weight += find_it->second;
+        } else {
+            ground_station_raw_weights.emplace(ground_station, PremisesWithUltraFastBroadbandAccess.at(ground_station));
+        }
     }
 
-    return NormalizeToOne(ground_station_weights);
+    CHECK_LE(total_overwrite_weight, 1.0);
+
+    // obtain normalized weights for the weights of the ground stations inferred from data
+    auto normalized_weights = NormalizeToWeight(ground_station_raw_weights, 1.0 - total_overwrite_weight);
+
+    // insert weights of ground stations with overwrite
+    for (const auto &station: ground_stations) {
+        if (normalized_weights.find(station) == std::cend(normalized_weights)) {
+            normalized_weights.emplace(station, PremisesWithWeightOverride.at(station));
+        }
+    }
+
+    return normalized_weights;
 }
 
 std::unordered_map<quake::GroundStation, double> GetDistributionCoefficientsFromPopulation(const std::vector<quake::GroundStation> &ground_stations) {
@@ -219,7 +242,7 @@ std::unordered_map<quake::GroundStation, double> GetDistributionCoefficientsFrom
                              std::accumulate(std::cbegin(flow_matrix[station_index]), std::cend(flow_matrix[station_index]), static_cast<int64>(0)));
     }
 
-    return NormalizeToOne(station_flow);
+    return NormalizeToWeight(station_flow, 1.0);
 }
 
 std::unordered_map<quake::GroundStation, int> GetInitialBuffers(
@@ -328,24 +351,22 @@ private:
     std::vector<std::tuple<double, double, double> > elevation_to_transfer_index_;
 };
 
-std::unordered_map<quake::GroundStation, std::vector<double> > GetElevationData(const std::vector<quake::GroundStation> &ground_stations,
-                                                                                boost::posix_time::ptime initial_epoch,
-                                                                                boost::posix_time::time_period observation_period) {
+void GetElevationData(const std::vector<quake::GroundStation> &ground_stations,
+                      boost::posix_time::ptime initial_epoch,
+                      boost::posix_time::time_period observation_period,
+                      std::unordered_map<quake::GroundStation, std::vector<double> > &output_elevation_data,
+                      std::vector<boost::posix_time::time_period> &output_umbra) {
     static const auto TIME_STEP = boost::posix_time::seconds(1);
 
     quake::SatelliteTracker tracker{quake::KeplerElements::DEFAULT, initial_epoch, observation_period, TIME_STEP};
-    const auto satellite_positions = tracker.CalculatePositions();
 
-    std::unordered_map<quake::GroundStation, std::vector<double>> elevation_angle_data;
+    std::vector<Eci> satellite_positions;
+    std::vector<boost::posix_time::time_period> umbras;
+    std::vector<boost::posix_time::time_period> penumbras;
+    tracker.CalculatePositions(satellite_positions, umbras, penumbras);
+
+    std::unordered_map<quake::GroundStation, std::vector<double>> elevation_data;
     for (const auto &ground_station : ground_stations) {
-//        auto old_elevation = GetElevation(
-//                ground_station,
-//                quake::KeplerElements::DEFAULT,
-//                initial_epoch,
-//                observation_period,
-//                TIME_STEP);
-//        std::transform(std::begin(old_elevation), std::end(old_elevation), std::begin(old_elevation), Util::RadiansToDegrees);
-
         Observer ground_station_observer{ground_station.coordinates()};
 
         std::vector<double> elevation;
@@ -356,12 +377,11 @@ std::unordered_map<quake::GroundStation, std::vector<double> > GetElevationData(
             elevation.emplace_back(Util::RadiansToDegrees(elevation_radians));
         }
 
-//        CHECK(old_elevation == elevation);
-
-        elevation_angle_data.emplace(ground_station, std::move(elevation));
+        elevation_data.emplace(ground_station, std::move(elevation));
     }
 
-    return elevation_angle_data;
+    output_elevation_data = elevation_data;
+    output_umbra = umbras;
 }
 
 std::unordered_map<quake::GroundStation, std::unordered_map<boost::gregorian::date, std::pair<boost::posix_time::ptime, boost::posix_time::ptime> > >
@@ -389,11 +409,52 @@ GetSunsetSunriseData(const quake::util::Resources &resources, const std::vector<
     return sunset_sunrise_data;
 }
 
+std::vector<boost::posix_time::time_period> Intersect(const std::vector<boost::posix_time::time_period> &left,
+                                                      const std::vector<boost::posix_time::time_period> &right) {
+    std::vector<boost::posix_time::time_period> intersection_windows;
+
+    auto left_window_it = std::cbegin(left);
+    const auto left_window_end_it = std::cend(left);
+
+    auto right_window_it = std::cbegin(right);
+    const auto right_window_end_it = std::cend(right);
+    for (; left_window_it != left_window_end_it && right_window_it != right_window_end_it;) {
+        const boost::posix_time::time_period left_window = *left_window_it;
+        const boost::posix_time::time_period right_window = *right_window_it;
+
+        if (left_window.is_after(right_window.end())
+            || (left_window.is_adjacent(right_window) && left_window.begin() == right_window.end())) {
+            ++right_window_it;
+            continue;
+        } else if (left_window.is_before(right_window.begin())
+                   || (left_window.is_adjacent(right_window) && left_window.end() == right_window.begin())) {
+            ++left_window_it;
+            continue;
+        } else {
+            CHECK(left_window.intersects(right_window) || right_window.contains(left_window));
+
+            if (right_window.contains(left_window)) {
+                intersection_windows.push_back(left_window);
+            } else {
+                auto intersection_window = left_window.intersection(right_window);
+                if (intersection_window.length() > boost::posix_time::seconds(0)) {
+                    intersection_windows.emplace_back(intersection_window);
+                }
+            }
+
+            ++left_window_it;
+        }
+    }
+
+    return intersection_windows;
+}
+
 std::unordered_map<quake::GroundStation, std::vector<boost::posix_time::time_period>> GetCommunicationWindowData(
         const std::vector<quake::GroundStation> &ground_stations,
         const quake::util::Resources &resources,
         const boost::posix_time::time_period &time_period,
-        const std::unordered_map<quake::GroundStation, std::vector<double> > &elevation_data) {
+        const std::unordered_map<quake::GroundStation, std::vector<double> > &elevation_data,
+        const std::vector<boost::posix_time::time_period> &umbra_windows) {
     const auto sunset_sunrise_data = GetSunsetSunriseData(resources, ground_stations);
 
     const auto start_time = time_period.begin();
@@ -441,38 +502,9 @@ std::unordered_map<quake::GroundStation, std::vector<boost::posix_time::time_per
             current_day = next_day;
         }
 
-        std::vector<boost::posix_time::time_period> transfer_windows;
-        auto elevation_window_it = std::cbegin(elevation_windows);
-        auto night_window_it = std::cbegin(night_windows);
-        const auto elevation_window_end_it = std::cend(elevation_windows);
-        const auto night_window_end_it = std::cend(night_windows);
-        for (; elevation_window_it != elevation_window_end_it && night_window_it != night_window_end_it;) {
-            const auto elevation_window = *elevation_window_it;
-            const auto night_window = *night_window_it;
-
-            if (elevation_window.is_after(night_window.end())) {
-                ++night_window_it;
-                continue;
-            } else if (elevation_window.is_before(night_window.begin())) {
-                ++elevation_window_it;
-                continue;
-            } else {
-                DCHECK(elevation_window.intersects(night_window) || night_window.contains(elevation_window));
-
-                if (night_window.contains(elevation_window)) {
-                    transfer_windows.push_back(elevation_window);
-                } else {
-                    auto intersection_window = elevation_window.intersection(night_window);
-                    if (intersection_window.length() > boost::posix_time::seconds(0)) {
-                        transfer_windows.emplace_back(intersection_window);
-                    }
-                }
-
-                ++elevation_window_it;
-            }
-        }
-
-        transfer_window_data.emplace(ground_station, std::move(transfer_windows));
+        std::vector<boost::posix_time::time_period> initial_transfer_windows = Intersect(elevation_windows, night_windows);
+        std::vector<boost::posix_time::time_period> final_transfer_windows = Intersect(initial_transfer_windows, umbra_windows);
+        transfer_window_data.emplace(ground_station, std::move(final_transfer_windows));
     }
 
     return transfer_window_data;
@@ -483,8 +515,10 @@ quake::Problem quake::ProblemGenerator::Create(std::vector<quake::GroundStation>
                                                boost::posix_time::time_period time_period) const {
     quake::util::Resources resources{"~/dev/quake/data"};
 
-    auto elevation_data = GetElevationData(ground_stations, initial_epoch, time_period);
-    auto communication_window_data = GetCommunicationWindowData(ground_stations, resources, time_period, elevation_data);
+    std::unordered_map<GroundStation, std::vector<double> > elevation_data;
+    std::vector<boost::posix_time::time_period> umbra_windows;
+    GetElevationData(ground_stations, initial_epoch, time_period, elevation_data, umbra_windows);
+    auto communication_window_data = GetCommunicationWindowData(ground_stations, resources, time_period, elevation_data, umbra_windows);
 
     const auto length_days = time_period.length().hours() / 24;
     auto distribution_coefficients = GetLinearDistributionCoefficients(ground_stations);
@@ -536,8 +570,10 @@ quake::ExtendedProblem quake::ProblemGenerator::CreateExtendedProblem(const std:
                                                                       boost::posix_time::time_period time_period) const {
     quake::util::Resources resources{"~/dev/quake/data"};
 
-    const auto elevation_data = GetElevationData(ground_stations, initial_epoch, time_period);
-    const auto communication_window_data = GetCommunicationWindowData(ground_stations, resources, time_period, elevation_data);
+    std::unordered_map<GroundStation, std::vector<double> > elevation_data;
+    std::vector<boost::posix_time::time_period> umbra_windows;
+    GetElevationData(ground_stations, initial_epoch, time_period, elevation_data, umbra_windows);
+    const auto communication_window_data = GetCommunicationWindowData(ground_stations, resources, time_period, elevation_data, umbra_windows);
 
     quake::TransferRateReader transfer_rate_reader;
     auto transfer_rate_data = transfer_rate_reader.Read(resources.TransferRate(DEFAULT_TRANSFER_RATE));
@@ -545,13 +581,8 @@ quake::ExtendedProblem quake::ProblemGenerator::CreateExtendedProblem(const std:
 
     const auto length_days = time_period.length().hours() / 24;
 
-    // TODO: define weights
-    const auto distribution_coefficients = GetDistributionCoefficientsFromHouseholdsWithUltraFastBroadband(ground_stations);
-
-    // TODO: define initial buffers
+    const auto distribution_coefficients = GetDistributionCoefficientsFromHouseholdsWithUltraFastBroadbandWithOverride(ground_stations);
     const auto initial_buffers = GetFixedInitialBuffers(distribution_coefficients, 64);
-
-    // TODO: define key consumption
     const auto key_consumption = GetNoKeyConsumption(initial_buffers, length_days);
 
     const auto start_time = time_period.begin();

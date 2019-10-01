@@ -21,7 +21,6 @@
 # SOFTWARE.
 
 import argparse
-import collections
 import csv
 import datetime
 import itertools
@@ -30,6 +29,7 @@ import math
 import os
 import pathlib
 import typing
+import operator
 
 import PIL
 import matplotlib.cm
@@ -275,196 +275,6 @@ BBOX_STYLE = {'boxstyle': 'square,pad=0.0', 'lw': 0, 'fc': 'w', 'alpha': 0.8}
 LABEL_STYLE = {'fontname': 'Roboto', 'weight': 'normal'}
 
 
-class ProblemBundle:
-
-    def __init__(self, problems: typing.List[quake.weather.problem.Problem]):
-        self.__problems = problems
-
-    def get_communication_windows(self, station: quake.city.City) -> typing.List[quake.weather.time_period.TimePeriod]:
-        communication_windows = []
-        for problem in self.__problems:
-            communication_windows.extend(problem.get_communication_windows(station))
-        return communication_windows
-
-    def get_aggregated_observation_frame(self) -> pandas.DataFrame:
-        data = []
-        for problem in self.__problems:
-            for station in problem.stations:
-                for period in problem.get_communication_windows(station):
-                    data.append({'station': station, 'date': period.begin.date(), 'length': period.length})
-        frame = pandas.DataFrame(data=data)
-        agg_frame = frame.groupby(['date', 'station'])['length'].sum().to_frame()
-        agg_frame.reset_index(inplace=True)
-        pivot_frame = agg_frame.pivot_table(index=['date'], columns=['station'], values=['length'], aggfunc='sum')
-        pivot_frame.columns = pivot_frame.columns.get_level_values(1)
-        return pivot_frame
-
-    def get_cloud_cover_frame(self) -> pandas.DataFrame:
-        frames = []
-        for problem in self.__problems:
-            scenario = problem.get_scenario('real')
-            frame = problem.get_cloud_cover_frame(scenario)
-            frames.append(frame)
-        return pandas.concat(frames)
-
-    def get_key_rate_frame(self) -> pandas.DataFrame:
-        frames = []
-        for problem in self.__problems:
-            scenario = problem.get_scenario('real')
-            frame = problem.get_key_rate_frame(scenario)
-            frames.append(frame)
-        return pandas.concat(frames)
-
-    @property
-    def stations(self) -> typing.List[quake.city.City]:
-        return self.__problems[0].stations
-
-    @property
-    def problems(self) -> typing.List[quake.weather.problem.Problem]:
-        return self.__problems
-
-    @staticmethod
-    def read_from_dir(data_dir: str) -> 'ProblemBundle':
-        problem_files = []
-        for file_name in os.listdir(str(data_dir)):
-            if file_name.startswith('week_'):
-                problem_path = os.path.join(str(data_dir), file_name)
-                problem_files.append(problem_path)
-
-        problems = quake.util.process_parallel_map(problem_files, quake.weather.problem.Problem.read_json)
-        problems.sort(key=lambda problem: problem.observation_period.begin)
-        return ProblemBundle(problems)
-
-
-class SolutionBundle:
-    def __init__(self, problems: typing.List[quake.weather.problem.Problem], solutions: typing.List[quake.weather.solution.Solution]):
-        problem_by_date = {problem.observation_period.begin.date(): problem for problem in problems}
-        solution_by_date = {solution.observation_period.begin.date(): solution for solution in solutions}
-
-        dates = list(problem_by_date.keys())
-        dates.extend(solution_by_date.keys())
-        dates = list(set(dates))
-        dates.sort()
-
-        self.__problem_by_date = collections.OrderedDict()
-        self.__solution_by_date = collections.OrderedDict()
-
-        for date in dates:
-            self.__problem_by_date[date] = problem_by_date[date]
-            self.__solution_by_date[date] = solution_by_date[date]
-
-    def get_transfer_share(self, station: quake.city.City) -> float:
-        return self.__sample_problem.get_transfer_share(station)
-
-    @property
-    def stations(self) -> typing.List[quake.city.City]:
-        return self.__sample_problem.stations
-
-    def to_frame(self) -> pandas.DataFrame:
-        data = []
-        for date in self.__problem_by_date:
-            problem = self.__problem_by_date[date]
-            scenario = problem.get_scenario('real')
-            solution = self.__solution_by_date[date]
-            for station in problem.stations:
-                local_keys_transferred = 0
-                for observation in solution.get_observations(station):
-                    local_keys_transferred += problem.get_transferred_keys(station, observation, scenario)
-                local_final_buffer = solution.get_final_buffer(station)
-                local_initial_buffer = local_final_buffer - local_keys_transferred
-                assert local_initial_buffer >= 0
-
-                data.append({'station': station, 'date': date, 'initial_buffer': local_initial_buffer, 'keys_transferred': local_keys_transferred})
-        frame = pandas.DataFrame(data=data)
-        frame.set_index(['station', 'date'], inplace=True)
-        frame.sort_index(level=1, inplace=True)
-        return frame
-
-    def to_local_service_level_frame(self) -> pandas.DataFrame:
-        bundle_frame = self.to_frame()
-        stations = bundle_frame.index.get_level_values(0).unique()
-
-        data = []
-        for station in stations:
-            keys_transferred = bundle_frame.loc[station]['keys_transferred'].values
-
-            weekly_consumption = 0
-            while True:
-                local_deltas = keys_transferred - weekly_consumption
-                local_balance = numpy.cumsum(local_deltas)
-                negative_balance_weeks = local_balance[local_balance < 0]
-
-                data.append({'station': station,
-                             'weekly_consumption': weekly_consumption,
-                             'negative_balance_weeks': negative_balance_weeks.size,
-                             'total_weeks': local_deltas.size})
-
-                if len(negative_balance_weeks) == len(keys_transferred):
-                    break
-
-                weekly_consumption += 1.0
-
-        master_frame = pandas.DataFrame(data=data)
-        master_frame.sort_values(by=['station', 'weekly_consumption'], inplace=True)
-        master_frame.set_index(['station', 'weekly_consumption'], inplace=True)
-        return master_frame
-
-    def to_global_service_level_frame(self) -> pandas.DataFrame:
-        bundle_frame = self.to_frame()
-        stations = bundle_frame.index.get_level_values(0).unique()
-
-        data = []
-        traffic_index = 0.0
-        while True:
-            total_negative_balance_pos = set()
-            total_pos = 0
-            for station in stations:
-                transfer_share = self.get_transfer_share(station)
-                keys_transferred = bundle_frame.loc[station]['keys_transferred'].values
-                total_pos = len(keys_transferred)
-                delta = keys_transferred - traffic_index * transfer_share
-
-                local_balance = numpy.cumsum(delta)
-                positive_balance = local_balance[local_balance > 0]
-                negative_balance_pos = numpy.argwhere(local_balance < 0).flatten()
-                if negative_balance_pos.size == 0:
-                    continue
-
-                total_negative_balance_pos = total_negative_balance_pos.union(set(negative_balance_pos.tolist()))
-                if positive_balance.size == 0:
-                    break
-
-            data.append({'traffic_index': traffic_index,
-                         'negative_balance_weeks': len(total_negative_balance_pos),
-                         'total_weeks': total_pos})
-
-            if len(total_negative_balance_pos) == total_pos:
-                break
-
-            traffic_index += 10.0
-        return pandas.DataFrame(data=data)
-
-    @staticmethod
-    def read_from_dir(problem_directory_path: str, solution_directory_path: str) -> 'SolutionBundle':
-        problem_bundle = ProblemBundle.read_from_dir(problem_directory_path)
-
-        solution_files = []
-        for file_name in os.listdir(solution_directory_path):
-            if file_name.startswith('solution_'):
-                solution_path = os.path.join(solution_directory_path, file_name)
-                solution_files.append(solution_path)
-
-        solutions = quake.util.process_parallel_map(solution_files, quake.weather.solution.Solution.read_json)
-        solutions.sort(key=lambda solution: solution.observation_period.begin)
-        return SolutionBundle(problem_bundle.problems, solutions)
-
-    @property
-    def __sample_problem(self) -> quake.weather.problem.Problem:
-        first_date = list(self.__problem_by_date)[0]
-        first_problem = self.__problem_by_date[first_date]
-        return first_problem
-
-
 def save_figure(filename_no_ext, rotate=None):
     filename = filename_no_ext + '.' + FORMAT
 
@@ -642,7 +452,7 @@ def load_sunset_sunrise_index():
 
 def plot_aggregate(args):
     data_dir = getattr(args, 'data_dir')
-    problem_bundle = ProblemBundle.read_from_dir(data_dir)
+    problem_bundle = quake.weather.problem.ProblemBundle.read_from_dir(data_dir)
 
     cities = problem_bundle.stations
     weather_corrected_key_rate_frame = problem_bundle.get_key_rate_frame()
@@ -652,6 +462,7 @@ def plot_aggregate(args):
     agg_cloud_cover_frame = cloud_cover_frame.resample('D').agg(numpy.nanmean)
 
     agg_observation_frame = problem_bundle.get_aggregated_observation_frame()
+    agg_observation_frame.fillna(value=datetime.timedelta(), inplace=True)
 
     HSPACE_ADJUST = 0.25
 
@@ -758,7 +569,7 @@ def plot_aggregate(args):
     save_figure('maximum_keys_correlation')
 
     # Transform to total seconds
-    cumulative_index = pandas.date_range(start=agg_observation_frame.index.min(), end=agg_observation_frame.index.max()).values
+    cumulative_index = agg_observation_frame.index.values
     cumulative_min = agg_observation_frame.transpose().min().values / numpy.timedelta64(1, 's')
     cumulative_max = agg_observation_frame.transpose().max().values / numpy.timedelta64(1, 's')
 
@@ -772,7 +583,7 @@ def plot_aggregate(args):
 
         axis.plot(cumulative_index, cumulative_city, c=FOREGROUND_COLOR)
         axis.yaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(NumpyTimeDeltaConverter()))
-        axis.set_yticks([value * 60 for value in range(5, 40, 5)])
+        axis.set_yticks([value * 60 for value in range(0, 40, 5)])
         axis.set_ylabel('Daily Observation Time [hh:mm]')
         axis.set_xlabel('Date')
         fig.tight_layout()
@@ -827,7 +638,7 @@ def plot_network_traffic(args):
     data_dir = getattr(args, 'data_dir')
     solution_dir = getattr(args, 'solution_dir')
 
-    solution_bundle = SolutionBundle.read_from_dir(data_dir, solution_dir)
+    solution_bundle = quake.weather.solution.SolutionBundle.read_from_dir(data_dir, solution_dir)
 
     cities = solution_bundle.stations
     frame = solution_bundle.to_frame()
@@ -944,7 +755,7 @@ class ResultsSet:
             if self.__solution_bundle is not None:
                 return self.__solution_bundle
 
-            self.__solution_bundle = SolutionBundle.read_from_dir(self.__problem_dir, self.__solution_dir)
+            self.__solution_bundle = quake.weather.solution.SolutionBundle.read_from_dir(self.__problem_dir, self.__solution_dir)
             return self.__solution_bundle
 
         @property
@@ -1360,7 +1171,7 @@ def plot_communication_window(args):
     data_directory = getattr(args, 'data_dir')
     city = quake.city.from_name(getattr(args, 'station'))
 
-    problem_bundle = ProblemBundle.read_from_dir(data_directory)
+    problem_bundle = quake.weather.problem.ProblemBundle.read_from_dir(data_directory)
     communication_windows = problem_bundle.get_communication_windows(city)
     sunset_sunrise_index = load_sunset_sunrise_index()
 
@@ -1410,6 +1221,7 @@ def plot_communication_window(args):
         except ValueError:
             return None
 
+    # axis.axhline(y=datetime.datetime.combine(ref_end_date, datetime.time()))
     axis.yaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(date_time_formatter))
     axis.set_xlabel('Date')
     axis.set_ylabel('Time [hh:mm]')
@@ -1431,104 +1243,27 @@ def plot_communication_window(args):
 
 
 def plot_weights_disturbed(args):
-    data_dir = os.path.abspath(getattr(args, 'data_dir'))
+    solution_bundles = [quake.weather.solution.SolutionBundle.read_from_dir('/home/pmateusz/dev/quake/current_review/2013_disturbed_1',
+                                                                            '/home/pmateusz/dev/quake/current_review/2013_disturbed_1/solutions'),
+                        quake.weather.solution.SolutionBundle.read_from_dir('/home/pmateusz/dev/quake/current_review/2013_disturbed_2',
+                                                                            '/home/pmateusz/dev/quake/current_review/2013_disturbed_2/solutions')]
 
-    data_files = [('./simulation_disturbed_1/week_2018-01-01_fraction020.dzn', ['./simulation/run_21_disturbed']),
-                  ('./simulation_disturbed_2/week_2018-01-01_fraction020.dzn', ['./simulation/run_22_disturbed']),
-                  ('./simulation_disturbed_3/week_2018-01-01_fraction020.dzn', ['./simulation/run_23_disturbed']),
-                  ('./simulation_disturbed_4/week_2018-01-01_fraction020.dzn', ['./simulation/run_24_disturbed']),
-                  ('./simulation_disturbed_5/week_2018-01-01_fraction020.dzn', ['./simulation/run_25_disturbed']),
-                  ('./simulation_disturbed_6/week_2018-01-01_fraction010.dzn', ['./simulation/run_26_disturbed']),
-                  ('./simulation_disturbed_7/week_2018-01-01_fraction030.dzn', ['./simulation/run_27_disturbed']),
-                  ('./simulation_disturbed_8/week_2018-01-01_fraction030.dzn', ['./simulation/run_28_disturbed']),
-                  ('./simulation_disturbed_9/week_2018-01-01_fraction040.dzn', ['./simulation/run_29_disturbed']),
-                  ('./simulation_disturbed_10/week_2018-01-01_fraction050.dzn', ['./simulation/run_30_disturbed'])]
+    stations = solution_bundles[0].stations
+    for station in stations:
+        keys_transferred_by_weight = []
+        for solution_bundle in solution_bundles:
+            data_frame = solution_bundle.to_frame()
+            keys_transferred_by_weight.append((solution_bundle.get_transfer_share(station), data_frame.loc[station]['keys_transferred'].values.tolist()))
+        keys_transferred_by_weight.sort(key=operator.itemgetter(0))
+        data = [keys_transferred for _, keys_transferred in keys_transferred_by_weight]
 
-    data_files_small_perturbation = [
-        ('./simulation_disturbed_11/week_2018-01-01_fraction010.dzn', ['./simulation/run_31_disturbed']),
-        ('./simulation_disturbed_12/week_2018-01-01_fraction010.dzn', ['./simulation/run_32_disturbed']),
-        ('./simulation_disturbed_13/week_2018-01-01_fraction010.dzn', ['./simulation/run_33_disturbed']),
-        ('./simulation_disturbed_14/week_2018-01-01_fraction010.dzn', ['./simulation/run_34_disturbed']),
-        ('./simulation_disturbed_15/week_2018-01-01_fraction010.dzn', ['./simulation/run_35_disturbed']),
-        ('./simulation_disturbed_16/week_2018-01-01_fraction010.dzn', ['./simulation/run_36_disturbed']),
-        ('./simulation_disturbed_17/week_2018-01-01_fraction010.dzn', ['./simulation/run_37_disturbed']),
-        ('./simulation_disturbed_18/week_2018-01-01_fraction010.dzn', ['./simulation/run_38_disturbed']),
-        ('./simulation_disturbed_19/week_2018-01-01_fraction010.dzn', ['./simulation/run_39_disturbed']),
-        ('./simulation_disturbed_20/week_2018-01-01_fraction010.dzn', ['./simulation/run_40_disturbed'])]
-
-    upgraded_data_files_small_perturbation = [
-        ('./simulation_upgrade_disturbed_1/week_2018-01-01_fraction010.dzn',
-         ['./simulation_upgrade/run_1_disturbed10']),
-        ('./simulation_upgrade_disturbed_2/week_2018-01-01_fraction010.dzn',
-         ['./simulation_upgrade/run_2_disturbed10']),
-        ('./simulation_upgrade_disturbed_3/week_2018-01-01_fraction010.dzn',
-         ['./simulation_upgrade/run_3_disturbed10']),
-        ('./simulation_upgrade_disturbed_4/week_2018-01-01_fraction010.dzn',
-         ['./simulation_upgrade/run_4_disturbed10']),
-        ('./simulation_upgrade_disturbed_5/week_2018-01-01_fraction010.dzn',
-         ['./simulation_upgrade/run_5_disturbed10']),
-        ('./simulation_upgrade_disturbed_6/week_2018-01-01_fraction010.dzn',
-         ['./simulation_upgrade/run_6_disturbed10']),
-        ('./simulation_upgrade_disturbed_7/week_2018-01-01_fraction010.dzn',
-         ['./simulation_upgrade/run_7_disturbed10']),
-        ('./simulation_upgrade_disturbed_8/week_2018-01-01_fraction010.dzn',
-         ['./simulation_upgrade/run_8_disturbed10']),
-        ('./simulation_upgrade_disturbed_9/week_2018-01-01_fraction010.dzn',
-         ['./simulation_upgrade/run_9_disturbed10']),
-        ('./simulation_upgrade_disturbed_10/week_2018-01-01_fraction010.dzn',
-         ['./simulation_upgrade/run_10_disturbed10'])
-    ]
-
-    def __plot_weights_disturbed(data_files, prefix):
-        configurations = []
-        for problem_file, solution_files in data_files:
-            problem_file_to_use = os.path.join(data_dir, problem_file)
-            loader = quake.minizinc.MiniZincLoader()
-            with open(problem_file_to_use, 'r') as file_stream:
-                model = loader.load(file_stream)
-            stations = [quake.city.City.from_name(name) for name in model['STATION'][1:]]
-            transfer_shares = model['transfer_share'][1:]
-            station_weights = {station: weight for station, weight in zip(stations, transfer_shares)}
-            solutions = [
-                quake.multistage_simulation.MultistageSimulation.load_from_dir(os.path.dirname(problem_file_to_use),
-                                                                               os.path.join(data_dir, solution_file))
-                for solution_file in solution_files]
-            configurations.append((station_weights, solutions))
-
-        stations = set()
-        for station_weights, _ in configurations:
-            for city in station_weights:
-                stations.add(city)
-
-        for city in stations:
-            configurations_to_use = [(station_weights, solutions) for station_weights, solutions in configurations
-                                     if city in station_weights]
-            configurations_to_use.sort(key=lambda x: x[0][city])
-
-            weight_data_records = []
-            for station_weights, solutions in configurations_to_use:
-                data = []
-                for solution in solutions:
-                    frame = solution.to_frame()
-                    city_frame = frame[frame['Station'] == city.name].copy()
-                    min_week = city_frame['Week'].min()
-                    max_week = city_frame['Week'].max()
-                    filtered_city_frame = city_frame[(city_frame['Week'] < max_week) & (city_frame['Week'] > min_week)]
-                    data.extend(filtered_city_frame['KeyTransferred'].tolist())
-                weight_data_records.append((station_weights[city], data))
-            boxplot_data = [data for _, data in weight_data_records]
-
-            fig, ax = matplotlib.pyplot.subplots(figsize=(FIGURE_WIDTH_SQUARE_SIZE, FIGURE_HEIGHT_SQUARE_SIZE))
-            ax.boxplot(boxplot_data, flierprops=dict(marker='.'), medianprops=dict(color=FOREGROUND_COLOR))
-            ax.set_xticklabels(["{0:.4f}".format(weight) for weight, _ in weight_data_records], rotation=90)
-
-            ax.set_xlabel('Weight')
-            ax.set_ylabel('Keys Received')
-            fig.tight_layout()
-            save_figure('noisy_weight_boxplot_{0}_{1}'.format(prefix, city.name))
-
-    # __plot_weights_disturbed(data_files, 'varied')
-    __plot_weights_disturbed(upgraded_data_files_small_perturbation, '10')
+        fig, ax = matplotlib.pyplot.subplots(figsize=(FIGURE_WIDTH_SQUARE_SIZE, FIGURE_HEIGHT_SQUARE_SIZE))
+        ax.boxplot(data, flierprops=dict(marker='.'), medianprops=dict(color=FOREGROUND_COLOR))
+        ax.set_xticklabels(["{0:.4f}".format(weight) for weight, _ in keys_transferred_by_weight], rotation=90)
+        ax.set_xlabel('Weight')
+        ax.set_ylabel('Keys Received')
+        fig.tight_layout()
+        save_figure('noisy_weight_boxplot_{0}'.format(station.name))
 
 
 class ModelWrapper:
@@ -1755,7 +1490,6 @@ def parse_args():
     communication_window_parser.add_argument('--station')
 
     weights_disturbed_parser = subparsers.add_parser('weights-disturbed')
-    weights_disturbed_parser.add_argument('--data-dir')
 
     # compare_parser = subparsers.add_parser('compare')
     # compare_parser.add_argument('--problem')

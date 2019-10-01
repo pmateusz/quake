@@ -29,8 +29,10 @@
 namespace quake {
 
     namespace util {
-        static const auto EARTH_EQUATORIAL_RADIUS_KM = 6378.136;
+        static const auto ASTRONOMIC_UNIT_KM = 149597870.700;
+        static const auto EARTH_EQUATORIAL_RADIUS_KM = 6378.1363;
         static const auto EARTH_POLAR_RADIUS_KM = 6356.751;
+        static const auto SOLAR_RADIUS_KM = 696000;
         static const auto NODAL_PRECESSION_EARTH = 1.0826E-3;
         static const auto EARTH_STANDARD_GRAVITATIONAL_PARAM = kMU;
         static const auto SECONDS_PER_DAY = 24 * 60 * 60;

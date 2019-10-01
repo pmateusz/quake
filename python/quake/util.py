@@ -6,6 +6,14 @@ import re
 import tqdm
 
 
+class ParseDateTimeAction(argparse.Action):
+    DATE_TIME_FORMAT = '%Y-%m-%d %H:%M:%S'
+
+    def __call__(self, parser: argparse.ArgumentParser, namespace: argparse.Namespace, values, option_string=None):
+        date_time_value = datetime.datetime.strptime(values, self.DATE_TIME_FORMAT)
+        setattr(namespace, self.dest, date_time_value)
+
+
 class ParseDateAction(argparse.Action):
     DATE_FORMAT = '%Y-%m-%d'
 

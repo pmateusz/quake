@@ -43,7 +43,9 @@ namespace quake {
                          boost::posix_time::time_period observation_period,
                          boost::posix_time::time_duration time_step);
 
-        std::vector<Eci> CalculatePositions();
+        void CalculatePositions(std::vector<Eci> &positions,
+                                std::vector<boost::posix_time::time_period> &umbras,
+                                std::vector<boost::posix_time::time_period> &penumbras);
 
     private:
         KeplerElements initial_satellite_position_;

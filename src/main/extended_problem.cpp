@@ -151,7 +151,7 @@ quake::ExtendedProblem quake::ExtendedProblem::Round(unsigned int decimal_places
         }
 
         rounded_station_data.emplace_back(station_data.Station,
-                                          station_data.TransferShare,
+                                          util::round(station_data.TransferShare, decimal_places),
                                           station_data.InitialBuffer,
                                           station_data.KeyConsumption,
                                           std::move(communication_window_data));

@@ -22,26 +22,28 @@
 
 import argparse
 import collections
+import copy
 import csv
 import datetime
+import json
 import logging
 import math
 import operator
 import os
 import os.path
-import re
-import random
-import subprocess
-import warnings
 import pathlib
+import random
+import re
+import subprocess
 import typing
-
-import tqdm
+import warnings
 
 import pandas
+import tqdm
 
 import quake.city
 import quake.util
+import quake.weather.problem
 
 
 class Settings:
@@ -375,7 +377,7 @@ def elevation(args):
             run_elevation(begin_date_time, end_date_time, elevation_file)
 
 
-def disturb(args):
+def old_disturb(args):
     raw_input_dir = getattr(args, 'input')
     raw_output_dir = getattr(args, 'output')
 
@@ -538,6 +540,32 @@ def disturb(args):
             fp.writelines(content)
 
 
+def disturb(args):
+    raw_input_dir = getattr(args, 'input')
+    raw_output_dir = getattr(args, 'output')
+    fraction = 0.1
+
+    problem_bundle = quake.weather.problem.ProblemBundle.read_from_dir(raw_input_dir)
+    old_station_weights = {station: problem_bundle.get_transfer_share(station) for station in problem_bundle.stations}
+    raw_new_station_weights = dict()
+    for station in old_station_weights:
+        old_weight = old_station_weights[station]
+        new_weight = old_weight + old_weight * fraction * random.gauss(mu=0, sigma=1)
+        assert new_weight >= 0
+        raw_new_station_weights[station] = new_weight
+
+    total_new_weights = sum(raw_new_station_weights[station] for station in raw_new_station_weights)
+    new_station_weights = {station: raw_new_station_weights[station] / total_new_weights for station in raw_new_station_weights}
+
+    for problem in tqdm.tqdm(problem_bundle.problems, leave=False):
+        problem_copy = copy.deepcopy(problem)
+        problem_copy.set_transfer_share_model(new_station_weights)
+        problem_date = problem_copy.observation_period.begin.date()
+        output_file_path = os.path.join(raw_output_dir, 'week_{0}.json'.format(problem_date))
+        with open(output_file_path, 'w') as output_file:
+            json.dump(problem_copy.json_object, output_file)
+
+
 if __name__ == '__main__':
     parser_ = build_parser()
 
@@ -554,5 +582,5 @@ if __name__ == '__main__':
     elif command == 'elevation':
         elevation(args_)
     elif command == 'disturb':
-        # disturb(args_)
+        disturb(args_)
         pass

@@ -42,7 +42,7 @@ DEFINE_string(output, "", "The output solution file.");
 DEFINE_validator(output, quake::util::validate_output_file);
 DEFINE_validator(from, quake::util::validate_date);
 DEFINE_validator(to, quake::util::validate_date);
-DEFINE_validator(initial_epoch, quake::util::validate_date);
+DEFINE_validator(initial_epoch, quake::util::validate_datetime);
 
 struct Arguments {
     Arguments()
@@ -56,7 +56,7 @@ struct Arguments {
     boost::posix_time::ptime InitialEpoch;
 };
 
-boost::posix_time::ptime ParseDateTime(const std::string &value) {
+boost::posix_time::ptime ParseDateIgnoreTime(const std::string &value) {
     static const auto ZERO_DURATION = boost::posix_time::seconds(0);
     return {boost::gregorian::from_simple_string(value), ZERO_DURATION};
 }
@@ -81,13 +81,13 @@ Arguments SetupLogsAndParseArgs(int argc, char *argv[]) {
     Arguments args;
     args.ProblemOutputPath = FLAGS_output;
 
-    const auto start_time = ParseDateTime(FLAGS_from);
-    const auto end_time = ParseDateTime(FLAGS_to);
+    const auto start_time = ParseDateIgnoreTime(FLAGS_from);
+    const auto end_time = ParseDateIgnoreTime(FLAGS_to);
     CHECK_LE(start_time, end_time);
 
     boost::posix_time::ptime initial_epoch = start_time;
     if (!FLAGS_initial_epoch.empty()) {
-        initial_epoch = ParseDateTime(FLAGS_initial_epoch);
+        initial_epoch = boost::posix_time::time_from_string(FLAGS_initial_epoch);
     }
 
     args.ObservationTime = boost::posix_time::time_period(start_time + boost::posix_time::hours(12),
@@ -118,6 +118,7 @@ int main(int argc, char *argv[]) {
                                                       quake::GroundStation::Ipswich,
                                                       quake::GroundStation::Manchester,
                                                       quake::GroundStation::York,
+                                                      quake::GroundStation::Thurso,
                                                       quake::GroundStation::London};
 
     quake::ProblemGenerator generator;

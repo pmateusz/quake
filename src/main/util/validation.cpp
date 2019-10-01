@@ -68,3 +68,12 @@ bool quake::util::validate_date(const char *flagname, const std::string &date) {
     boost::gregorian::from_simple_string(date);
     return true;
 }
+
+bool quake::util::validate_datetime(const char *flagname, const std::string &date_time) {
+    if (date_time.empty()) {
+        return true;
+    }
+
+    boost::posix_time::time_from_string(date_time);
+    return true;
+}

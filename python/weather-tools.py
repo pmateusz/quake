@@ -99,7 +99,7 @@ def parse_args():
     generate_parser = sub_parsers.add_parser(GENERATE_COMMAND)
     generate_parser.add_argument('--from', action=quake.util.ParseDateAction)
     generate_parser.add_argument('--to', action=quake.util.ParseDateAction)
-    generate_parser.add_argument('--initial-epoch', action=quake.util.ParseDateAction)
+    generate_parser.add_argument('--initial-epoch', action=quake.util.ParseDateTimeAction)
     generate_parser.add_argument('--time-step', action=quake.util.ParseTimeDeltaAction, default=datetime.timedelta(days=1))
     generate_parser.add_argument('--time-horizon', action=quake.util.ParseTimeDeltaAction, default=datetime.timedelta(days=1))
     generate_parser.add_argument('--problem-prefix')
@@ -458,14 +458,14 @@ def extend_problem_definition(args):
         updated_problem.set_metadata('scenarios_number', len(scenario_frames))
         updated_problem.set_metadata('scenario_generator', scenario_generator_name)
         updated_problem.set_var_model(var_model)
-        updated_problem.set_mean_variance(mean_variance_result)
+        updated_problem.set_mean_variance_model(mean_variance_result)
 
         with open(output_file, 'w') as output_file:
             json.dump(updated_problem.json_object, output_file)
 
 
 def generate_command(args):
-    GENERATE_PROGRAM_PATH = '/home/pmateusz/dev/quake/cmake-build-debug/quake-generate'
+    GENERATE_PROGRAM_PATH = '/home/pmateusz/dev/quake/build/quake-generate'
     TEMP_SUFFIX = '_temp'
 
     problem_prefix_arg = getattr(args, 'problem_prefix')
@@ -487,10 +487,11 @@ def generate_command(args):
     for from_date, to_date, problem in configurations:
         temp_problem = problem + TEMP_SUFFIX
         subprocess.run([GENERATE_PROGRAM_PATH,
-                        '--from={0}'.format(from_date.date()),
-                        '--to={0}'.format(to_date.date()),
-                        '--initial-epoch={0}'.format(initial_epoch.date()),
-                        '--output={0}'.format(temp_problem)], check=True)
+                        "--from={0}".format(from_date.date()),
+                        "--to={0}".format(to_date.date()),
+                        "--initial-epoch",
+                       initial_epoch.strftime('%Y-%m-%d %H:%M:%S'),
+                        "--output={0}".format(temp_problem)], check=True)
 
         if not os.path.exists(temp_problem):
             raise Exception('Failed to generate problem {0}'.format(temp_problem))
@@ -1023,7 +1024,6 @@ if __name__ == '__main__':
         return pivot_transform(local_frame[(local_frame['Delay'] == datetime.timedelta(seconds=0))
                                            & (local_frame['DateTime'] >= date_time)
                                            & (local_frame['DateTime'] <= max_date_time)])
-
 
     # with open('/home/pmateusz/dev/quake/network_share/ofcom/201809_fixed_pc_coverage_r01.csv', 'r') as input_stream:
     #     import csv
