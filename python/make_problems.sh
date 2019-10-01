@@ -30,7 +30,7 @@ WEATHER_TOOLS_EXEC=/home/pmateusz/dev/quake/python/weather-tools.py
 #$WEATHER_TOOLS_EXEC generate --problem-prefix=week --from=2013-01-01 --to=2014-01-01 --time-horizon="7 days" --time-step="7 days" --initial-epoch=2013-01-01
 #popd
 
-pushd /home/pmateusz/dev/quake/current_review/test_sma674_raan110_ta0
+pushd /home/pmateusz/dev/quake/current_review/2013_big
 $WEATHER_TOOLS_EXEC generate --problem-prefix=week --from=2013-01-01 --to=2014-01-01 --time-horizon="7 days" --time-step="7 days" --initial-epoch="2013-01-01 00:00:00"
 popd
 
