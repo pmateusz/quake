@@ -28,6 +28,7 @@
 #include <boost/config.hpp>
 #include <boost/optional.hpp>
 #include <boost/date_time.hpp>
+#include <multi_week_block_intervals_mip_model.h>
 
 #include "util/error.h"
 #include "util/logging.h"
@@ -110,7 +111,7 @@ int main(int argc, char *argv[]) {
     }
 
     const auto forecast = model.GetWeatherSample(quake::ExtendedProblem::WeatherSample::Real);
-    quake::BlockIntervalsMipModel mip_model(&model, forecast, arguments.TimeStep);
+    quake::MultiWeekBlockIntervalsMipModel mip_model(&model, forecast, arguments.TimeStep);
     const auto solution_opt = mip_model.Solve(arguments.TimeLimit, arguments.GapLimit, boost::none);
     if (solution_opt) {
         const auto final_solution = mip_model.UpdateFinalBuffers(solution_opt.get(), forecast);
