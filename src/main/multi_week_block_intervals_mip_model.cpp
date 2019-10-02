@@ -22,7 +22,6 @@ void quake::MultiWeekBlockIntervalsMipModel::Build(const boost::optional<Solutio
 
     const auto &forecast = Forecasts().front();
 
-    // TODO: compute max lambda for entire year
     const auto max_observation_period = problem_->ObservationPeriod();
     std::vector<double> max_station_lambda{0.0};
     for (const auto &station :Stations()) {
@@ -35,100 +34,85 @@ void quake::MultiWeekBlockIntervalsMipModel::Build(const boost::optional<Solutio
 
     // constraint: lambda is bounded from above
     const double max_lambda = *std::max_element(std::cbegin(max_station_lambda), std::cend(max_station_lambda));
-    LOG(INFO) << max_lambda;
 
     // split week into periods ending every Sunday
     boost::posix_time::time_period observation_period = problem_->ObservationPeriod();
-    std::vector<boost::posix_time::time_period> weeks;
+    std::vector<boost::posix_time::time_period> milestone_periods;
     boost::posix_time::ptime current_week_start = observation_period.begin();
     while (current_week_start < observation_period.end()) {
+        // every Sunday is the end of the week instead of a constant day period
         const auto next_week_days = 7 - current_week_start.date().day_of_week();
         boost::posix_time::ptime next_week_start{current_week_start.date() + boost::gregorian::days(next_week_days),
                                                  current_week_start.time_of_day()};
 
+        next_week_start = std::min(observation_period.end(), next_week_start);
+
         const auto period = boost::posix_time::time_period{current_week_start, next_week_start};
-        LOG(INFO) << period;
-        weeks.emplace_back(period);
+        milestone_periods.emplace_back(period);
 
         current_week_start = next_week_start;
     }
+    const auto num_milestones = milestone_periods.size();
 
-    LOG(INFO) << "here";
-    // TODO: have an auxiliary variable -> number of keys transferred every week for each ground station
-    // TODO: define lambda for each week
-    // TODO: define the objective as the maximization of the minimum lambda
+    // compute number of keys delivered every milestone
+    std::vector<std::vector<GRBLinExpr>> keys_transferred_by_station_by_milestone(Stations().size(), std::vector<GRBLinExpr>(num_milestones));
+    for (const auto &station : ObservableStations()) {
+        const auto station_index = Index(station);
 
-//    // obtain maximum lambdas
+        auto milestone_index = 0;
+        for (const auto &interval : StationIntervals(station)) {
+            while (milestone_index < num_milestones && milestone_periods.at(milestone_index).is_before(interval.Period().begin())) {
+                ++milestone_index;
+            }
 
-//    lambda_ = mip_model_.addVar(0.0, max_lambda, 0.0, GRB_CONTINUOUS, "lambda");
-//
-//    for (const auto &station : ObservableStations()) {
-//        GRBLinExpr keys_delivered = 0;
-//        const auto station_index = Index(station);
-//        for (const auto &interval : StationIntervals(station)) {
-//            CHECK_EQ(interval.StationIndex(), station_index);
-//            keys_delivered += problem_->KeyRate(station, interval.Period(), forecast) * interval.Var();
-//        }
-//
-//        mip_model_.addConstr(TransferShare(station) * lambda_ <= initial_buffer_to_use.at(station) + keys_delivered);
-//    }
-//
-//    // objective function
-//    mip_model_.set(GRB_IntAttr_ModelSense, GRB_MAXIMIZE);
-//
-//    GRBLinExpr first_objective = lambda_;
-//    mip_model_.setObjectiveN(first_objective, 0, 10);
-//
-//    GRBLinExpr total_keys = 0.0;
-//    for (const auto &station : Stations()) {
-//        if (station == GroundStation::None) { continue; }
-//        for (const auto &interval : StationIntervals(station)) {
-//            total_keys += problem_->KeyRate(station, interval.Period(), forecast) * interval.Var();
-//        }
-//    }
-//
-//    const double max_keys_sum = std::accumulate(std::cbegin(max_station_keys), std::cend(max_station_keys), 0.0);
-//    total_keys_ = mip_model_.addVar(0, max_keys_sum, 0.0, GRB_CONTINUOUS, "total_keys");
-//    mip_model_.addConstr(total_keys_ == total_keys);
-//    GRBLinExpr second_objective = total_keys_;
-//    mip_model_.setObjectiveN(second_objective, 1, 5);
-//
-//    const auto solver_gap = mip_model_.get(GRB_DoubleParam_MIPGap);
-//    auto first_obj_env = mip_model_.getMultiobjEnv(0);
-//    first_obj_env.set(GRB_DoubleParam_MIPGap, solver_gap);
-//
-//    auto second_obj_env = mip_model_.getMultiobjEnv(1);
-//    second_obj_env.set(GRB_DoubleParam_MIPGap, solver_gap);
+            CHECK(milestone_periods.at(milestone_index).contains(interval.Period()));
+
+            keys_transferred_by_station_by_milestone.at(station_index).at(milestone_index)
+                    += problem_->KeyRate(station, interval.Period(), forecast) * interval.Var();
+        }
+    }
+
+    CHECK_GE(num_milestones, 1);
+    for (const auto &initial_buffer_entry : initial_buffer_to_use) {
+        const auto station_index = Index(initial_buffer_entry.first);
+        keys_transferred_by_station_by_milestone.at(station_index).at(0) += initial_buffer_entry.second;
+    }
+
+    lambda_ = mip_model_.addVar(0, max_lambda, 0, GRB_CONTINUOUS);
+    for (const auto &station : ObservableStations()) {
+        const auto station_index = Index(station);
+
+        GRBLinExpr final_key_buffer = 0;
+        for (std::size_t milestone_index = 0; milestone_index < num_milestones; ++milestone_index) {
+            final_key_buffer += keys_transferred_by_station_by_milestone.at(station_index).at(milestone_index);
+
+            mip_model_.addConstr(lambda_ <= final_key_buffer / TransferShare(station));
+        }
+    }
+
+    // objective function
+    GRBLinExpr objective = lambda_;
+    mip_model_.set(GRB_IntAttr_ModelSense, GRB_MAXIMIZE);
+    mip_model_.setObjective(objective);
+
+    LOG(INFO) << "Model Configuration Finished";
 }
 
 void quake::MultiWeekBlockIntervalsMipModel::ReportResults(quake::util::SolverStatus solver_status) {
     BaseMipModel::ReportResults(solver_status);
 
     std::stringstream msg;
-
-    auto first_obj_env = mip_model_.getMultiobjEnv(0);
-    msg << "First objective stop MIP Gap: " << first_obj_env.get(GRB_DoubleParam_MIPGap) << std::endl;
-
-    auto second_obj_env = mip_model_.getMultiobjEnv(1);
-    msg << "Second objective stop MIP Gap: " << second_obj_env.get(GRB_DoubleParam_MIPGap) << std::endl;
-
+    msg << "Objective stop MIP Gap limit: " << mip_model_.get(GRB_DoubleParam_MIPGap);
     msg << "Best solution:" << std::endl
-        << " - lambda: " << lambda_.get(GRB_DoubleAttr_X) << std::endl
-        << " - total keys: " << total_keys_.get(GRB_DoubleAttr_X) << std::endl;
+        << " - lambda: " << lambda_.get(GRB_DoubleAttr_X) << std::endl;
 
-    // Print number of solutions stored
     auto num_solutions = mip_model_.get(GRB_IntAttr_SolCount);
     msg << "Number of solutions found " << num_solutions << ":" << std::endl;
     msg << " solutions:" << std::endl;
     for (auto solution_index = 0; solution_index < num_solutions; ++solution_index) {
         mip_model_.set(GRB_IntParam_SolutionNumber, solution_index);
-
-        mip_model_.set(GRB_IntParam_ObjNumber, 0);
-        const auto lambda = mip_model_.get(GRB_DoubleAttr_ObjNVal);
-
-        mip_model_.set(GRB_IntParam_ObjNumber, 1);
-        const auto total_keys = mip_model_.get(GRB_DoubleAttr_ObjNVal);
-        msg << " - " << lambda << ", " << total_keys << std::endl;
+        const auto lambda = mip_model_.get(GRB_DoubleAttr_ObjVal);
+        msg << " - " << lambda << std::endl;
     }
 
     LOG(INFO) << msg.str();

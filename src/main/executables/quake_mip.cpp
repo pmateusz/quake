@@ -28,13 +28,12 @@
 #include <boost/config.hpp>
 #include <boost/optional.hpp>
 #include <boost/date_time.hpp>
-#include <multi_week_block_intervals_mip_model.h>
 
 #include "util/error.h"
 #include "util/logging.h"
 #include "util/validation.h"
 
-#include "block_intervals_mip_model.h"
+#include "multi_week_block_intervals_mip_model.h"
 
 DEFINE_string(output, "", "The output solution file.");
 DEFINE_string(input, "", "The input problem file.");
