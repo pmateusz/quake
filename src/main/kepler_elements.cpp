@@ -51,7 +51,7 @@ quake::KeplerElements::KeplerElements(double semi_major_axis,
 
 // parameters of the Sun Synchronous Orbit
 const quake::KeplerElements quake::KeplerElements::DEFAULT{
-        util::EARTH_EQUATORIAL_RADIUS_KM + 500,
+        util::EARTH_EQUATORIAL_RADIUS_KM + 566.896708692896,
         0,
         97.4 * M_PI / 180.0,
         110 * M_PI / 180.0,

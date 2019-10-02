@@ -774,10 +774,15 @@ class ResultsSet:
             return pathlib.Path(os.path.join(self.__cache_dir, file_name))
 
     def __init__(self):
+        # self.__results = [ResultsSet.SolutionBundleEntry('/home/pmateusz/dev/quake/cache',
+        #                                                  '/home/pmateusz/dev/quake/current_review/{0}'.format(year),
+        #                                                  '/home/pmateusz/dev/quake/current_review/{0}/solutions'.format(year),
+        #                                                  year) for year in range(2013, 2019, 1)]
+
         self.__results = [ResultsSet.SolutionBundleEntry('/home/pmateusz/dev/quake/cache',
-                                                         '/home/pmateusz/dev/quake/current_review/{0}'.format(year),
-                                                         '/home/pmateusz/dev/quake/current_review/{0}/solutions'.format(year),
-                                                         year) for year in range(2013, 2019, 1)]
+                                                         '/home/pmateusz/dev/quake/current_review/2013_year',
+                                                         '/home/pmateusz/dev/quake/current_review/2013_year/solutions',
+                                                         2013)]
 
     def get_transfer_share(self, station: quake.city.City) -> float:
         solution_bundle = self.__results[0].solution_bundle

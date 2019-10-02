@@ -15,8 +15,8 @@ namespace quake {
         void ReportResults(util::SolverStatus solver_status) override;
 
     private:
-        GRBVar lambda_;
-        GRBVar total_keys_;
+        std::vector<boost::posix_time::time_period> milestones_;
+        std::vector<GRBVar> traffic_indices_;
     };
 }
 

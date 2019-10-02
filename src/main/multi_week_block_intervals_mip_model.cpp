@@ -37,7 +37,6 @@ void quake::MultiWeekBlockIntervalsMipModel::Build(const boost::optional<Solutio
 
     // split week into periods ending every Sunday
     boost::posix_time::time_period observation_period = problem_->ObservationPeriod();
-    std::vector<boost::posix_time::time_period> milestone_periods;
     boost::posix_time::ptime current_week_start = observation_period.begin();
     while (current_week_start < observation_period.end()) {
         // every Sunday is the end of the week instead of a constant day period
@@ -48,11 +47,11 @@ void quake::MultiWeekBlockIntervalsMipModel::Build(const boost::optional<Solutio
         next_week_start = std::min(observation_period.end(), next_week_start);
 
         const auto period = boost::posix_time::time_period{current_week_start, next_week_start};
-        milestone_periods.emplace_back(period);
+        milestones_.emplace_back(period);
 
         current_week_start = next_week_start;
     }
-    const auto num_milestones = milestone_periods.size();
+    const auto num_milestones = milestones_.size();
 
     // compute number of keys delivered every milestone
     std::vector<std::vector<GRBLinExpr>> keys_transferred_by_station_by_milestone(Stations().size(), std::vector<GRBLinExpr>(num_milestones));
@@ -61,11 +60,11 @@ void quake::MultiWeekBlockIntervalsMipModel::Build(const boost::optional<Solutio
 
         auto milestone_index = 0;
         for (const auto &interval : StationIntervals(station)) {
-            while (milestone_index < num_milestones && milestone_periods.at(milestone_index).is_before(interval.Period().begin())) {
+            while (milestone_index < num_milestones && milestones_.at(milestone_index).is_before(interval.Period().begin())) {
                 ++milestone_index;
             }
 
-            CHECK(milestone_periods.at(milestone_index).contains(interval.Period()));
+            CHECK(milestones_.at(milestone_index).contains(interval.Period()));
 
             keys_transferred_by_station_by_milestone.at(station_index).at(milestone_index)
                     += problem_->KeyRate(station, interval.Period(), forecast) * interval.Var();
@@ -78,7 +77,11 @@ void quake::MultiWeekBlockIntervalsMipModel::Build(const boost::optional<Solutio
         keys_transferred_by_station_by_milestone.at(station_index).at(0) += initial_buffer_entry.second;
     }
 
-    lambda_ = mip_model_.addVar(0, max_lambda, 0, GRB_CONTINUOUS);
+    traffic_indices_.reserve(num_milestones);
+    for (std::size_t milestone_index = 0; milestone_index < num_milestones; ++milestone_index) {
+        traffic_indices_.emplace_back(mip_model_.addVar(0, max_lambda, 0, GRB_CONTINUOUS));
+    }
+
     for (const auto &station : ObservableStations()) {
         const auto station_index = Index(station);
 
@@ -86,12 +89,16 @@ void quake::MultiWeekBlockIntervalsMipModel::Build(const boost::optional<Solutio
         for (std::size_t milestone_index = 0; milestone_index < num_milestones; ++milestone_index) {
             final_key_buffer += keys_transferred_by_station_by_milestone.at(station_index).at(milestone_index);
 
-            mip_model_.addConstr(lambda_ <= final_key_buffer / TransferShare(station));
+            mip_model_.addConstr(traffic_indices_.at(milestone_index) <= final_key_buffer / TransferShare(station));
         }
     }
 
     // objective function
-    GRBLinExpr objective = lambda_;
+    GRBLinExpr objective = 0;
+    for (std::size_t milestone_index = 0; milestone_index < num_milestones; ++milestone_index) {
+        objective += traffic_indices_.at(milestone_index);
+    }
+
     mip_model_.set(GRB_IntAttr_ModelSense, GRB_MAXIMIZE);
     mip_model_.setObjective(objective);
 
@@ -103,17 +110,17 @@ void quake::MultiWeekBlockIntervalsMipModel::ReportResults(quake::util::SolverSt
 
     std::stringstream msg;
     msg << "Objective stop MIP Gap limit: " << mip_model_.get(GRB_DoubleParam_MIPGap);
-    msg << "Best solution:" << std::endl
-        << " - lambda: " << lambda_.get(GRB_DoubleAttr_X) << std::endl;
-
-    auto num_solutions = mip_model_.get(GRB_IntAttr_SolCount);
-    msg << "Number of solutions found " << num_solutions << ":" << std::endl;
-    msg << " solutions:" << std::endl;
-    for (auto solution_index = 0; solution_index < num_solutions; ++solution_index) {
-        mip_model_.set(GRB_IntParam_SolutionNumber, solution_index);
-        const auto lambda = mip_model_.get(GRB_DoubleAttr_ObjVal);
-        msg << " - " << lambda << std::endl;
-    }
+//    msg << "Best solution:" << std::endl
+//        << " - lambda: " << lambda_.get(GRB_DoubleAttr_X) << std::endl;
+//
+//    auto num_solutions = mip_model_.get(GRB_IntAttr_SolCount);
+//    msg << "Number of solutions found " << num_solutions << ":" << std::endl;
+//    msg << " solutions:" << std::endl;
+//    for (auto solution_index = 0; solution_index < num_solutions; ++solution_index) {
+//        mip_model_.set(GRB_IntParam_SolutionNumber, solution_index);
+//        const auto lambda = mip_model_.get(GRB_DoubleAttr_ObjVal);
+//        msg << " - " << lambda << std::endl;
+//    }
 
     LOG(INFO) << msg.str();
 }
