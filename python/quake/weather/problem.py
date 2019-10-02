@@ -165,7 +165,7 @@ class Problem:
     def get_transferred_keys(self,
                              station: quake.city.City,
                              observation_period: quake.weather.time_period.TimePeriod,
-                             scenario: typing.Callable[[quake.city.City, datetime.datetime], float]):
+                             scenario: typing.Callable[[quake.city.City, datetime.datetime], float]) -> float:
         keys_transferred = 0.0
         for communication_frame in self.__communication_frames[station]:
 
@@ -192,7 +192,7 @@ class Problem:
 
             keys_transferred_locally = overlap_frame['effective_transfer'].sum()
             keys_transferred += keys_transferred_locally
-        return int(math.floor(keys_transferred))
+        return keys_transferred  # previously we used to have: int(math.floor(keys_transferred))
 
     def get_transfer_share(self, station: quake.city.City) -> float:
         transfer_shares = self.__get_transfer_shares()
@@ -348,7 +348,8 @@ class ProblemBundle:
     def read_from_dir(data_dir: str) -> 'ProblemBundle':
         problem_files = []
         for file_name in os.listdir(str(data_dir)):
-            if file_name.startswith('week_'):
+            file_name_part, file_ext_part = os.path.splitext(file_name)
+            if file_ext_part == '.json' and (file_name_part.startswith('week') or file_name_part.startswith('year')):
                 problem_path = os.path.join(str(data_dir), file_name)
                 problem_files.append(problem_path)
 

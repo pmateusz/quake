@@ -41,7 +41,7 @@ class Solution:
     def get_final_buffer(self, station: quake.city.City) -> float:
         for city_name, final_buffer in self.__json_object['final_buffers']:
             if quake.city.City.from_name(city_name) == station:
-                return final_buffer
+                return float(final_buffer)
         return 0.0
 
     @property
@@ -145,15 +145,49 @@ class SolutionBundle:
             problem = self.__problem_by_date[date]
             scenario = problem.get_scenario('real')
             solution = self.__solution_by_date[date]
-            for station in problem.stations:
-                local_keys_transferred = 0
-                for observation in solution.get_observations(station):
-                    local_keys_transferred += problem.get_transferred_keys(station, observation, scenario)
-                local_final_buffer = solution.get_final_buffer(station)
-                local_initial_buffer = local_final_buffer - local_keys_transferred
-                assert local_initial_buffer >= 0
 
-                data.append({'station': station, 'date': date, 'initial_buffer': local_initial_buffer, 'keys_transferred': local_keys_transferred})
+            if problem.observation_period.length > datetime.timedelta(weeks=2):
+                observation_periods = []
+                next_period_begin = problem.observation_period.begin
+                while next_period_begin < problem.observation_period.end:
+                    days_to_extend = 7 - next_period_begin.date().weekday()
+                    next_period_end = min(next_period_begin + datetime.timedelta(days=days_to_extend), problem.observation_period.end)
+                    observation_periods.append(quake.weather.time_period.TimePeriod(next_period_begin, next_period_end))
+                    next_period_begin = next_period_end
+
+                for station in problem.stations:
+                    observation_period_it = iter(observation_periods)
+                    local_keys_transferred = {period: 0 for period in observation_periods}
+                    observation_period = next(observation_period_it, None)
+                    for observation in solution.get_observations(station):
+                        while observation_period and not observation_period.contains(observation):
+                            observation_period = next(observation_period_it, None)
+                        assert observation_period is not None
+
+                        observation_keys_transferred = problem.get_transferred_keys(station, observation, scenario)
+                        local_keys_transferred[observation_period] += observation_keys_transferred
+
+                    local_final_buffer = solution.get_final_buffer(station)
+                    for observation_period in reversed(list(local_keys_transferred)):
+                        local_final_buffer -= local_keys_transferred[observation_period]
+                        data.append({'station': station,
+                                     'date': observation_period.begin.date(),
+                                     'initial_buffer': local_final_buffer,
+                                     'keys_transferred': local_keys_transferred[observation_period]})
+                    assert local_final_buffer >= 0
+            else:
+                for station in problem.stations:
+                    local_keys_transferred = 0
+                    for observation in solution.get_observations(station):
+                        local_keys_transferred += problem.get_transferred_keys(station, observation, scenario)
+                    local_final_buffer = solution.get_final_buffer(station)
+                    local_initial_buffer = local_final_buffer - local_keys_transferred
+                    assert local_initial_buffer >= 0
+
+                    data.append({'station': station,
+                                 'date': date,
+                                 'initial_buffer': local_initial_buffer,
+                                 'keys_transferred': local_keys_transferred})
         frame = pandas.DataFrame(data=data)
         frame.set_index(['station', 'date'], inplace=True)
         frame.sort_index(level=1, inplace=True)
@@ -229,7 +263,8 @@ class SolutionBundle:
 
         solution_files = []
         for file_name in os.listdir(solution_directory_path):
-            if file_name.startswith('solution_'):
+            file_name_part, file_ext_part = os.path.splitext(file_name)
+            if file_ext_part == '.json' and file_name_part.startswith('solution'):
                 solution_path = os.path.join(solution_directory_path, file_name)
                 solution_files.append(solution_path)
 

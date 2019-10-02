@@ -12,7 +12,7 @@
     <option name="ADD_CONTENT_ROOTS" value="true" />
     <option name="ADD_SOURCE_ROOTS" value="true" />
     <option name="SCRIPT_NAME" value="$PROJECT_DIR$/python/plot-quake.py" />
-    <option name="PARAMETERS" value="week-performance $PROJECT_DIR$/current_review/2013/week_2013-01-01.json $PROJECT_DIR$/current_review/2013/solutions/solution_2013-01-01.json" />
+    <option name="PARAMETERS" value="week-performance $PROJECT_DIR$/current_review/2013_year/year_2013.json $PROJECT_DIR$/current_review/2013_year/solutions/solution_year_2013-01-01_01.json" />
     <option name="SHOW_COMMAND_LINE" value="false" />
     <option name="EMULATE_TERMINAL" value="false" />
     <option name="MODULE_MODE" value="false" />
