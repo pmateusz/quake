@@ -257,7 +257,7 @@ def format_timedelta(x, pos=None):
 #     plot_frame(elevation_frame, 'Elevation Angle', 'elevation_plot.png')
 
 
-FORMAT = 'pdf'
+FORMAT = 'png'
 FIGURE_FONT_SIZE = 12
 FIGURE_WIDTH_SIZE = 7
 FIGURE_WIDTH_SQUARE_SIZE = 5
@@ -780,8 +780,8 @@ class ResultsSet:
         #                                                  year) for year in range(2013, 2019, 1)]
 
         self.__results = [ResultsSet.SolutionBundleEntry('/home/pmateusz/dev/quake/cache',
-                                                         '/home/pmateusz/dev/quake/current_review/2013_year',
-                                                         '/home/pmateusz/dev/quake/current_review/2013_year/solutions',
+                                                         '/home/pmateusz/dev/quake/current_review/validation_sma566_raan118_ta280',
+                                                         '/home/pmateusz/dev/quake/current_review/validation_sma566_raan118_ta280/solutions',
                                                          2013)]
 
     def get_transfer_share(self, station: quake.city.City) -> float:
@@ -1206,20 +1206,17 @@ def plot_communication_window(args):
                           alpha=BACKGROUND_ALPHA)
 
         def map_datetime(value):
-            if value.time() >= datetime.time(hour=12, minute=0):
+            if datetime.time(hour=12, minute=0) <= value.time() <= datetime.time(hour=23, minute=59, second=59):
                 reference_date = ref_start_date
             else:
                 reference_date = ref_end_date
             return datetime.datetime.combine(reference_date, value.time())
 
         for time_period in communication_windows:
-            # the plot is showing night between two days, to maintain line vertical we overwrite date in the second day
-            if time_period.begin.date() != time_period.end.date():
-                axis.plot([time_period.begin.date(), time_period.begin.date()],
-                          [map_datetime(time_period.begin), map_datetime(time_period.end)], '-', color=FOREGROUND_COLOR)
-            else:
-                axis.plot([time_period.begin.date(), time_period.end.date()],
-                          [map_datetime(time_period.begin), map_datetime(time_period.end)], '-', color=FOREGROUND_COLOR)
+            begin_date_to_use = (time_period.begin - datetime.timedelta(hours=12)).date()
+            end_date_to_use = (time_period.end - datetime.timedelta(hours=12)).date()
+            axis.plot([begin_date_to_use, end_date_to_use], [map_datetime(time_period.begin), map_datetime(time_period.end)],
+                      '-', color=FOREGROUND_COLOR)
 
         def date_time_formatter(x, pos=None):
             try:
@@ -1243,8 +1240,8 @@ def plot_communication_window(args):
 
         axis.set_xlim(left=datetime.date(min_date_time.year, 6, 1), right=datetime.date(min_date_time.year, 9, 15))
         axis.set_xticks([datetime.date(min_date_time.year, month, 1) for month in range(6, 10, 1)])
-        axis.set_ylim(bottom=datetime.datetime.combine(ref_start_date, datetime.time(22, 30)),
-                      top=datetime.datetime.combine(ref_end_date, datetime.time(0, 30)))
+        axis.set_ylim(bottom=datetime.datetime.combine(ref_start_date, datetime.time(23, 15)),
+                      top=datetime.datetime.combine(ref_end_date, datetime.time(0, 45)))
         figure.tight_layout()
         save_figure('observation_time_magnified_' + city.name)
 

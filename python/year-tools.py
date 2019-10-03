@@ -198,20 +198,27 @@ def old_generate(args):
                 logging.exception('Failed to process work item {0} {1}', start_day, end_day)
 
 
-def get_records(data_dir, prefix) -> typing.Dict[datetime.date, typing.Dict[str, pathlib.Path]]:
+def get_records(data_dir) -> typing.Dict[datetime.date, typing.Dict[str, pathlib.Path]]:
     records = {}
     for file_item in os.listdir(data_dir):
-        match = re.match(r'^(?P<prefix>\w+?)_(?P<date>\d+-\d+-\d+).*?\..+$', file_item)
-        if not match:
-            continue
-        date = match.group('date')
-        local_prefix = match.group('prefix')
+        date_match = re.match(r'^(?P<prefix>\w+?)_(?P<year>\d+)-(?P<month>\d+)-(?P<day>\d+).*?\.json$', file_item)
+        if date_match:
+            year = int(date_match.group('year'))
+            month = int(date_match.group('month'))
+            day = int(date_match.group('day'))
+            date = datetime.date(year=year, month=month, day=day)
+            prefix = date_match.group('prefix')
+        else:
+            year_match = re.match(r'^(?P<prefix>\w+?)_(?P<year>\d+).*?\.json$', file_item)
+            if not year_match:
+                continue
+            year = int(year_match.group('year'))
+            date = datetime.date(year=year, month=1, day=1)
+            prefix = year_match.group('prefix')
 
         if date not in records:
             records[date] = dict()
-
-        if local_prefix == prefix:
-            records[date][prefix] = pathlib.Path(os.path.join(data_dir, file_item))
+        records[date][prefix] = pathlib.Path(os.path.join(data_dir, file_item))
     return records
 
 
@@ -317,7 +324,11 @@ def run_sequence(args) -> None:
     time_step = getattr(args, 'time_step')
     gap_limit = getattr(args, 'gap_limit')
 
-    problem_records = get_records(problem_dir, 'week')
+    problem_records = get_records(problem_dir)
+    problem_prefixes = {prefix for date in problem_records for prefix in problem_records[date]}
+    assert len(problem_prefixes) == 1
+    problem_prefix = next(iter(problem_prefixes), None)
+
     problem_dates = list(problem_records.keys())
     problem_dates.sort()
 
@@ -334,7 +345,7 @@ def run_sequence(args) -> None:
                 prev_solution_file = solution_file
                 continue
 
-            run_mip_solver(problem_date, problem_records[problem_date]['week'], solution_file, time_step, gap_limit, prev_solution_file)
+            run_mip_solver(problem_date, problem_records[problem_date][problem_prefix], solution_file, time_step, gap_limit, prev_solution_file)
             prev_solution_file = solution_file
 
 

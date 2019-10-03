@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
 WEATHER_TOOLS_EXEC=/home/pmateusz/dev/quake/python/weather-tools.py
+PROBLEM_GENERATOR_EXEC=/home/pmateusz/dev/quake/build/quake-generate
+PLOT_SCRIPT=/home/pmateusz/dev/quake/python/plot-quake.py
 
 #pushd /home/pmateusz/dev/quake/current_review/2013
 #$WEATHER_TOOLS_EXEC generate --problem-prefix=week --from=2013-01-01 --to=2014-01-01 --time-horizon="7 days" --time-step="7 days" --initial-epoch=2012-12-22
@@ -30,8 +32,15 @@ WEATHER_TOOLS_EXEC=/home/pmateusz/dev/quake/python/weather-tools.py
 #$WEATHER_TOOLS_EXEC generate --problem-prefix=week --from=2013-01-01 --to=2014-01-01 --time-horizon="7 days" --time-step="7 days" --initial-epoch=2013-01-01
 #popd
 
-pushd /home/pmateusz/dev/quake/current_review/alt_566
-$WEATHER_TOOLS_EXEC generate --problem-prefix=week --from=2013-01-01 --to=2014-01-01 --time-horizon="7 days" --time-step="7 days" --initial-epoch="2013-01-01 00:00:00"
+#pushd /home/pmateusz/dev/quake/current_review/alt_566
+#$WEATHER_TOOLS_EXEC generate --problem-prefix=week --from=2013-01-01 --to=2014-01-01 --time-horizon="7 days" --time-step="7 days" --initial-epoch="2013-01-01 00:00:00"
+#popd
+
+pushd /home/pmateusz/dev/quake/current_review/validation_sma566_inc110.5_inc976_ta42
+#$PROBLEM_GENERATOR_EXEC --from=2013-01-01 --to=2014-01-01 --initial-epoch="2013-01-01 00:00:00" --output=year_2013.json_temp
+#$WEATHER_TOOLS_EXEC extend year_2013.json_temp --output=year_2013.json
+#$PLOT_SCRIPT communication-window --data-dir="."
+$PLOT_SCRIPT aggregate --data-dir="."
 popd
 
 #for scenario_generator in past_error_replication

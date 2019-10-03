@@ -47,13 +47,20 @@ quake::KeplerElements::KeplerElements(double semi_major_axis,
                                               * pow(util::EARTH_EQUATORIAL_RADIUS_KM / semilatus_rectum_, 2.0)
                                               * cos(inclination_)} {}
 
-                                              // altitude 500, raan 110, inclination 97.4
+// altitude 500, raan 110, inclination 97.4
+
+// most_effective_configurations:
+// - sma: 566.896708692896, raan 118.0 ta 280 - cross over England
+// - sma: 566.896708692896, raan 107.0 ta 280 - two bands symmetric around midnight one cross
+// - sma: 566.896708692896, raan 107.0 ta  42 - two bands one centered around midnight
+// - sma: 566.896708692896, raan 110.5 ta  50 - two bands, zenith over London at midnight
+// - sma: 500.000000000000, raan 110.5 ta  46
 
 // parameters of the Sun Synchronous Orbit
 const quake::KeplerElements quake::KeplerElements::DEFAULT{
         util::EARTH_EQUATORIAL_RADIUS_KM + 566.896708692896,
         0,
-        97.4 * M_PI / 180.0,
-        110 * M_PI / 180.0,
+        97.6 * M_PI / 180.0,
+        110.5 * M_PI / 180.0,
         0.0,
-        0.0};
+        42.0 * M_PI / 180.0};
