@@ -780,8 +780,8 @@ class ResultsSet:
         #                                                  year) for year in range(2013, 2019, 1)]
 
         self.__results = [ResultsSet.SolutionBundleEntry('/home/pmateusz/dev/quake/cache',
-                                                         '/home/pmateusz/dev/quake/current_review/validation_sma566_raan118_ta280',
-                                                         '/home/pmateusz/dev/quake/current_review/validation_sma566_raan118_ta280/solutions',
+                                                         '/home/pmateusz/dev/quake/current_review/sma556_inc97.4_ta330_raan110.5',
+                                                         '/home/pmateusz/dev/quake/current_review/sma556_inc97.4_ta330_raan110.5/solutions',
                                                          2013)]
 
     def get_transfer_share(self, station: quake.city.City) -> float:

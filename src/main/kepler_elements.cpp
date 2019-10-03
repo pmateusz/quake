@@ -63,4 +63,4 @@ const quake::KeplerElements quake::KeplerElements::DEFAULT{
         97.4 * M_PI / 180.0,
         110.5 * M_PI / 180.0,
         0.0,
-        315 * M_PI / 180.0};
+        0 * M_PI / 180.0};
