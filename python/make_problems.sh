@@ -36,11 +36,24 @@ PLOT_SCRIPT=/home/pmateusz/dev/quake/python/plot-quake.py
 #$WEATHER_TOOLS_EXEC generate --problem-prefix=week --from=2013-01-01 --to=2014-01-01 --time-horizon="7 days" --time-step="7 days" --initial-epoch="2013-01-01 00:00:00"
 #popd
 
-pushd /home/pmateusz/dev/quake/current_review/sma566_inc97.4_ta0_raan110.5
+pushd /home/pmateusz/dev/quake/current_review/many_years_fake_period_with_illumination
 $PROBLEM_GENERATOR_EXEC --from=2013-01-01 --to=2014-01-01 --initial-epoch="2013-01-01 00:00:00" --output=year_2013.json_temp
 $WEATHER_TOOLS_EXEC extend year_2013.json_temp --output=year_2013.json
-$PLOT_SCRIPT communication-window --data-dir="."
-$PLOT_SCRIPT aggregate --data-dir="."
+
+$PROBLEM_GENERATOR_EXEC --from=2014-01-01 --to=2015-01-01 --initial-epoch="2013-01-01 00:00:00" --output=year_2014.json_temp
+$WEATHER_TOOLS_EXEC extend year_2014.json_temp --output=year_2014.json
+
+$PROBLEM_GENERATOR_EXEC --from=2015-01-01 --to=2016-01-01 --initial-epoch="2013-01-01 00:00:00" --output=year_2015.json_temp
+$WEATHER_TOOLS_EXEC extend year_2015.json_temp --output=year_2015.json
+
+$PROBLEM_GENERATOR_EXEC --from=2016-01-01 --to=2017-01-01 --initial-epoch="2013-01-01 00:00:00" --output=year_2016.json_temp
+$WEATHER_TOOLS_EXEC extend year_2016.json_temp --output=year_2016.json
+
+$PROBLEM_GENERATOR_EXEC --from=2017-01-01 --to=2018-01-01 --initial-epoch="2013-01-01 00:00:00" --output=year_2017.json_temp
+$WEATHER_TOOLS_EXEC extend year_2017.json_temp --output=year_2017.json
+
+$PROBLEM_GENERATOR_EXEC --from=2018-01-01 --to=2019-01-01 --initial-epoch="2013-01-01 00:00:00" --output=year_2018.json_temp
+$WEATHER_TOOLS_EXEC extend year_2018.json_temp --output=year_2018.json
 popd
 
 #for scenario_generator in past_error_replication

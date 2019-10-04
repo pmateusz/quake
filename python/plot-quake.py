@@ -1231,10 +1231,10 @@ def plot_communication_window(args):
         axis.set_ylabel('Time [hh:mm]')
         axis.set_ylim(bottom=ref_start_date_time, top=ref_end_date_time)
         axis.set_xlim(left=min_date_time, right=max_date_time)
-        axis.set_xticks([datetime.date(min_date_time.year, 1, 1),
-                         datetime.date(min_date_time.year, 4, 1),
-                         datetime.date(min_date_time.year, 8, 1),
-                         datetime.date(min_date_time.year, 12, 1)])
+        # axis.set_xticks([datetime.date(min_date_time.year, 1, 1),
+        #                  datetime.date(min_date_time.year, 4, 1),
+        #                  datetime.date(min_date_time.year, 8, 1),
+        #                  datetime.date(min_date_time.year, 12, 1)])
         figure.tight_layout()
         save_figure('observation_time_' + city.name)
 

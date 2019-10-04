@@ -124,6 +124,7 @@ add_executable(quake-box-mean-index ${CMAKE_SOURCE_DIR}/src/main/executables/qua
 add_executable(quake-var-robust ${CMAKE_SOURCE_DIR}/src/main/executables/quake_var_robust.cpp)
 add_executable(quake-det ${CMAKE_SOURCE_DIR}/src/main/executables/quake_deterministic.cpp)
 add_executable(quake-soc-mean-std ${CMAKE_SOURCE_DIR}/src/main/executables/quake_soc_mean_std.cpp)
+add_executable(quake-drift ${CMAKE_SOURCE_DIR}/src/main/executables/quake_day_drift.cpp)
 
 target_link_libraries(quake-cp quake ${LIBRARY_DEP})
 target_link_libraries(quake-saa quake ${LIBRARY_DEP})
@@ -141,6 +142,7 @@ target_link_libraries(quake-box-mean-var quake ${LIBRARY_DEP})
 target_link_libraries(quake-box-mean-var-index quake ${LIBRARY_DEP})
 target_link_libraries(quake-box-mean-index quake ${LIBRARY_DEP})
 target_link_libraries(quake-soc-mean-std quake ${LIBRARY_DEP})
+target_link_libraries(quake-drift quake ${LIBRARY_DEP})
 
 get_property(external_project_dependencies GLOBAL PROPERTY EXTERNAL_PROJECT_DEPENDENCIES)
 #separate_arguments(external_project_dependencies)
