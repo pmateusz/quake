@@ -35,15 +35,15 @@ PLOT_SCRIPT=/home/pmateusz/dev/quake/python/plot-quake.py
 #$PLOT_SCRIPT print-service-levels
 #popd
 
-pushd /home/pmateusz/dev/quake/current_review/sma566_inc97.4_ta0_raan110.5/solutions
-#$RUN_SCRIPT run --problem-dir=/home/pmateusz/dev/quake/current_review/sma566_inc97.4_ta0_raan110.5 --solution-prefix=solution --gap-limit=0.005 --time-step=00:00:15
-$PLOT_SCRIPT service-level --data-dir=/home/pmateusz/dev/quake/current_review/sma566_inc97.4_ta0_raan110.5 --solution-dir=/home/pmateusz/dev/quake/current_review/sma566_inc97.4_ta0_raan110.5/solutions
+pushd /home/pmateusz/dev/quake/current_review/candidate_sma565_inc97.652862548828125/solutions
+$RUN_SCRIPT run --problem-dir=/home/pmateusz/dev/quake/current_review/candidate_sma565_inc97.652862548828125 --solution-prefix=solution --gap-limit=0.01 --time-step=00:00:30
+#$PLOT_SCRIPT service-level --data-dir=/home/pmateusz/dev/quake/current_review/sma566_inc97.4_ta0_raan110.5 --solution-dir=/home/pmateusz/dev/quake/current_review/sma566_inc97.4_ta0_raan110.5/solutions
 #$PLOT_SCRIPT network-traffic --data-dir=/home/pmateusz/dev/quake/current_review/sma566_inc97.4_ta0_raan110.5 --solution-dir=/home/pmateusz/dev/quake/current_review/sma566_inc97.4_ta0_raan110.5/solutions
 #$PLOT_SCRIPT long-term-performance --data-dir=/home/pmateusz/dev/quake/current_review/sma566_inc97.4_ta0_raan110.5 --solution-dir=/home/pmateusz/dev/quake/current_review/sma566_inc97.4_ta0_raan110.5/solutions
 #$PLOT_SCRIPT week-performance /home/pmateusz/dev/quake/current_review/sma566_inc97.4_ta0_raan110.5/year_2013.json /home/pmateusz/dev/quake/current_review/sma566_inc97.4_ta0_raan110.5/solutions
 #$PLOT_SCRIPT aggregate --data-dir=/home/pmateusz/dev/quake/current_review/sma566_inc97.4_ta0_raan110.5
 #$PLOT_SCRIPT communication-window --data-dir=/home/pmateusz/dev/quake/current_review/sma566_inc97.4_ta0_raan110.5
-$PLOT_SCRIPT print-service-levels
+#$PLOT_SCRIPT print-service-levels
 popd
 
 #pushd /home/pmateusz/dev/quake/current_review/validation_sma566_raan118_ta280/solutions

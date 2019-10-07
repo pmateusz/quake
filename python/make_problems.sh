@@ -36,7 +36,7 @@ PLOT_SCRIPT=/home/pmateusz/dev/quake/python/plot-quake.py
 #$WEATHER_TOOLS_EXEC generate --problem-prefix=week --from=2013-01-01 --to=2014-01-01 --time-horizon="7 days" --time-step="7 days" --initial-epoch="2013-01-01 00:00:00"
 #popd
 
-pushd /home/pmateusz/dev/quake/current_review/many_years_fake_period_with_illumination
+pushd /home/pmateusz/dev/quake/current_review/candidate_sma560_inc97.631739501953120
 $PROBLEM_GENERATOR_EXEC --from=2013-01-01 --to=2014-01-01 --initial-epoch="2013-01-01 00:00:00" --output=year_2013.json_temp
 $WEATHER_TOOLS_EXEC extend year_2013.json_temp --output=year_2013.json
 

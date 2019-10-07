@@ -56,11 +56,14 @@ quake::KeplerElements::KeplerElements(double semi_major_axis,
 // - sma: 566.896708692896, raan 110.5 ta  50 - two bands, zenith over London at midnight
 // - sma: 500.000000000000, raan 110.5 ta  46
 
+// computed inclination: 97.652862548828125
+// computed altitude: 565 or 566.899658203125000
+
 // parameters of the Sun Synchronous Orbit
 const quake::KeplerElements quake::KeplerElements::DEFAULT{
-        util::EARTH_EQUATORIAL_RADIUS_KM + 566.896708692896,
+        util::EARTH_EQUATORIAL_RADIUS_KM + 560,
         0,
-        97.4 * M_PI / 180.0,
+        97.631739501953120 * M_PI / 180.0,
         110.5 * M_PI / 180.0,
         0.0,
-        0 * M_PI / 180.0};
+        46.0 * M_PI / 180.0};
