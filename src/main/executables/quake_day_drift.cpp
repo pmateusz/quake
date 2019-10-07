@@ -268,6 +268,23 @@ boost::posix_time::time_duration GetMaxDriftWithinBand(double orbit_inclination,
     return *std::max_element(std::cbegin(duration_drifts), std::cend(duration_drifts));
 }
 
+double GetDriftInRevolutions(double orbit_inclination,
+                             double orbit_altitude,
+                             boost::posix_time::ptime epoch_start,
+                             boost::posix_time::ptime epoch_end) {
+    const quake::KeplerElements initial_satellite_position{quake::util::EARTH_EQUATORIAL_RADIUS_KM + orbit_altitude,
+                                                           0,
+                                                           orbit_inclination * M_PI / 180.0,
+                                                           110.5 * M_PI / 180.0,
+                                                           0.0,
+                                                           0 * M_PI / 180.0};
+    const auto revolutions_per_day =
+            (initial_satellite_position.CircularOrbitVelocity() * kSECONDS_PER_DAY) / (M_PI * 2.0);
+    double int_part, fract_part;
+    fract_part = modf(revolutions_per_day, &int_part);
+    return fract_part;
+}
+
 template<typename ResultType>
 class CachedFunction {
 public:
@@ -293,14 +310,14 @@ private:
 };
 
 template<typename ResultType>
-void HillClimbing(double initial_point, double initial_step, std::function<ResultType(double)> function) {
+void HillClimbing(double initial_point, double max_point, double initial_step, std::function<ResultType(double)> function) {
     auto current_input = initial_point;
     auto current_step = initial_step;
     auto current_output = function(current_input);
 
     CachedFunction<ResultType> cached_function(std::move(function));
 
-    while (current_step > 10e-18) {
+    while (current_step > 10e-18 && current_input <= max_point) {
         const auto candidate_left = current_input - current_step;
         const auto candidate_left_output = cached_function(candidate_left);
 
@@ -364,10 +381,15 @@ int main(int argc, char *argv[]) {
     const boost::posix_time::ptime end_epoch{boost::gregorian::date{2019, 1, 1}};
     // inclination 97.631754, altitude: 566.9014
 
-    HillClimbing<boost::posix_time::time_duration>(566.9014, 0.05,
-                                                   [&begin_epoch, &end_epoch](double orbit_altitude) -> boost::posix_time::time_duration {
-                                                       return GetMaxDriftWithinBand(97.631754, orbit_altitude, begin_epoch, end_epoch);
-                                                   });
+//    HillClimbing<boost::posix_time::time_duration>(566.9014, 0.05,
+//                                                   [&begin_epoch, &end_epoch](double orbit_altitude) -> boost::posix_time::time_duration {
+//                                                       return GetMaxDriftWithinBand(97.631754, orbit_altitude, begin_epoch, end_epoch);
+//                                                   });
+
+    HillClimbing<double>(566.900460058593922, 800, 0.05,
+                         [&begin_epoch, &end_epoch](double orbit_altitude) -> double {
+                             return GetDriftInRevolutions(97.631754, orbit_altitude, begin_epoch, end_epoch);
+                         });
 //
 //    HillClimbing<boost::posix_time::time_duration>(97.631754, 0.000008,
 //                                                   [&begin_epoch, &end_epoch](double orbit_inclination) -> boost::posix_time::time_duration {
