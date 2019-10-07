@@ -362,18 +362,17 @@ void HillClimbing(double initial_point, double initial_step, std::function<Resul
 int main(int argc, char *argv[]) {
     const boost::posix_time::ptime begin_epoch{boost::gregorian::date{2013, 1, 1}};
     const boost::posix_time::ptime end_epoch{boost::gregorian::date{2019, 1, 1}};
-    // inclination 97.631739501953120, altitude 566.900146484375000
-    // inclination 97.631754, altitude:
+    // inclination 97.631754, altitude: 566.9014
 
-//    HillClimbing<boost::posix_time::time_duration>(566.9014, 0.00001,
-//                                                   [&begin_epoch, &end_epoch](double orbit_altitude) -> boost::posix_time::time_duration {
-//                                                       return GetMaxDriftWithinBand(97.631739501953120, orbit_altitude, begin_epoch, end_epoch);
-//                                                   });
-
-    HillClimbing<boost::posix_time::time_duration>(97.631754, 0.000008,
-                                                   [&begin_epoch, &end_epoch](double orbit_inclination) -> boost::posix_time::time_duration {
-                                                       return GetMaxCommunicationStartDrift(orbit_inclination, 560.0, begin_epoch, end_epoch);
+    HillClimbing<boost::posix_time::time_duration>(566.9014, 0.05,
+                                                   [&begin_epoch, &end_epoch](double orbit_altitude) -> boost::posix_time::time_duration {
+                                                       return GetMaxDriftWithinBand(97.631754, orbit_altitude, begin_epoch, end_epoch);
                                                    });
+//
+//    HillClimbing<boost::posix_time::time_duration>(97.631754, 0.000008,
+//                                                   [&begin_epoch, &end_epoch](double orbit_inclination) -> boost::posix_time::time_duration {
+//                                                       return GetMaxCommunicationStartDrift(orbit_inclination, 560.0, begin_epoch, end_epoch);
+//                                                   });
 
 
     return EXIT_SUCCESS;
