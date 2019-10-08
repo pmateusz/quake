@@ -1,5 +1,5 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="solve mip next step" type="CMakeRunConfiguration" factoryName="Application" PROGRAM_PARAMS="--input=$PROJECT_DIR$/current_review/2016/week_2016-10-14.json --output=test_solution_2.json --previous_solution=$PROJECT_DIR$/current_review/2016/solutions/solution_2016-10-07.json --time-step=00:00:30 --gap-limit=0.1" PASS_PARENT_ENVS_2="true" PROJECT_NAME="quake" TARGET_NAME="quake-mip" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="quake" RUN_TARGET_NAME="quake-mip">
+  <configuration default="false" name="solve mip next step" type="CMakeRunConfiguration" factoryName="Application" PROGRAM_PARAMS="--input=$PROJECT_DIR$/current_review/rc_alt560_inc97.631754/year_2018.json --output=$PROJECT_DIR$/current_review/rc_alt560_inc97.631754/solution_2018-01-01.json --time-step=0:00:30 --gap-limit=0.01 --previous-solution=$PROJECT_DIR$/current_review/rc_alt560_inc97.631754/solution_2017-01-01.json" PASS_PARENT_ENVS_2="true" PROJECT_NAME="quake" TARGET_NAME="quake-mip" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="quake" RUN_TARGET_NAME="quake-mip">
     <method v="2">
       <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
     </method>

@@ -2,62 +2,59 @@
 RUN_SCRIPT=/home/pmateusz/dev/quake/python/year-tools.py
 PLOT_SCRIPT=/home/pmateusz/dev/quake/python/plot-quake.py
 
-#pushd /home/pmateusz/dev/quake/current_review/validation_sma500_raan110.5_ta46/solutions
-#$SCRIPT run --problem-dir=/home/pmateusz/dev/quake/current_review/validation_sma500_raan110.5_ta46 --solution-prefix=solution --gap-limit=0.005 --time-step=00:00:15
-#$PLOT_SCRIPT service-level --solution-dir=/home/pmateusz/dev/quake/current_review/validation_sma500_raan110.5_ta46/solutions --data-dir=/home/pmateusz/dev/quake/current_review/validation_sma500_raan110.5_ta46
-#$PLOT_SCRIPT network-traffic --data-dir=/home/pmateusz/dev/quake/current_review/validation_sma500_raan110.5_ta46 --solution-dir=/home/pmateusz/dev/quake/current_review/validation_sma500_raan110.5_ta46/solutions
-#$PLOT_SCRIPT long-term-performance --data-dir=/home/pmateusz/dev/quake/current_review/validation_sma500_raan110.5_ta46 --solution-dir=/home/pmateusz/dev/quake/current_review/validation_sma500_raan110.5_ta46/solutions
-#$PLOT_SCRIPT week-performance /home/pmateusz/dev/quake/current_review/validation_sma500_raan110.5_ta46/year_2013.json /home/pmateusz/dev/quake/current_review/validation_sma500_raan110.5_ta46/solutions/solution_2013-01-01.json
-#$PLOT_SCRIPT aggregate --data-dir=/home/pmateusz/dev/quake/current_review/validation_sma500_raan110.5_ta46
-#$PLOT_SCRIPT communication-window --data-dir=/home/pmateusz/dev/quake/current_review/validation_sma500_raan110.5_ta46
-#$PLOT_SCRIPT print-service-levels
-#popd
-
-#pushd /home/pmateusz/dev/quake/current_review/validation_sma566_raan107_ta42/solutions
-#$SCRIPT run --problem-dir=/home/pmateusz/dev/quake/current_review/validation_sma566_raan107_ta42 --solution-prefix=solution --gap-limit=0.005 --time-step=00:00:15
-#$PLOT_SCRIPT service-level --data-dir=/home/pmateusz/dev/quake/current_review/validation_sma566_raan107_ta42 --solution-dir=/home/pmateusz/dev/quake/current_review/validation_sma566_raan107_ta42/solutions
-#$PLOT_SCRIPT network-traffic --data-dir=/home/pmateusz/dev/quake/current_review/validation_sma566_raan107_ta42 --solution-dir=/home/pmateusz/dev/quake/current_review/validation_sma566_raan107_ta42/solutions
-#$PLOT_SCRIPT long-term-performance --data-dir=/home/pmateusz/dev/quake/current_review/validation_sma566_raan107_ta42 --solution-dir=/home/pmateusz/dev/quake/current_review/validation_sma566_raan107_ta42/solutions
-#$PLOT_SCRIPT week-performance /home/pmateusz/dev/quake/current_review/validation_sma566_raan107_ta42 /home/pmateusz/dev/quake/current_review/validation_sma566_raan107_ta42/solutions
-#$PLOT_SCRIPT aggregate --data-dir=/home/pmateusz/dev/quake/current_review/validation_sma566_raan107_ta42
-#$PLOT_SCRIPT communication-window --data-dir=/home/pmateusz/dev/quake/current_review/validation_sma566_raan107_ta42
-#$PLOT_SCRIPT print-service-levels
-#popd
-
-#pushd /home/pmateusz/dev/quake/current_review/validation_sma566_raan107_ta280/solutions
-##$SCRIPT run --problem-dir=/home/pmateusz/dev/quake/current_review/validation_sma566_raan107_ta280 --solution-prefix=solution --gap-limit=0.005 --time-step=00:00:15
-##$PLOT_SCRIPT service-level --data-dir=/home/pmateusz/dev/quake/current_review/validation_sma566_raan107_ta280 --solution-dir=/home/pmateusz/dev/quake/current_review/validation_sma566_raan107_ta280/solutions
-##$PLOT_SCRIPT network-traffic --data-dir=/home/pmateusz/dev/quake/current_review/validation_sma566_raan107_ta280 --solution-dir=/home/pmateusz/dev/quake/current_review/validation_sma566_raan107_ta280/solutions
-##$PLOT_SCRIPT long-term-performance --data-dir=/home/pmateusz/dev/quake/current_review/validation_sma566_raan107_ta280 --solution-dir=/home/pmateusz/dev/quake/current_review/validation_sma566_raan107_ta280/solutions
-#$PLOT_SCRIPT week-performance /home/pmateusz/dev/quake/current_review/validation_sma566_raan107_ta280/year_2013.json home/pmateusz/dev/quake/current_review/validation_sma566_raan107_ta280/solutions
-#$PLOT_SCRIPT aggregate --data-dir=/home/pmateusz/dev/quake/current_review/validation_sma566_raan107_ta280
-#$PLOT_SCRIPT communication-window --data-dir=/home/pmateusz/dev/quake/current_review/validation_sma566_raan107_ta280
-#$PLOT_SCRIPT print-service-levels
-#popd
-
-pushd /home/pmateusz/dev/quake/current_review/candidate_sma565_inc97.652862548828125/solutions
-$RUN_SCRIPT run --problem-dir=/home/pmateusz/dev/quake/current_review/candidate_sma565_inc97.652862548828125 --solution-prefix=solution --gap-limit=0.01 --time-step=00:00:30
-#$PLOT_SCRIPT service-level --data-dir=/home/pmateusz/dev/quake/current_review/sma566_inc97.4_ta0_raan110.5 --solution-dir=/home/pmateusz/dev/quake/current_review/sma566_inc97.4_ta0_raan110.5/solutions
-#$PLOT_SCRIPT network-traffic --data-dir=/home/pmateusz/dev/quake/current_review/sma566_inc97.4_ta0_raan110.5 --solution-dir=/home/pmateusz/dev/quake/current_review/sma566_inc97.4_ta0_raan110.5/solutions
-#$PLOT_SCRIPT long-term-performance --data-dir=/home/pmateusz/dev/quake/current_review/sma566_inc97.4_ta0_raan110.5 --solution-dir=/home/pmateusz/dev/quake/current_review/sma566_inc97.4_ta0_raan110.5/solutions
-#$PLOT_SCRIPT week-performance /home/pmateusz/dev/quake/current_review/sma566_inc97.4_ta0_raan110.5/year_2013.json /home/pmateusz/dev/quake/current_review/sma566_inc97.4_ta0_raan110.5/solutions
-#$PLOT_SCRIPT aggregate --data-dir=/home/pmateusz/dev/quake/current_review/sma566_inc97.4_ta0_raan110.5
-#$PLOT_SCRIPT communication-window --data-dir=/home/pmateusz/dev/quake/current_review/sma566_inc97.4_ta0_raan110.5
+function solve_all_make_plots {
+problem_directory=$1
+pushd $problem_directory
+mkdir -p solutions
+pushd solutions
+$RUN_SCRIPT run --problem-dir=$problem_directory --solution-prefix=solution --gap-limit=0.005 --time-step=00:00:05
+#$PLOT_SCRIPT service-level --data-dir=$problem_directory --solution-dir=$problem_directory/solutions
+#$PLOT_SCRIPT network-traffic --data-dir=$problem_directory --solution-dir=$problem_directory/solutions
+#$PLOT_SCRIPT long-term-performance --data-dir=$problem_directory --solution-dir=$problem_directory/solutions
+#$PLOT_SCRIPT week-performance $problem_directory/year_2013.json $problem_directory/solutions
+#$PLOT_SCRIPT aggregate --data-dir=$problem_directory
+#$PLOT_SCRIPT communication-window --data-dir=$problem_directory
 #$PLOT_SCRIPT print-service-levels
 popd
+popd
+}
 
-#pushd /home/pmateusz/dev/quake/current_review/validation_sma566_raan118_ta280/solutions
-##$SCRIPT run --problem-dir=/home/pmateusz/dev/quake/current_review/validation_sma566_raan110.5_ta46 --solution-prefix=solution --gap-limit=0.005 --time-step=00:00:15
-#$PLOT_SCRIPT service-level --data-dir=/home/pmateusz/dev/quake/current_review/validation_sma566_raan118_ta280 --solution-dir=/home/pmateusz/dev/quake/current_review/validation_sma566_raan118_ta280/solutions
-##$PLOT_SCRIPT network-traffic --data-dir=/home/pmateusz/dev/quake/current_review/validation_sma566_raan118_ta280 --solution-dir=/home/pmateusz/dev/quake/current_review/validation_sma566_raan118_ta280/solutions
-##$PLOT_SCRIPT long-term-performance --data-dir=/home/pmateusz/dev/quake/current_review/validation_sma566_raan118_ta280 --solution-dir=/home/pmateusz/dev/quake/current_review/validation_sma566_raan118_ta280/solutions
-##$PLOT_SCRIPT week-performance --data-dir=/home/pmateusz/dev/quake/current_review/validation_sma566_raan118_ta280/year_2013.json /home/pmateusz/dev/quake/current_review/validation_sma566_raan118_ta280/solutions/solution_2013-01-01.json
-##$PLOT_SCRIPT aggregate --data-dir=/home/pmateusz/dev/quake/current_review/validation_sma566_raan118_ta280
-##$PLOT_SCRIPT communication-window --data-dir=/home/pmateusz/dev/quake/current_review/validation_sma566_raan118_ta280
-#$PLOT_SCRIPT print-service-levels
-#popd
+#solve_all_make_plots /home/pmateusz/dev/quake/current_review/rc_alt560_inc97.631754
 
-# generate files with elevation angle
-# /home/pmateusz/dev/quake/python/year-simulation.py elevation --data-dir=/home/pmateusz/dev/quake/data/simulation_upgrade
+#+------------+----------+-------------+------------+--------------+-------------+
+#| station    |   weight |   local_100 |   local_99 |   global_100 |   global_99 |
+#|------------+----------+-------------+------------+--------------+-------------|
+#| Thurso     |    0.01  |         168 |        178 |            0 |         135 |
+#| Glasgow    |    0.111 |        1724 |       1780 |            0 |        1504 |
+#| Belfast    |    0.079 |         410 |       1278 |            0 |        1070 |
+#| York       |    0.023 |           0 |        390 |            0 |         311 |
+#| Manchester |    0.111 |        1737 |       1816 |            0 |        1504 |
+#| Birmingham |    0.158 |        2481 |       2561 |            0 |        2140 |
+#| Cambridge  |    0.028 |         469 |        502 |            0 |         379 |
+#| Ipswich    |    0.02  |           0 |        339 |            0 |         271 |
+#| London     |    0.363 |        4920 |       6053 |            0 |        4918 |
+#| Bristol    |    0.096 |          17 |       1554 |            0 |        1300 |
+#+------------+----------+-------------+------------+--------------+-------------+
 
-#/home/pmateusz/dev/quake/python/year-simulation.py run --data-dir=/home/pmateusz/dev/quake/data/simulation_upgrade --problem-dir=/home/pmateusz/dev/quake/data/simulation_upgrade_disturbed_10 --solution-prefix=solution_upgrade_disturbed_10
+
+#solve_all_make_plots /home/pmateusz/dev/quake/current_review/rc_alt566.899126024325710_inc97.631754
+
+#+------------+----------+-------------+------------+--------------+-------------+
+#| station    |   weight |   local_100 |   local_99 |   global_100 |   global_99 |
+#|------------+----------+-------------+------------+--------------+-------------|
+#| Thurso     |    0.01  |         238 |        242 |            0 |         207 |
+#| Glasgow    |    0.111 |        2313 |       2391 |            0 |        2307 |
+#| Belfast    |    0.079 |        1655 |       1731 |            0 |        1642 |
+#| York       |    0.023 |           1 |        524 |            0 |         478 |
+#| Manchester |    0.111 |        2273 |       2415 |            0 |        2307 |
+#| Birmingham |    0.158 |        3284 |       3484 |            0 |        3284 |
+#| Cambridge  |    0.028 |         675 |        679 |            0 |         582 |
+#| Ipswich    |    0.02  |          26 |        483 |            0 |         415 |
+#| London     |    0.363 |        6774 |       8441 |            0 |        7546 |
+#| Bristol    |    0.096 |           0 |       2243 |            0 |        1995 |
+#+------------+----------+-------------+------------+--------------+-------------+
+
+for problem_directory in $(ls /home/pmateusz/dev/quake/current_review)
+do
+solve_all_make_plots /home/pmateusz/dev/quake/current_review/$problem_directory
+done

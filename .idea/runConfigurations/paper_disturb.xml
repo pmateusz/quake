@@ -12,7 +12,7 @@
     <option name="ADD_CONTENT_ROOTS" value="true" />
     <option name="ADD_SOURCE_ROOTS" value="true" />
     <option name="SCRIPT_NAME" value="$PROJECT_DIR$/python/year-tools.py" />
-    <option name="PARAMETERS" value="disturb --input=$PROJECT_DIR$/current_review/2013 --output=$PROJECT_DIR$/current_review/2013_disturbed_2" />
+    <option name="PARAMETERS" value="disturb --input=$PROJECT_DIR$/current_review/rc_alt566.899126024325710_inc97.631754 --output=$PROJECT_DIR$/current_review/rc_alt566_inc97.63_dist10" />
     <option name="SHOW_COMMAND_LINE" value="false" />
     <option name="EMULATE_TERMINAL" value="false" />
     <option name="MODULE_MODE" value="false" />

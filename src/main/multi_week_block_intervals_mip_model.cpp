@@ -64,7 +64,13 @@ void quake::MultiWeekBlockIntervalsMipModel::Build(const boost::optional<Solutio
                 ++milestone_index;
             }
 
-            CHECK(milestones_.at(milestone_index).contains(interval.Period()));
+            if (milestone_index >= milestones_.size()) {
+                LOG(WARNING) << "Skipping the interval " << interval.Period()
+                             << " and onwards for " << station << " as they extend beyond the scheduling horizon";
+                break;
+            }
+
+            CHECK(milestones_.at(milestone_index).contains(interval.Period())) << interval.Period();
 
             keys_transferred_by_station_by_milestone.at(station_index).at(milestone_index)
                     += problem_->KeyRate(station, interval.Period(), forecast) * interval.Var();
