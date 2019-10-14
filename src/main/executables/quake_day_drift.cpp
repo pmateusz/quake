@@ -41,7 +41,8 @@ void PropagateOrbitalElements(const quake::KeplerElements &initial_position,
                               const boost::posix_time::time_duration &elapsed_time,
                               boost::numeric::ublas::vector<double> &output_elements) {
     const auto current_ascending_node_longitude = Util::WrapTwoPI(
-            initial_position.AscendingNodeLongitude() + initial_position.AscendingNodeLongitudeVariation() * elapsed_time.total_seconds());
+            initial_position.AscendingNodeLongitude() +
+            initial_position.AscendingNodeLongitudeVariation() * elapsed_time.total_seconds());
     const auto current_theta = Util::WrapTwoPI(
             initial_position.TrueAnomaly() + initial_position.CircularOrbitVelocity() * elapsed_time.total_seconds());
 
@@ -96,7 +97,8 @@ public:
             normalized_time_durations.emplace_back(Normalize(entry.second).time_of_day());
         }
 
-        const auto minmax_it_pair = std::minmax_element(std::cbegin(normalized_time_durations), std::cend(normalized_time_durations));
+        const auto minmax_it_pair = std::minmax_element(std::cbegin(normalized_time_durations),
+                                                        std::cend(normalized_time_durations));
         return (*minmax_it_pair.second - *minmax_it_pair.first);
     }
 
@@ -201,10 +203,12 @@ std::list<CommunicationBandBuilder> ComputeCommunicationBands(double orbit_incli
     Observer ground_station_observer{quake::GroundStation::London.coordinates()};
 
     std::list<CommunicationBandBuilder> band_builders;
-    for (boost::posix_time::ptime current_time = epoch_start; current_time < epoch_end; current_time += boost::posix_time::seconds(1)) {
+    for (boost::posix_time::ptime current_time = epoch_start;
+         current_time < epoch_end; current_time += boost::posix_time::seconds(1)) {
         const auto elapsed_time = current_time - epoch_start;
         const auto current_date_time = epoch_start + elapsed_time;
-        if (current_date_time.time_of_day() <= boost::posix_time::hours(18) && current_date_time.time_of_day() >= boost::posix_time::hours(6)) {
+        if (current_date_time.time_of_day() <= boost::posix_time::hours(18) &&
+            current_date_time.time_of_day() >= boost::posix_time::hours(6)) {
             continue;
         }
 
@@ -216,7 +220,8 @@ std::list<CommunicationBandBuilder> ComputeCommunicationBands(double orbit_incli
 
         const auto current_astronomic_date_time = CreateDateTime(current_date_time);
         Eci current_satellite_eci = CreateEci(current_astronomic_date_time, cartesian_position, cartesian_velocity);
-        const auto elevation = Util::RadiansToDegrees(ground_station_observer.GetLookAngle(current_satellite_eci).elevation);
+        const auto elevation = Util::RadiansToDegrees(
+                ground_station_observer.GetLookAngle(current_satellite_eci).elevation);
         if (elevation > 15.0) {
             auto inserted = false;
             for (auto &band_builder : band_builders) {
@@ -268,18 +273,34 @@ boost::posix_time::time_duration GetMaxDriftWithinBand(double orbit_inclination,
     return *std::max_element(std::cbegin(duration_drifts), std::cend(duration_drifts));
 }
 
-double GetDriftInRevolutions(double orbit_inclination,
-                             double orbit_altitude,
-                             boost::posix_time::ptime epoch_start,
-                             boost::posix_time::ptime epoch_end) {
-    const quake::KeplerElements initial_satellite_position{quake::util::EARTH_EQUATORIAL_RADIUS_KM + orbit_altitude,
-                                                           0,
-                                                           orbit_inclination * M_PI / 180.0,
+double GetRaanDrift(double inclination, double eccentricity, double altitude) {
+    const quake::KeplerElements initial_satellite_position{quake::util::EARTH_EQUATORIAL_RADIUS_KM + altitude,
+                                                           Util::WrapNegPosPI(Util::DegreesToRadians(eccentricity)),
+                                                           Util::WrapNegPosPI(Util::DegreesToRadians(inclination)),
+                                                           Util::WrapNegPosPI(Util::DegreesToRadians(110.5)),
+                                                           0.0,
+                                                           0.0};
+    const auto revolutions_per_day =
+            (initial_satellite_position.AscendingNodeLongitudeVariation() * kSECONDS_PER_DAY) / (2.0 * M_PI);
+
+    double int_part, fract_part;
+    fract_part = modf(revolutions_per_day, &int_part);
+//    LOG(INFO) << Util::WrapTwoPI(Util::DegreesToRadians(eccentricity))
+//              << " " << Util::WrapTwoPI(Util::DegreesToRadians(inclination))
+//              << " " << fract_part;
+    return fract_part;
+}
+
+double GetTrueAnomalyDrift(double inclination, double eccentricity, double altitude) {
+    const quake::KeplerElements initial_satellite_position{quake::util::EARTH_EQUATORIAL_RADIUS_KM + altitude,
+                                                           Util::WrapNegPosPI(Util::DegreesToRadians(eccentricity)),
+                                                           Util::WrapNegPosPI(Util::DegreesToRadians(inclination)),
                                                            110.5 * M_PI / 180.0,
                                                            0.0,
                                                            0 * M_PI / 180.0};
     const auto revolutions_per_day =
             (initial_satellite_position.CircularOrbitVelocity() * kSECONDS_PER_DAY) / (M_PI * 2.0);
+
     double int_part, fract_part;
     fract_part = modf(revolutions_per_day, &int_part);
     return fract_part;
@@ -310,14 +331,18 @@ private:
 };
 
 template<typename ResultType>
-void HillClimbing(double initial_point, double max_point, double initial_step, std::function<ResultType(double)> function) {
+void HillClimbing(double initial_point,
+                  double min_point,
+                  double max_point,
+                  double initial_step,
+                  std::function<ResultType(double)> function) {
     auto current_input = initial_point;
     auto current_step = initial_step;
     auto current_output = function(current_input);
 
     CachedFunction<ResultType> cached_function(std::move(function));
 
-    while (current_step > 10e-18 && current_input <= max_point) {
+    while (current_step > 10e-18 && current_input <= max_point && current_input >= min_point) {
         const auto candidate_left = current_input - current_step;
         const auto candidate_left_output = cached_function(candidate_left);
 
@@ -386,9 +411,11 @@ int main(int argc, char *argv[]) {
 //                                                       return GetMaxDriftWithinBand(97.631754, orbit_altitude, begin_epoch, end_epoch);
 //                                                   });
 
-    HillClimbing<double>(566.900460058593922, 800, 0.05,
-                         [&begin_epoch, &end_epoch](double orbit_altitude) -> double {
-                             return GetDriftInRevolutions(97.631754, orbit_altitude, begin_epoch, end_epoch);
+    HillClimbing<double>(0.0, -180.5, 180.5, 90.0,
+                         [&begin_epoch, &end_epoch](double eccentricity) -> double {
+                             return GetRaanDrift(97.631754,
+                                                 eccentricity,
+                                                 566.899126024325597);
                          });
 //
 //    HillClimbing<boost::posix_time::time_duration>(97.631754, 0.000008,

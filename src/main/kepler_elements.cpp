@@ -43,7 +43,7 @@ quake::KeplerElements::KeplerElements(double semi_major_axis,
           semilatus_rectum_{semimajor_axis_ * (1.0 - pow(eccentricity_, 2.0))},
           ascending_node_longitude_variation_{-1.5
                                               * mean_motion_
-                                              * util::NODAL_PRECESSION_EARTH
+                                              * util::NODAL_PRECESSION_EARTH // J2
                                               * pow(util::EARTH_EQUATORIAL_RADIUS_KM / semilatus_rectum_, 2.0)
                                               * cos(inclination_)} {}
 
