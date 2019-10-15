@@ -48,7 +48,10 @@ namespace quake {
                        boost::posix_time::ptime initial_epoch,
                        boost::posix_time::time_period time_period) const;
 
-        ExtendedProblem CreateExtendedProblem(const std::vector<GroundStation>& ground_stations,
+        ExtendedProblem CreateExtendedProblem(const std::vector<GroundStation> &ground_stations,
+                                              double altitude,
+                                              double inclination,
+                                              double raan,
                                               boost::posix_time::ptime initial_epoch,
                                               boost::posix_time::time_period time_period) const;
     };

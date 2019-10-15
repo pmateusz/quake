@@ -85,6 +85,9 @@ TEST(ProblemGeneratorTest, CanGenerateEquivalentProblems) {
                                           observation_period);
 
     const auto extended_problem = generator.CreateExtendedProblem(ground_stations,
+                                                                  quake::KeplerElements::DEFAULT_ALTITUDE,
+                                                                  quake::KeplerElements::DEFAULT_INCLINATION,
+                                                                  quake::KeplerElements::DEFAULT_RAAN,
                                                                   start_time,
                                                                   observation_period);
 

@@ -33,13 +33,13 @@ namespace quake {
         static const auto EARTH_EQUATORIAL_RADIUS_KM = 6378.1363;
         static const auto EARTH_POLAR_RADIUS_KM = 6356.751;
         static const auto SOLAR_RADIUS_KM = 696000;
-        static const auto NODAL_PRECESSION_EARTH = 1.0826E-3;
-        static const auto EARTH_STANDARD_GRAVITATIONAL_PARAM = kMU;
-        static const auto SECONDS_PER_DAY = 24 * 60 * 60;
+        static const auto J2 = 1.08262668E-3; // Earth Nodal Precession
         static const auto EARTH_ECCENTRICITY
                 = sqrt(1.0 - pow(EARTH_POLAR_RADIUS_KM / EARTH_EQUATORIAL_RADIUS_KM, 2.0));
         static const auto ECCENTRICITY_TOLERANCE = 1.0e-10;
         static const auto MIN_ELEVATION = 15.0;
+        static const auto EARTH_STANDARD_GRAVITATIONAL_PARAM = 398600.44189; // km^3/s^2
+        static const auto RAAN_SSO_DRIFT_PER_YEAR = 0.19910213E-6; // rad/s
     }
 }
 #endif //QUAKE_CONSTANTS_H

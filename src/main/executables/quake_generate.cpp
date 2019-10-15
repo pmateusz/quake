@@ -24,10 +24,9 @@
 #include <gflags/gflags.h>
 #include <glog/logging.h>
 
-#include <boost/config.hpp>
 #include <boost/date_time.hpp>
 #include <boost/filesystem.hpp>
-#include <boost/optional.hpp>
+#include <kepler_elements.h>
 
 #include "util/validation.h"
 #include "util/logging.h"
@@ -36,8 +35,11 @@
 
 DEFINE_string(from, "2019-03-01", "The start date for which the elevation angle should be computed.");
 DEFINE_string(to, "2019-03-02", "The end date for which the elevation angle should be computed.");
-DEFINE_string(initial_epoch, "", "Initial epoch. Should be set to the same value for problems with a rolling horizon");
+DEFINE_string(initial_epoch, "", "Initial epoch. Should be set to the same value for problems with a rolling horizon.");
 DEFINE_string(output, "", "The output solution file.");
+DEFINE_double(altitude, quake::KeplerElements::DEFAULT_ALTITUDE, "Altitude.");
+DEFINE_double(inclination, quake::KeplerElements::DEFAULT_INCLINATION, "Inclination.");
+DEFINE_double(raan, quake::KeplerElements::DEFAULT_RAAN, "RAAN");
 
 DEFINE_validator(output, quake::util::validate_output_file);
 DEFINE_validator(from, quake::util::validate_date);
@@ -46,10 +48,17 @@ DEFINE_validator(initial_epoch, quake::util::validate_datetime);
 
 struct Arguments {
     Arguments()
-            : ProblemOutputPath(""),
+            : Altitude(quake::KeplerElements::DEFAULT_ALTITUDE),
+              Inclination(quake::KeplerElements::DEFAULT_INCLINATION),
+              RAAN(quake::KeplerElements::DEFAULT_RAAN),
+              ProblemOutputPath(""),
               ObservationTime(boost::posix_time::time_period(boost::posix_time::ptime(),
                                                              boost::posix_time::seconds(0))),
               InitialEpoch(ObservationTime.begin()) {}
+
+    double Altitude;
+    double Inclination;
+    double RAAN;
 
     boost::filesystem::path ProblemOutputPath;
     boost::posix_time::time_period ObservationTime;
@@ -79,6 +88,9 @@ Arguments SetupLogsAndParseArgs(int argc, char *argv[]) {
     CHECK(!FLAGS_output.empty()) << "output argument is required";
 
     Arguments args;
+    args.Altitude = FLAGS_altitude;
+    args.Inclination = FLAGS_inclination;
+    args.RAAN = FLAGS_raan;
     args.ProblemOutputPath = FLAGS_output;
 
     const auto start_time = ParseDateIgnoreTime(FLAGS_from);
@@ -122,7 +134,12 @@ int main(int argc, char *argv[]) {
                                                       quake::GroundStation::London};
 
     quake::ProblemGenerator generator;
-    const auto problem = generator.CreateExtendedProblem(ground_stations, arguments.InitialEpoch, arguments.ObservationTime);
+    const auto problem = generator.CreateExtendedProblem(ground_stations,
+                                                         arguments.Altitude,
+                                                         arguments.Inclination,
+                                                         arguments.RAAN,
+                                                         arguments.InitialEpoch,
+                                                         arguments.ObservationTime);
     Save(arguments, problem.Round(3));
     return EXIT_SUCCESS;
 }

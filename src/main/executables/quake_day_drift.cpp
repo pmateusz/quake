@@ -331,11 +331,7 @@ private:
 };
 
 template<typename ResultType>
-void HillClimbing(double initial_point,
-                  double min_point,
-                  double max_point,
-                  double initial_step,
-                  std::function<ResultType(double)> function) {
+double HillClimbing(double initial_point, double min_point, double max_point, double initial_step, std::function<ResultType(double)> function) {
     auto current_input = initial_point;
     auto current_step = initial_step;
     auto current_output = function(current_input);
@@ -396,33 +392,29 @@ void HillClimbing(double initial_point,
             CHECK_EQ(candidate_left_output, current_output);
             CHECK_EQ(current_output, candidate_right_output);
             LOG(INFO) << "No further improvement possible";
-            break;
+            return current_input;
         }
     }
+
+    return current_input;
 }
 
 int main(int argc, char *argv[]) {
     const boost::posix_time::ptime begin_epoch{boost::gregorian::date{2013, 1, 1}};
     const boost::posix_time::ptime end_epoch{boost::gregorian::date{2019, 1, 1}};
-    // inclination 97.631754, altitude: 566.9014
+    const double altitude = HillClimbing<double>(566.900460058593922, 500, 800, 0.05,
+                                                 [&begin_epoch, &end_epoch](double orbit_altitude) -> double {
+                                                     return GetTrueAnomalyDrift(97.631754, 0, orbit_altitude);
+                                                 });
+    const double semimajor_axis = altitude + quake::util::EARTH_EQUATORIAL_RADIUS_KM;
+    const double inclination = Util::RadiansToDegrees(quake::KeplerElements::GetSunSynchronousInclination(semimajor_axis, 0));
+    LOG(INFO) << "Inclination: " << std::fixed << std::setprecision(15) << inclination;
+    LOG(INFO) << "Altitude: " << std::fixed << std::setprecision(15) << altitude;
 
-//    HillClimbing<boost::posix_time::time_duration>(566.9014, 0.05,
-//                                                   [&begin_epoch, &end_epoch](double orbit_altitude) -> boost::posix_time::time_duration {
-//                                                       return GetMaxDriftWithinBand(97.631754, orbit_altitude, begin_epoch, end_epoch);
-//                                                   });
-
-    HillClimbing<double>(0.0, -180.5, 180.5, 90.0,
-                         [&begin_epoch, &end_epoch](double eccentricity) -> double {
-                             return GetRaanDrift(97.631754,
-                                                 eccentricity,
-                                                 566.899126024325597);
-                         });
-//
 //    HillClimbing<boost::posix_time::time_duration>(97.631754, 0.000008,
 //                                                   [&begin_epoch, &end_epoch](double orbit_inclination) -> boost::posix_time::time_duration {
 //                                                       return GetMaxCommunicationStartDrift(orbit_inclination, 560.0, begin_epoch, end_epoch);
 //                                                   });
-
 
     return EXIT_SUCCESS;
 }

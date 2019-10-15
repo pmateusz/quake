@@ -2,12 +2,18 @@
 RUN_SCRIPT=/home/pmateusz/dev/quake/python/year-tools.py
 PLOT_SCRIPT=/home/pmateusz/dev/quake/python/plot-quake.py
 
-function solve_all_make_plots {
+set -e
+
+function solve_all {
 problem_directory=$1
 pushd $problem_directory
 mkdir -p solutions
 pushd solutions
-$RUN_SCRIPT run --problem-dir=$problem_directory --solution-prefix=solution --gap-limit=0.005 --time-step=00:00:05
+$RUN_SCRIPT run --problem-dir=$problem_directory --solution-prefix=solution --gap-limit=0.01 --time-step=00:00:15
+popd
+popd
+}
+
 #$PLOT_SCRIPT service-level --data-dir=$problem_directory --solution-dir=$problem_directory/solutions
 #$PLOT_SCRIPT network-traffic --data-dir=$problem_directory --solution-dir=$problem_directory/solutions
 #$PLOT_SCRIPT long-term-performance --data-dir=$problem_directory --solution-dir=$problem_directory/solutions
@@ -15,10 +21,6 @@ $RUN_SCRIPT run --problem-dir=$problem_directory --solution-prefix=solution --ga
 #$PLOT_SCRIPT aggregate --data-dir=$problem_directory
 #$PLOT_SCRIPT communication-window --data-dir=$problem_directory
 #$PLOT_SCRIPT print-service-levels
-popd
-popd
-}
-
 #solve_all_make_plots /home/pmateusz/dev/quake/current_review/rc_alt560_inc97.631754
 
 #+------------+----------+-------------+------------+--------------+-------------+
@@ -54,7 +56,10 @@ popd
 #| Bristol    |    0.096 |           0 |       2243 |            0 |        1995 |
 #+------------+----------+-------------+------------+--------------+-------------+
 
-for problem_directory in $(ls /home/pmateusz/dev/quake/current_review)
-do
-solve_all_make_plots /home/pmateusz/dev/quake/current_review/$problem_directory
-done
+#for problem_directory in $(ls /home/pmateusz/dev/quake/current_review)
+#do
+#solve_all_make_plots /home/pmateusz/dev/quake/current_review/$problem_directory
+#done
+
+solve_all /home/pmateusz/dev/quake/current_review/90.5
+solve_all /home/pmateusz/dev/quake/current_review/91.5

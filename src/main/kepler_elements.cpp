@@ -20,6 +20,7 @@
 // SOFTWARE.
 
 #include <cmath>
+#include <glog/logging.h>
 
 #include "util/constants.h"
 
@@ -43,11 +44,24 @@ quake::KeplerElements::KeplerElements(double semi_major_axis,
           semilatus_rectum_{semimajor_axis_ * (1.0 - pow(eccentricity_, 2.0))},
           ascending_node_longitude_variation_{-1.5
                                               * mean_motion_
-                                              * util::NODAL_PRECESSION_EARTH // J2
+                                              * util::J2
                                               * pow(util::EARTH_EQUATORIAL_RADIUS_KM / semilatus_rectum_, 2.0)
-                                              * cos(inclination_)} {}
+                                              * cos(inclination_)} {
+    CHECK_NEAR(ascending_node_longitude_variation_,
+               -3.0 / 2.0
+               * quake::util::J2
+               * pow(quake::util::EARTH_EQUATORIAL_RADIUS_KM / (semimajor_axis_ * (1 - pow(eccentricity_, 2.0))), 2.0)
+               * sqrt(quake::util::EARTH_STANDARD_GRAVITATIONAL_PARAM / pow(semimajor_axis_, 3.0))
+               * cos(inclination_), 0.00001); // compare RAAN drift
+}
 
-// altitude 500, raan 110, inclination 97.4
+double quake::KeplerElements::GetSunSynchronousInclination(double semimajor_axis, double eccentricity) {
+    return acos(-2.0 / 3.0
+                * quake::util::RAAN_SSO_DRIFT_PER_YEAR
+                * (1.0 / quake::util::J2)
+                * pow((semimajor_axis * (1.0 - pow(eccentricity, 2.0)) / quake::util::EARTH_EQUATORIAL_RADIUS_KM), 2.0)
+                * sqrt(pow(semimajor_axis, 3.0) / quake::util::EARTH_STANDARD_GRAVITATIONAL_PARAM));
+}
 
 // most_effective_configurations:
 // - sma: 566.896708692896, raan 118.0 ta 280 - cross over England
@@ -56,14 +70,11 @@ quake::KeplerElements::KeplerElements(double semi_major_axis,
 // - sma: 566.896708692896, raan 110.5 ta  50 - two bands, zenith over London at midnight
 // - sma: 500.000000000000, raan 110.5 ta  46
 
-// computed inclination: 97.652862548828125
-// computed altitude: 565 or 566.899658203125000
-
 // parameters of the Sun Synchronous Orbit
 const quake::KeplerElements quake::KeplerElements::DEFAULT{
-        util::EARTH_EQUATORIAL_RADIUS_KM + 566.899126024325710, //566.900460058593922,
+        util::EARTH_EQUATORIAL_RADIUS_KM + DEFAULT_ALTITUDE,
         0,
-        97.631754 * M_PI / 180.0,
-        110.5 * M_PI / 180.0,
+        DEFAULT_INCLINATION * M_PI / 180.0,
+        DEFAULT_RAAN * M_PI / 180.0,
         0.0,
         46.0 * M_PI / 180.0};

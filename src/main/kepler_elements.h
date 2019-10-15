@@ -30,7 +30,13 @@ namespace quake {
 
     class KeplerElements {
     public:
+        static constexpr double DEFAULT_INCLINATION = 97.658190099944605;
+        static constexpr double DEFAULT_ALTITUDE = 566.897046176199410;
+        static constexpr double DEFAULT_RAAN = 110.5;
+
         static const KeplerElements DEFAULT;
+
+        static double GetSunSynchronousInclination(double semimajor_axis, double eccentricity);
 
         KeplerElements(double semimajor_axis,
                        double eccentricity,

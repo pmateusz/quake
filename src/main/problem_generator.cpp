@@ -352,12 +352,23 @@ private:
 };
 
 void GetElevationData(const std::vector<quake::GroundStation> &ground_stations,
+                      double altitude,
+                      double inclination,
+                      double raan,
                       boost::posix_time::ptime initial_epoch,
                       boost::posix_time::time_period observation_period,
                       std::unordered_map<quake::GroundStation, std::vector<double> > &output_elevation_data,
                       std::vector<boost::posix_time::time_period> &output_umbra) {
     static const auto TIME_STEP = boost::posix_time::seconds(1);
 
+    quake::KeplerElements initial_satellite_position{
+            quake::util::EARTH_EQUATORIAL_RADIUS_KM + altitude,
+            0.0,
+            Util::DegreesToRadians(inclination),
+            Util::DegreesToRadians(raan),
+            0.0,
+            Util::DegreesToRadians(46.0)
+    };
     quake::SatelliteTracker tracker{quake::KeplerElements::DEFAULT, initial_epoch, observation_period, TIME_STEP};
 
     std::vector<Eci> satellite_positions;
@@ -517,7 +528,14 @@ quake::Problem quake::ProblemGenerator::Create(std::vector<quake::GroundStation>
 
     std::unordered_map<GroundStation, std::vector<double> > elevation_data;
     std::vector<boost::posix_time::time_period> umbra_windows;
-    GetElevationData(ground_stations, initial_epoch, time_period, elevation_data, umbra_windows);
+    GetElevationData(ground_stations,
+                     KeplerElements::DEFAULT_ALTITUDE,
+                     KeplerElements::DEFAULT_INCLINATION,
+                     KeplerElements::DEFAULT_RAAN,
+                     initial_epoch,
+                     time_period,
+                     elevation_data,
+                     umbra_windows);
     auto communication_window_data = GetCommunicationWindowData(ground_stations, resources, time_period, elevation_data, umbra_windows);
 
     const auto length_days = time_period.length().hours() / 24;
@@ -566,13 +584,16 @@ quake::Problem quake::ProblemGenerator::Create(std::vector<quake::GroundStation>
 }
 
 quake::ExtendedProblem quake::ProblemGenerator::CreateExtendedProblem(const std::vector<quake::GroundStation> &ground_stations,
+                                                                      double altitude,
+                                                                      double inclination,
+                                                                      double raan,
                                                                       boost::posix_time::ptime initial_epoch,
                                                                       boost::posix_time::time_period time_period) const {
     quake::util::Resources resources{"~/dev/quake/data"};
 
     std::unordered_map<GroundStation, std::vector<double> > elevation_data;
     std::vector<boost::posix_time::time_period> umbra_windows;
-    GetElevationData(ground_stations, initial_epoch, time_period, elevation_data, umbra_windows);
+    GetElevationData(ground_stations, altitude, inclination, raan, initial_epoch, time_period, elevation_data, umbra_windows);
     const auto communication_window_data = GetCommunicationWindowData(ground_stations, resources, time_period, elevation_data, umbra_windows);
 
     quake::TransferRateReader transfer_rate_reader;
