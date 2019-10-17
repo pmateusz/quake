@@ -8,7 +8,7 @@ set -e
 
 pushd /home/pmateusz/dev/quake/current_review
 
-for raan in $(seq 91.5 1 116)
+for raan in $(seq 90.5 1 116)
 do
 
   mkdir -p $raan

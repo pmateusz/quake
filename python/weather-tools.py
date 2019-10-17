@@ -43,6 +43,7 @@ import tabulate
 import tqdm
 
 import quake.city
+import quake.mip_log
 import quake.util
 import quake.weather.cache
 import quake.weather.metadata
@@ -57,10 +58,12 @@ COVARIANCE_COMMAND = 'compute-covariance'
 PLOT_FORECAST_COMMAND = 'plot-forecast'
 PLOT_COREGIONALIZATION_COMMAND = 'plot-coregionalization'
 PLOT_GENERATED_SCENARIOS_COMMAND = 'plot-generated-scenarios'
+PRINT_ROOT_RELAXATION_COMMAND = 'print-root-relaxation'
 ANALYZE_COMMAND = 'analyze'
 VAR_COMMAND = 'compute-var'
 EXTEND_COMMAND = 'extend'
 GENERATE_COMMAND = 'generate'
+PRINT_WEIGHTS_COMMAND = 'print-weights'
 
 BBOX_STYLE = {'boxstyle': 'square,pad=0.0', 'lw': 0, 'fc': 'w', 'alpha': 0.8}
 
@@ -95,6 +98,8 @@ def parse_args():
     scenario_generation_models_to_use.append('')
 
     extend_parser.add_argument('--scenario-generator', default='', choices=scenario_generation_models_to_use, required=False)
+
+    sub_parsers.add_parser(PRINT_WEIGHTS_COMMAND)
 
     generate_parser = sub_parsers.add_parser(GENERATE_COMMAND)
     generate_parser.add_argument('--from', action=quake.util.ParseDateAction)
@@ -490,7 +495,7 @@ def generate_command(args):
                         "--from={0}".format(from_date.date()),
                         "--to={0}".format(to_date.date()),
                         "--initial-epoch",
-                       initial_epoch.strftime('%Y-%m-%d %H:%M:%S'),
+                        initial_epoch.strftime('%Y-%m-%d %H:%M:%S'),
                         "--output={0}".format(temp_problem)], check=True)
 
         if not os.path.exists(temp_problem):
@@ -891,6 +896,96 @@ def analyze_command(args):
         writer.save()
 
 
+def print_weights_command(args):
+    with open('/home/pmateusz/dev/quake/network_share/ofcom/201809_fixed_pc_coverage_r01.csv', 'r') as input_stream:
+        import csv
+        import math
+
+        dialect = csv.Sniffer().sniff(input_stream.read(4096))
+        input_stream.seek(0, 0)
+        reader = csv.reader(input_stream, dialect)
+
+        def replace_illegal_characters(label):
+            label_to_use = label.replace('%', 'percent')
+            label_to_use = label_to_use.replace('/', ' per ')
+            label_to_use = label_to_use.replace(' ', '_')
+            return label_to_use
+
+        columns = list(map(replace_illegal_characters, next(reader)))
+        content = list(reader)
+
+        frame = pandas.DataFrame(columns=columns, data=content)
+
+        postal_areas = {
+            quake.city.LONDON: [
+                'WC',  # Western Central London
+                'W',  # West London
+                'SW',  # South West London
+                'SE',  # South East London
+                'NW',  # North West London
+                'N',  # North London
+                'E',  # East London
+                'EC',  # East Central London
+            ],
+            quake.city.GLASGOW: ['G'],
+            quake.city.BELFAST: ['BT'],
+            quake.city.THURSO: ['KW'],
+            quake.city.BRISTOL: ['BS'],
+            quake.city.CAMBRIDGE: ['CB'],
+            quake.city.IPSWICH: ['IP'],
+            quake.city.BIRMINGHAM: ['B'],
+            quake.city.MANCHESTER: ['M'],
+            quake.city.YORK: ['YO']
+        }
+
+        total_data = []
+        for city in postal_areas.keys():
+            sub_frame = frame[frame['pca'].isin(postal_areas[city])][
+                ['All_Matched_Premises', 'UFBB_availability_(percent_premises)', 'FTTP_availability_(percent_premises)']].copy()
+            sub_frame['premises'] = sub_frame['All_Matched_Premises'].apply(float)
+            sub_frame['ufbb_premises_relative'] = sub_frame['UFBB_availability_(percent_premises)'].apply(float)
+            sub_frame['fttp_premises_relative'] = sub_frame['FTTP_availability_(percent_premises)'].apply(float)
+            sub_frame['ufbb_premises'] = sub_frame['ufbb_premises_relative'] * sub_frame['premises'] / 100.0
+            sub_frame['fttp_premises'] = sub_frame['fttp_premises_relative'] * sub_frame['premises'] / 100.0
+            total_data.append({'city': city, 'ufbb_premises': int(math.floor(sub_frame['ufbb_premises'].sum()))})
+
+        total_frame = pandas.DataFrame(data=total_data)
+        all_ufbb_premises = total_frame['ufbb_premises'].sum()
+        total_frame['ufbb_weight'] = total_frame['ufbb_premises'] / all_ufbb_premises
+        total_frame['final_weight'] = total_frame['ufbb_weight'] * 0.99
+        total_frame.loc[total_frame['city'] == quake.city.THURSO, 'final_weight'] = 0.01
+
+        formatted_frame = pandas.DataFrame()
+        formatted_frame['city'] = total_frame['city']
+        formatted_frame['premises'] = total_frame['ufbb_premises'].apply(lambda value: '{0:,}'.format(value))
+        formatted_frame['inferred_weight'] = total_frame['ufbb_weight'].apply(lambda value: '{0:.5f}'.format(value))
+        formatted_frame['final_weight'] = total_frame['final_weight'].apply(lambda value: '{0:.3f}'.format(value))
+
+        print(tabulate.tabulate(formatted_frame, ['City', 'Premises with UFBB', 'Inferred Weight', 'Used Weight'], tablefmt='latex', showindex=False))
+
+
+def print_root_relaxation_command(args):
+    root_dir = '/home/pmateusz/dev/quake/current_review'
+    root_relaxations = []
+    for problem_dir in os.listdir(root_dir):
+        problem_dir_path = os.path.join(root_dir, problem_dir)
+        if not os.listdir(problem_dir_path):
+            continue
+
+        solution_dir = os.path.join(problem_dir_path, 'solutions')
+        if not os.path.isdir(solution_dir):
+            continue
+
+        for solution_file in os.listdir(solution_dir):
+            if not solution_file.startswith('out') or not solution_file.endswith('.log'):
+                continue
+
+            solution_file_path = os.path.join(solution_dir, solution_file)
+            log = quake.mip_log.GurobiLog.read_from_file(solution_file_path)
+            root_relaxations.append(log.root_relaxation())
+    print(numpy.mean(root_relaxations), numpy.max(root_relaxations), len(root_relaxations))
+
+
 if __name__ == '__main__':
     args = parse_args()
     command = getattr(args, 'command')
@@ -915,6 +1010,10 @@ if __name__ == '__main__':
         plot_generated_scenarios(args)
     elif command == ANALYZE_COMMAND:
         analyze_command(args)
+    elif command == PRINT_WEIGHTS_COMMAND:
+        print_weights_command(args)
+    elif command == PRINT_ROOT_RELAXATION_COMMAND:
+        print_root_relaxation_command(args)
 
     import matplotlib.cm
 
@@ -1024,61 +1123,3 @@ if __name__ == '__main__':
         return pivot_transform(local_frame[(local_frame['Delay'] == datetime.timedelta(seconds=0))
                                            & (local_frame['DateTime'] >= date_time)
                                            & (local_frame['DateTime'] <= max_date_time)])
-
-    # with open('/home/pmateusz/dev/quake/network_share/ofcom/201809_fixed_pc_coverage_r01.csv', 'r') as input_stream:
-    #     import csv
-    #     import math
-    #
-    #     dialect = csv.Sniffer().sniff(input_stream.read(4096))
-    #     input_stream.seek(0, 0)
-    #     reader = csv.reader(input_stream, dialect)
-    #
-    #
-    #     def replace_illegal_characters(label):
-    #         label_to_use = label.replace('%', 'percent')
-    #         label_to_use = label_to_use.replace('/', ' per ')
-    #         label_to_use = label_to_use.replace(' ', '_')
-    #         return label_to_use
-    #
-    #
-    #     columns = list(map(replace_illegal_characters, next(reader)))
-    #     content = list(reader)
-    #
-    #     frame = pandas.DataFrame(columns=columns, data=content)
-    #
-    #     postal_areas = {
-    #         quake.city.LONDON: [
-    #             'WC',  # Western Central London
-    #             'W',  # West London
-    #             'SW',  # South West London
-    #             'SE',  # South East London
-    #             'NW',  # North West London
-    #             'N',  # North London
-    #             'E',  # East London
-    #             'EC',  # East Central London
-    #         ],
-    #         quake.city.GLASGOW: ['G'],
-    #         quake.city.BELFAST: ['BT'],
-    #         quake.city.THURSO: ['KW'],
-    #         quake.city.BRISTOL: ['BS'],
-    #         quake.city.CAMBRIDGE: ['CB'],
-    #         quake.city.IPSWICH: ['IP'],
-    #         quake.city.BIRMINGHAM: ['B'],
-    #         quake.city.MANCHESTER: ['M'],
-    #         quake.city.YORK: ['YO']
-    #     }
-    #
-    #     total_data = []
-    #     for city in postal_areas.keys():
-    #         sub_frame = frame[frame['pca'].isin(postal_areas[city])][['All_Matched_Premises', 'UFBB_availability_(percent_premises)']].copy()
-    #         sub_frame['premises'] = sub_frame['All_Matched_Premises'].apply(float)
-    #         sub_frame['fiber_to_premises'] = sub_frame['UFBB_availability_(percent_premises)'].apply(float)
-    #         sub_frame['fiber_premises'] = sub_frame['fiber_to_premises'] * sub_frame['fiber_to_premises']
-    #         all_fiber_premises = sub_frame['fiber_to_premises'].sum()
-    #         total_data.append({'city': city, 'premises_with_fiber': int(math.floor(all_fiber_premises))})
-    #
-    #     total_frame = pandas.DataFrame(data=total_data)
-    #     all_premises = total_frame['premises_with_fiber'].sum()
-    #     total_frame['weight'] = total_frame['premises_with_fiber'] / all_premises
-    #
-    #     print(tabulate.tabulate(total_frame, tablefmt='latex'))

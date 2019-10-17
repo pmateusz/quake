@@ -29,7 +29,6 @@ import math
 import operator
 import os
 import pathlib
-import typing
 
 import PIL
 import matplotlib.cm
@@ -39,7 +38,6 @@ import matplotlib.pyplot
 import matplotlib.ticker
 import numpy
 import pandas
-import tabulate
 
 import quake.city
 import quake.cloud_cover
@@ -719,12 +717,11 @@ def plot_network_traffic(args):
 
 class ResultsSet:
     class SolutionBundleEntry:
-        def __init__(self, cache_dir: str, problem_dir: str, solution_dir: str, year: int, tag: str = None):
-            self.__cache_dir = cache_dir
+        def __init__(self, cache_root_dir: str, problem_dir: str, solution_dir: str, year: int):
+            self.__cache_root_dir = cache_root_dir
             self.__problem_dir = problem_dir
             self.__solution_dir = solution_dir
             self.__year = year
-            self.__tag = tag
 
             self.__solution_bundle = None
 
@@ -736,7 +733,7 @@ class ResultsSet:
 
             solution_bundle = self.solution_bundle
             local_frame = solution_bundle.to_local_service_level_frame()
-            local_frame.to_hdf(str(local_frame_path), key='a')
+            self.__save_data_frame(local_frame, local_frame_path)
             return local_frame
 
         @property
@@ -747,16 +744,23 @@ class ResultsSet:
 
             solution_bundle = self.solution_bundle
             global_frame = solution_bundle.to_global_service_level_frame()
-            global_frame.to_hdf(str(global_frame_path), key='a')
+            self.__save_data_frame(global_frame, global_frame_path)
             return global_frame
 
         @property
-        def solution_bundle(self):
-            if self.__solution_bundle is not None:
-                return self.__solution_bundle
-
-            self.__solution_bundle = quake.weather.solution.SolutionBundle.read_from_dir(self.__problem_dir, self.__solution_dir)
+        def solution_bundle(self) -> quake.weather.solution.SolutionBundle:
+            if self.__solution_bundle is None:
+                self.__solution_bundle = quake.weather.solution.SolutionBundle.read_from_dir(self.__problem_dir, self.__solution_dir)
             return self.__solution_bundle
+
+        @property
+        def stations(self):
+            local_frame_path = self.local_cached_frame_path
+            if local_frame_path.exists():
+                frame = pandas.read_hdf(str(local_frame_path))
+                return frame.index.get_level_values(0).unique().tolist()
+
+            return self.solution_bundle.stations
 
         @property
         def local_cached_frame_path(self) -> pathlib.Path:
@@ -767,11 +771,118 @@ class ResultsSet:
             return self.cached_frame_path('global')
 
         def cached_frame_path(self, prefix):
-            if self.__tag:
-                file_name = '{0}_{1}_{2}.hdf'.format(prefix, self.__year, self.__tag)
-            else:
-                file_name = '{0}_{1}.hdf'.format(prefix, self.__year)
-            return pathlib.Path(os.path.join(self.__cache_dir, file_name))
+            file_name = '{0}_{1}.hdf'.format(prefix, self.__year)
+            return pathlib.Path(os.path.join(self.__cache_root_dir, self.__problem_dir.strip('/'), file_name))
+
+        def __save_data_frame(self, data_frame: pandas.DataFrame, file_path: pathlib.Path) -> None:
+            parent_directory = str(file_path.parent)
+            if not os.path.exists(parent_directory):
+                os.makedirs(parent_directory)
+            data_frame.to_hdf(str(file_path), key='a')
+
+    class ConfigurationBundleEntry:
+        def __init__(self, root_cache_dir, problem_dir, solution_dir):
+            self.__root_cache_dir = root_cache_dir
+            self.__problem_dir = problem_dir
+            self.__solution_dir = solution_dir
+
+            self.__solution_bundles = [ResultsSet.SolutionBundleEntry(self.__root_cache_dir, self.__problem_dir, self.__solution_dir, year)
+                                       for year in range(2013, 2019)]
+
+        def release(self):
+            self.__solution_bundles = [ResultsSet.SolutionBundleEntry(self.__root_cache_dir, self.__problem_dir, self.__solution_dir, year)
+                                       for year in range(2013, 2019)]
+
+        def get_service_level_summary(self) -> pandas.DataFrame:
+            global_traffic_index_100 = self.get_global_traffic_index_at_level(1.0)
+            global_traffic_index_99 = self.get_global_traffic_index_at_level(0.99)
+            data = []
+            for station in self.stations:
+                transfer_share = self.get_transfer_share(station)
+                local_consumption_100 = self.get_local_consumption_at_level(station, 1.0)
+                local_consumption_99 = self.get_local_consumption_at_level(station, 0.99)
+                global_consumption_100 = int(math.floor(global_traffic_index_100 * transfer_share))
+                global_consumption_99 = int(math.floor(global_traffic_index_99 * transfer_share))
+                data.append({'station': station,
+                             'weight': transfer_share,
+                             'local_100': local_consumption_100,
+                             'local_99': local_consumption_99,
+                             'global_100': global_consumption_100,
+                             'global_99': global_consumption_99})
+            return pandas.DataFrame(data=data)
+
+        def get_transfer_share(self, station: quake.city.City) -> float:
+            return self.__solution_bundles[0].solution_bundle.get_transfer_share(station)
+
+        def get_station_frame(self, station: quake.city.City) -> pandas.DataFrame:
+            local_frame = self.local_frame
+            station_frame = local_frame.loc[station].copy()
+            station_frame['level'] = (station_frame['total_weeks'] - station_frame['negative_balance_weeks']) / station_frame['total_weeks']
+            return station_frame
+
+        def get_global_traffic_index_at_level(self, level: float) -> float:
+            global_frame = self.global_frame
+            levels = (global_frame['total_weeks'] - global_frame['negative_balance_weeks']) / global_frame['total_weeks']
+            distance = numpy.abs(levels - level)
+            min_distance = numpy.min(distance)
+            index_level = int(numpy.argwhere(distance == min_distance).flatten()[-1])
+            return global_frame.index[index_level]
+
+        def get_local_consumption_at_level(self, station: quake.city.City, level: float) -> int:
+            station_frame = self.get_station_frame(station)
+            distance = numpy.abs(station_frame['level'] - level)
+            min_distance = numpy.min(distance)
+            index_level = int(numpy.argwhere(distance == min_distance).flatten()[-1])
+            return int(station_frame.index[index_level])
+
+        @staticmethod
+        def __concat_local_frames(local_frames) -> pandas.DataFrame:
+            index_frames = [local_frame.index.to_frame().reset_index(drop=True) for local_frame in local_frames]
+            master_index_frame = pandas.concat(index_frames)
+            master_index_frame.sort_values(by=['station', 'weekly_consumption'], inplace=True)
+            master_index_frame.drop_duplicates(inplace=True)
+            master_index = pandas.MultiIndex.from_frame(master_index_frame, sortorder=True)
+
+            filled_frames = []
+            for frame in local_frames:
+                local_frame = frame.reindex(master_index)
+                local_frame = local_frame.ffill()
+                filled_frames.append(local_frame)
+
+            master_frame = filled_frames[0]
+            for frame in filled_frames[1:]:
+                master_frame += frame
+            return master_frame
+
+        @staticmethod
+        def __concat_global_frames(global_frames) -> pandas.DataFrame:
+            index_values = list(set(itertools.chain.from_iterable(global_frame['traffic_index'].to_list() for global_frame in global_frames)))
+            index_values.sort()
+            master_index = pandas.Index(index_values)
+
+            filled_frames = []
+            for frame in global_frames:
+                frame_to_reindex = frame.set_index('traffic_index')
+                global_frame = frame_to_reindex.reindex(master_index)
+                global_frame = global_frame.ffill()
+                filled_frames.append(global_frame)
+
+            master_frame = filled_frames[0]
+            for frame in filled_frames[1:]:
+                master_frame += frame
+            return master_frame
+
+        @property
+        def stations(self):
+            return self.__solution_bundles[0].stations
+
+        @property
+        def local_frame(self) -> pandas.DataFrame:
+            return self.__concat_local_frames([bundle.local_frame for bundle in self.__solution_bundles])
+
+        @property
+        def global_frame(self) -> pandas.DataFrame:
+            return self.__concat_global_frames([bundle.global_frame for bundle in self.__solution_bundles])
 
     def __init__(self):
         # self.__results = [ResultsSet.SolutionBundleEntry('/home/pmateusz/dev/quake/cache',
@@ -779,103 +890,20 @@ class ResultsSet:
         #                                                  '/home/pmateusz/dev/quake/current_review/{0}/solutions'.format(year),
         #                                                  year) for year in range(2013, 2019, 1)]
 
-        self.__results = [ResultsSet.SolutionBundleEntry('/home/pmateusz/dev/quake/cache',
-                                                         '/home/pmateusz/dev/quake/current_review/rc_alt566.899126024325710_inc97.631754',
-                                                         '/home/pmateusz/dev/quake/current_review/rc_alt566.899126024325710_inc97.631754/solutions',
-                                                         year) for year in range(2013, 2019)]
+        # self.__results = [ResultsSet.SolutionBundleEntry('/home/pmateusz/dev/quake/cache',
+        #                                                  '/home/pmateusz/dev/quake/current_review/rc_alt566.899126024325710_inc97.631754',
+        #                                                  '/home/pmateusz/dev/quake/current_review/rc_alt566.899126024325710_inc97.631754/solutions',
+        #                                                  year) for year in range(2013, 2019)]
 
-    def get_transfer_share(self, station: quake.city.City) -> float:
-        solution_bundle = self.__results[0].solution_bundle
-        return solution_bundle.get_transfer_share(station)
-
-    @property
-    def local_frame(self) -> pandas.DataFrame:
-        return self.__concat_local_frames([result.local_frame for result in self.__results])
+        self.__config_bundles = [ResultsSet.ConfigurationBundleEntry('/home/pmateusz/dev/quake/cache',
+                                                                     problem_dir,
+                                                                     os.path.join(problem_dir, 'solutions'))
+                                 for problem_dir in ['/home/pmateusz/dev/quake/current_review/{0}'.format(105.5 + raan) for raan in range(0, 11, 1)]
+                                 ]
 
     @property
-    def global_frame(self) -> pandas.DataFrame:
-        return self.__concat_global_frames([result.global_frame for result in self.__results])
-
-    @property
-    def stations(self) -> typing.List[quake.city.City]:
-        solution_bundle = self.__results[0].solution_bundle
-        return solution_bundle.stations
-
-    def get_service_level_summary(self) -> pandas.DataFrame:
-        global_traffic_index_100 = self.get_global_traffic_index_at_level(1.0)
-        global_traffic_index_99 = self.get_global_traffic_index_at_level(0.99)
-        data = []
-        for station in self.stations:
-            transfer_share = self.get_transfer_share(station)
-            local_consumption_100 = self.get_local_consumption_at_level(station, 1.0)
-            local_consumption_99 = self.get_local_consumption_at_level(station, 0.99)
-            global_consumption_100 = int(math.floor(global_traffic_index_100 * transfer_share))
-            global_consumption_99 = int(math.floor(global_traffic_index_99 * transfer_share))
-            data.append({'station': station,
-                         'weight': transfer_share,
-                         'local_100': local_consumption_100,
-                         'local_99': local_consumption_99,
-                         'global_100': global_consumption_100,
-                         'global_99': global_consumption_99})
-        return pandas.DataFrame(data=data)
-
-    def get_station_frame(self, station: quake.city.City) -> pandas.DataFrame:
-        local_frame = self.local_frame
-        station_frame = local_frame.loc[station].copy()
-        station_frame['level'] = (station_frame['total_weeks'] - station_frame['negative_balance_weeks']) / station_frame['total_weeks']
-        return station_frame
-
-    def get_global_traffic_index_at_level(self, level: float) -> float:
-        global_frame = self.global_frame
-        levels = (global_frame['total_weeks'] - global_frame['negative_balance_weeks']) / global_frame['total_weeks']
-        distance = numpy.abs(levels - level)
-        min_distance = numpy.min(distance)
-        index_level = int(numpy.argwhere(distance == min_distance).flatten()[-1])
-        return global_frame.index[index_level]
-
-    def get_local_consumption_at_level(self, station: quake.city.City, level: float) -> int:
-        station_frame = self.get_station_frame(station)
-        distance = numpy.abs(station_frame['level'] - level)
-        min_distance = numpy.min(distance)
-        index_level = int(numpy.argwhere(distance == min_distance).flatten()[-1])
-        return int(station_frame.index[index_level])
-
-    @staticmethod
-    def __concat_local_frames(local_frames) -> pandas.DataFrame:
-        index_frames = [local_frame.index.to_frame().reset_index(drop=True) for local_frame in local_frames]
-        master_index_frame = pandas.concat(index_frames)
-        master_index_frame.sort_values(by=['station', 'weekly_consumption'], inplace=True)
-        master_index_frame.drop_duplicates(inplace=True)
-        master_index = pandas.MultiIndex.from_frame(master_index_frame, sortorder=True)
-
-        filled_frames = []
-        for frame in local_frames:
-            local_frame = frame.reindex(master_index)
-            local_frame = local_frame.ffill()
-            filled_frames.append(local_frame)
-
-        master_frame = filled_frames[0]
-        for frame in filled_frames[1:]:
-            master_frame += frame
-        return master_frame
-
-    @staticmethod
-    def __concat_global_frames(global_frames) -> pandas.DataFrame:
-        index_values = list(set(itertools.chain.from_iterable(global_frame['traffic_index'].to_list() for global_frame in global_frames)))
-        index_values.sort()
-        master_index = pandas.Index(index_values)
-
-        filled_frames = []
-        for frame in global_frames:
-            frame_to_reindex = frame.set_index('traffic_index')
-            global_frame = frame_to_reindex.reindex(master_index)
-            global_frame = global_frame.ffill()
-            filled_frames.append(global_frame)
-
-        master_frame = filled_frames[0]
-        for frame in filled_frames[1:]:
-            master_frame += frame
-        return master_frame
+    def configuration_bundles(self):
+        return self.__config_bundles
 
 
 def plot_service_level(args):
@@ -1440,8 +1468,15 @@ def plot_key_rate(args):
 
 def print_service_levels(args):
     result_set = ResultsSet()
-    frame = result_set.get_service_level_summary()
-    print(tabulate.tabulate(frame, tablefmt='psql', headers='keys', showindex=False))
+    import concurrent.futures
+
+    def get_service_level_summary(bundle: ResultsSet.ConfigurationBundleEntry) -> None:
+        bundle.get_service_level_summary()
+        bundle.release()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        for frame in executor.map(get_service_level_summary, result_set.configuration_bundles):
+            pass
 
 
 def parse_args():

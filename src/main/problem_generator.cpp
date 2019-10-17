@@ -170,16 +170,16 @@ std::unordered_map<quake::GroundStation, double> NormalizeToWeight(const std::un
 std::unordered_map<quake::GroundStation, double> GetDistributionCoefficientsFromHouseholdsWithUltraFastBroadbandWithOverride(
         const std::vector<quake::GroundStation> &ground_stations) {
     static const std::unordered_map<quake::GroundStation, int64> PremisesWithUltraFastBroadbandAccess = {
-            {quake::GroundStation::London,     5783941},
-            {quake::GroundStation::Thurso,     385},
-            {quake::GroundStation::Cambridge,  454174},
-            {quake::GroundStation::Birmingham, 2512320},
-            {quake::GroundStation::Glasgow,    1774439},
-            {quake::GroundStation::Manchester, 1775340},
-            {quake::GroundStation::Bristol,    1528836},
-            {quake::GroundStation::Ipswich,    316515},
-            {quake::GroundStation::York,       371431},
-            {quake::GroundStation::Belfast,    1265413}
+            {quake::GroundStation::London,     1421422},
+            {quake::GroundStation::Thurso,     118},
+            {quake::GroundStation::Cambridge,  107923},
+            {quake::GroundStation::Birmingham, 599540},
+            {quake::GroundStation::Glasgow,    381494},
+            {quake::GroundStation::Manchester, 353884},
+            {quake::GroundStation::Bristol,    297599},
+            {quake::GroundStation::Ipswich,    58093},
+            {quake::GroundStation::York,       72418},
+            {quake::GroundStation::Belfast,    288667}
     };
 
     static const std::unordered_map<quake::GroundStation, double> PremisesWithWeightOverride{

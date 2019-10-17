@@ -61,5 +61,7 @@ popd
 #solve_all_make_plots /home/pmateusz/dev/quake/current_review/$problem_directory
 #done
 
-solve_all /home/pmateusz/dev/quake/current_review/90.5
-solve_all /home/pmateusz/dev/quake/current_review/91.5
+for raan in $(seq 90.5 1 115.5)
+do
+solve_all /home/pmateusz/dev/quake/current_review/$raan
+done
