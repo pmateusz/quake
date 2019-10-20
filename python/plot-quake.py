@@ -405,6 +405,11 @@ def plot_long_term_performance(args):
     data_dir = getattr(args, 'data_dir')
     solution_dir = getattr(args, 'solution_dir')
 
+    begin_snapshot = datetime.datetime(2013, 1, 1)
+    end_snapshot = datetime.datetime(2019, 1, 1)
+    xticks = [datetime.datetime(year, 1, 1) for year in range(2013, 2020)]
+    xtick_labels = [year for year in range(2013, 2020)]
+
     solutions = quake.weather.solution.SolutionBundle.read_from_dir(data_dir, solution_dir)
     cities = solutions.stations
     frame = solutions.to_frame()
@@ -423,8 +428,12 @@ def plot_long_term_performance(args):
         if index != last_city_index:
             axis[index].get_xaxis().set_visible(False)
         # axis[index].set_ylim(0, 15000)
+        axis[index].set_xlim(begin_snapshot, end_snapshot)
+        axis[index].set_xticks(xticks)
     axis[len(cities) // 2].set_ylabel('Keys Received')
     axis[-1].set_xlabel('Date')
+    axis[-1].set_xticklabels(xtick_labels)
+
     fig.tight_layout()
     fig.subplots_adjust(hspace=0.12)
     save_figure('long_term_performance_' + os.path.basename(solution_dir))
@@ -435,6 +444,9 @@ def plot_long_term_performance(args):
         axis.plot(station_frame.index.values, station_frame['keys_transferred'], label=city.name)
     axis.set_xlabel('Date')
     axis.set_ylabel('Keys Received')
+    axis.set_xlim(begin_snapshot, end_snapshot)
+    axis.set_xticks(xticks)
+    axis.set_xticklabels(xtick_labels)
     fig.tight_layout()
     fig.subplots_adjust(bottom=0.30)
     fig.legend(loc='lower center', ncol=4, bbox_to_anchor=(0.5, 0.0))
@@ -1179,7 +1191,7 @@ def plot_week_performance(args):
     time_period = quake.weather.time_period.TimePeriod(solution.observation_period.begin,
                                                        solution.observation_period.begin + datetime.timedelta(days=7))
 
-    scenario = problem.get_scenario('real')
+    scenario = problem.get_scenario('real', smooth=True)
     key_rate_frame = problem.get_key_rate_frame(scenario)
     filtered_key_rate_frame = key_rate_frame.loc[pandas.Timestamp(time_period.begin): pandas.Timestamp(time_period.end)]
 
@@ -1212,6 +1224,18 @@ def plot_week_performance(args):
             if (frame.index.min() <= observation.period.begin < frame.index.max()) \
                     or (observation.period.begin < frame.index.min() < observation.period.end):
                 split_jobs[index].append(observation)
+
+    for city in cities:
+        for window in problem.get_communication_windows(city):
+            if window.is_after(time_period):
+                break
+
+            if not time_period.contains(window):
+                continue
+
+            print(city, window.begin, window.length, scenario(city, window.begin))
+
+    print('At most', max(len(jobs) for jobs in split_jobs), 'observations during a communication window')
 
     frame_ratios = [(frame.index.max() - frame.index.min()).seconds for frame in split_frames]
 
@@ -1304,7 +1328,7 @@ def plot_week_performance(args):
     for city_index, city in enumerate(cities):
         last_ax = matplotlib.pyplot.subplot(grid_spec[city_index * len(split_frames) + len(split_frames) - 1])
         last_ax.annotate(city,
-                         xy=(0.99, 0.80),
+                         xy=(0.99, 0.70),
                          xycoords='axes fraction',
                          horizontalalignment='right',
                          verticalalignment='center',

@@ -10,6 +10,7 @@ mkdir -p /home/pmateusz/dev/quake/current_review/plots
 pushd /home/pmateusz/dev/quake/current_review/plots
 $PLOT_TOOL aggregate --data-dir=$PROBLEM_DIR
 $PLOT_TOOL communication-window --data-dir=$PROBLEM_DIR
+$PLOT_TOOL week-performance $PROBLEM_DIR/year_2018.json $PROBLEM_DIR/solutions/solution_2018-01-01.json
 popd
 
 

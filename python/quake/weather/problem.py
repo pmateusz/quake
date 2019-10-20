@@ -1,7 +1,6 @@
 import copy
 import datetime
 import json
-import math
 import operator
 import os
 import typing
@@ -143,7 +142,7 @@ class Problem:
         pivot_frame.columns = pivot_frame.columns.get_level_values(1)
         return pivot_frame
 
-    def get_scenario(self, scenario_name: str) -> typing.Callable[[quake.city.City, datetime.datetime], float]:
+    def get_scenario(self, scenario_name: str, smooth: bool = False) -> typing.Callable[[quake.city.City, datetime.datetime], float]:
         forecasts_json = self.__json_object['forecasts']
         forecast_json = forecasts_json[scenario_name]
 
@@ -160,7 +159,7 @@ class Problem:
             assert len(cloud_cover_axis) == len(index_json)
             index[station] = time_axis, copy.copy(cloud_cover_axis)
 
-        return quake.cloud_cover.CloudCoverIndex(index)
+        return quake.cloud_cover.CloudCoverIndex(index, smooth)
 
     def get_transferred_keys(self,
                              station: quake.city.City,

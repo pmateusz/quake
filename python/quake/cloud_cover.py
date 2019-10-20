@@ -30,11 +30,11 @@ import quake.city
 
 class CloudCoverIndex:
 
-    def __init__(self, index):
+    def __init__(self, index, smooth: bool):
         self.__index = index
+        self.__smooth = smooth
 
     def __call__(self, city: quake.city.City, time: datetime.datetime) -> float:
-        # implementation must be consistent with ./quake/src/main/forecast.h
         if city not in self.__index:
             return 0.0
 
@@ -54,7 +54,26 @@ class CloudCoverIndex:
 
         assert 0 <= left_index
 
-        return cover_records[left_index]
+        if not self.__smooth:
+            # implementation must be consistent with ./quake/src/main/forecast.h
+            return cover_records[left_index]
+
+        right_index = left_index + 1
+        if right_index >= len(cover_records):
+            return cover_records[left_index]
+
+        left_distance = (time - time_records[left_index]).total_seconds() / update_frequency.total_seconds()
+        right_distance = (time_records[right_index] - time).total_seconds() / update_frequency.total_seconds()
+
+        assert right_distance >= 0
+        assert left_distance >= 0
+
+        if left_distance <= right_distance:
+            return cover_records[left_index]
+        else:
+            return cover_records[right_index]
+
+        # compute time distance from both windows
 
         # # old behaviour
         # import bisect
