@@ -21,6 +21,7 @@
 # SOFTWARE.
 
 import argparse
+import collections
 import csv
 import datetime
 import itertools
@@ -29,6 +30,7 @@ import math
 import operator
 import os
 import pathlib
+import typing
 
 import PIL
 import matplotlib.cm
@@ -38,6 +40,7 @@ import matplotlib.pyplot
 import matplotlib.ticker
 import numpy
 import pandas
+import tabulate
 
 import quake.city
 import quake.cloud_cover
@@ -255,7 +258,7 @@ def format_timedelta(x, pos=None):
 #     plot_frame(elevation_frame, 'Elevation Angle', 'elevation_plot.png')
 
 
-FORMAT = 'png'
+FORMAT = 'pdf'
 FIGURE_FONT_SIZE = 12
 FIGURE_WIDTH_SIZE = 7
 FIGURE_WIDTH_SQUARE_SIZE = 5
@@ -451,18 +454,150 @@ def load_sunset_sunrise_index():
 def plot_aggregate(args):
     data_dir = getattr(args, 'data_dir')
     problem_bundle = quake.weather.problem.ProblemBundle.read_from_dir(data_dir)
+    windows = []
+    for city in problem_bundle.stations:
+        for window in problem_bundle.get_communication_windows(city):
+            windows.append((city, window))
+
+    def shared_windows(windows: typing.List[quake.weather.time_period.TimePeriod]) -> pandas.DataFrame:
+        windows_by_date = collections.defaultdict(list)
+        for window in windows:
+            windows_by_date[window.begin.date()].append(window)
+
+        data_set = []
+        for date in windows_by_date:
+            groups = []
+            for window in windows_by_date[date]:
+                added_to_group = False
+                for group in groups:
+                    can_add_to_group = True
+                    for group_window in group:
+                        if window.intersect(group_window).length <= datetime.timedelta(seconds=0):
+                            can_add_to_group = False
+                            break
+                    if can_add_to_group:
+                        group.append(window)
+                        added_to_group = True
+                        break
+                if not added_to_group:
+                    groups.append([window])
+            total_shared = datetime.timedelta()
+            total_duration = datetime.timedelta()
+            for group in groups:
+                min_begin = min(window.begin for window in group)
+                max_begin = max(window.begin for window in group)
+                min_end = min(window.end for window in group)
+                max_end = max(window.end for window in group)
+                assert min_begin <= min_end
+                assert max_begin <= max_end
+                assert max_begin <= max_end
+                total_duration += (max_end - min_begin)
+                total_shared += (min_end - max_begin)
+            data_set.append({'date': date,
+                             'total_shared': total_shared,
+                             'total_duration': total_duration,
+                             'shared_percentage': total_shared.total_seconds() / total_duration.total_seconds()})
+        return pandas.DataFrame(data_set)
+
+    all_shared_frame = shared_windows([window for city, window in windows])
+    print('Min All Shared', all_shared_frame['shared_percentage'].min())
+    print('Max All Shared', all_shared_frame['shared_percentage'].max())
+
+    agg_observation_frame = problem_bundle.get_aggregated_observation_frame()
+    agg_observation_frame.fillna(value=datetime.timedelta(), inplace=True)
+    print('Max Observation Time Per Station', agg_observation_frame.max().max(), agg_observation_frame.max().idxmax())
+
+    def to_windows(datetime_list: typing.List[datetime.datetime]) -> typing.List[typing.Tuple[datetime.datetime, datetime.datetime]]:
+        trimmed_values_it = iter(datetime_list)
+        begin = next(trimmed_values_it, None)
+        last = begin
+        current = next(trimmed_values_it, None)
+        windows = []
+        while current:
+            if current - last > datetime.timedelta(days=1):
+                windows.append((begin, last))
+                begin = current
+                last = current
+            else:
+                last = current
+            current = next(trimmed_values_it, None)
+        if begin != last:
+            windows.append((begin, last))
+        return windows
+
+    def get_index_with_value(series: pandas.Series, value) -> typing.List[typing.Tuple[datetime.datetime, datetime.datetime]]:
+        trimmed_series = series[series == value]
+        return to_windows(trimmed_series.index.values.tolist())
+
+    for city in agg_observation_frame.columns.values:
+        series = agg_observation_frame[city]
+        trimmed_series = series[series <= datetime.timedelta(seconds=0)]
+        print('Blackouts for', city)
+        for begin, end in to_windows(trimmed_series.index.values.tolist()):
+            print(' - ', begin, end)
+
+    print('Min observation time in London:',
+          agg_observation_frame[quake.city.LONDON].min(),
+          get_index_with_value(agg_observation_frame[quake.city.LONDON], agg_observation_frame[quake.city.LONDON].min()))
+    print('Max observation time in London:',
+          agg_observation_frame[quake.city.LONDON].max(),
+          get_index_with_value(agg_observation_frame[quake.city.LONDON], agg_observation_frame[quake.city.LONDON].max()))
 
     cities = problem_bundle.stations
+
+    HSPACE_ADJUST = 0.28
+
+    # Transform to total seconds
+    cumulative_index = agg_observation_frame.index.values
+    cumulative_min = agg_observation_frame.transpose().min().values / numpy.timedelta64(1, 's')
+    cumulative_max = agg_observation_frame.transpose().max().values / numpy.timedelta64(1, 's')
+
+    for city in cities:
+        fig, axis = matplotlib.pyplot.subplots(1, 1, figsize=(FIGURE_WIDTH_SIZE, FIGURE_HEIGHT_SMALL_SIZE))
+
+        # for other_city in cities:
+        #     axis.plot(agg_observation_frame[other_city.name], c=gray_color)
+        axis.fill_between(cumulative_index, cumulative_min, cumulative_max, facecolor=FOREGROUND_COLOR, alpha=FOREGROUND_ALPHA)
+        cumulative_city = agg_observation_frame[city].values / numpy.timedelta64(1, 's')
+
+        axis.plot(cumulative_index, cumulative_city, c=FOREGROUND_COLOR)
+        axis.yaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(NumpyTimeDeltaConverter()))
+        axis.set_yticks([value * 60 for value in range(0, 20, 5)])
+        axis.set_ylabel('Daily Observation Time [hh:mm]')
+        axis.set_xlabel('Date')
+        fig.tight_layout()
+        save_figure('cumulative_observation_time_' + city.name)
+
+    # final plot London and Thurso
+    fig, axis = matplotlib.pyplot.subplots(1, 1, figsize=(FIGURE_WIDTH_SIZE, FIGURE_HEIGHT_SMALL_SIZE))
+    # axis.fill_between(cumulative_index, cumulative_min, cumulative_max, facecolor=FOREGROUND_COLOR, alpha=FOREGROUND_ALPHA)
+
+    for city in cities:
+        if city == quake.city.LONDON or city == quake.city.THURSO:
+            continue
+
+        cumulative_city = agg_observation_frame[city].values / numpy.timedelta64(1, 's')
+        axis.plot(cumulative_index, cumulative_city, c=FOREGROUND_COLOR, alpha=FOREGROUND_ALPHA)
+
+    thurso_city_data = agg_observation_frame[quake.city.THURSO].values / numpy.timedelta64(1, 's')
+    london_city_data = agg_observation_frame[quake.city.LONDON].values / numpy.timedelta64(1, 's')
+
+    thurso_handles = axis.plot(cumulative_index, thurso_city_data, c='black')
+    london_handles = axis.plot(cumulative_index, london_city_data, c=FOREGROUND_COLOR)
+    axis.yaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(NumpyTimeDeltaConverter()))
+    axis.set_yticks([value * 60 for value in range(0, 20, 5)])
+    axis.set_ylabel('Daily Observation Time [hh:mm]')
+    axis.set_xlabel('Date')
+    fig.tight_layout()
+    fig.subplots_adjust(bottom=0.25)
+    fig.legend(handles=(london_handles[0], thurso_handles[0]), labels=('London', 'Thurso'), loc='lower center', ncol=2, bbox_to_anchor=(0.5, 0.0))
+    save_figure('cumulative_observation_time_London_Thurso')
+
     weather_corrected_key_rate_frame = problem_bundle.get_key_rate_frame()
     agg_weather_corrected_key_rate_frame = weather_corrected_key_rate_frame.resample('D').sum()
 
     cloud_cover_frame = problem_bundle.get_cloud_cover_frame()
     agg_cloud_cover_frame = cloud_cover_frame.resample('D').agg(numpy.nanmean)
-
-    agg_observation_frame = problem_bundle.get_aggregated_observation_frame()
-    agg_observation_frame.fillna(value=datetime.timedelta(), inplace=True)
-
-    HSPACE_ADJUST = 0.25
 
     # plot observation time
     last_city_index = len(cities) - 1
@@ -473,7 +608,7 @@ def plot_aggregate(args):
         axis[index].set_yticks([0, 15 * 60 * 10 ** 9, 30 * 60 * 10 ** 9])
         axis[index].set_ylim(0, 40 * 60 * 10 ** 9)
         axis[index].annotate(city.name,
-                             xy=(0.99, 0.80),
+                             xy=(0.99, 0.7),
                              xycoords='axes fraction',
                              horizontalalignment='right',
                              verticalalignment='center',
@@ -487,20 +622,26 @@ def plot_aggregate(args):
     save_figure('observation_time')
 
     # plot average cloud cover
+    snapshot_left_time_limit = datetime.datetime(2016, 1, 1)
+    snapshot_right_time_limit = datetime.datetime(2019, 1, 1)
     fig, axis = matplotlib.pyplot.subplots(len(cities), 1, sharex=True, figsize=(FIGURE_WIDTH_SIZE, FIGURE_HEIGHT_SIZE))
     for index, city in enumerate(cities):
         axis[index].plot(agg_cloud_cover_frame[city], color=FOREGROUND_COLOR)
         axis[index].set_yticks([0, 50, 100])
         axis[index].annotate(city,
-                             xy=(0.99, 0.80),
+                             xy=(0.99, 0.7),
                              xycoords='axes fraction',
                              horizontalalignment='right',
                              verticalalignment='center',
                              bbox=BBOX_STYLE)
         if index != last_city_index:
             axis[index].get_xaxis().set_visible(False)
+        axis[index].set_xlim(left=snapshot_left_time_limit, right=snapshot_right_time_limit)
     axis[len(cities) // 2].set_ylabel('Average Cloud Cover [%]')
+    axis[-1].set_xticks([datetime.date(year, 1, 1) for year in range(2016, 2020, 1)])
+    axis[-1].set_xticklabels([year for year in range(2016, 2020)])
     axis[-1].set_xlabel('Date')
+
     fig.tight_layout()
     fig.subplots_adjust(hspace=HSPACE_ADJUST)
     save_figure('average_cloud_cover')
@@ -532,14 +673,17 @@ def plot_aggregate(args):
         axis[index].plot(agg_weather_corrected_key_rate_frame[city], color=FOREGROUND_COLOR)
         axis[index].set_yticks([0, 2000, 4000])
         axis[index].annotate(city.name,
-                             xy=(0.99, 0.80),
+                             xy=(0.99, 0.7),
                              xycoords='axes fraction',
                              horizontalalignment='right',
                              verticalalignment='center',
                              bbox=BBOX_STYLE)
+        axis[index].set_xlim(left=snapshot_left_time_limit, right=snapshot_right_time_limit)
         if index != last_city_index:
             axis[index].get_xaxis().set_visible(False)
     axis[len(cities) // 2].set_ylabel('Maximum Keys Received')
+    axis[-1].set_xticks([datetime.date(year, 1, 1) for year in range(2016, 2020, 1)])
+    axis[-1].set_xticklabels([year for year in range(2016, 2020)])
     axis[-1].set_xlabel('Date')
     fig.tight_layout()
     fig.subplots_adjust(hspace=HSPACE_ADJUST)
@@ -565,27 +709,6 @@ def plot_aggregate(args):
     fig.tight_layout()
 
     save_figure('maximum_keys_correlation')
-
-    # Transform to total seconds
-    cumulative_index = agg_observation_frame.index.values
-    cumulative_min = agg_observation_frame.transpose().min().values / numpy.timedelta64(1, 's')
-    cumulative_max = agg_observation_frame.transpose().max().values / numpy.timedelta64(1, 's')
-
-    for city in cities:
-        fig, axis = matplotlib.pyplot.subplots(1, 1, figsize=(FIGURE_WIDTH_SIZE, FIGURE_HEIGHT_SMALL_SIZE))
-
-        # for other_city in cities:
-        #     axis.plot(agg_observation_frame[other_city.name], c=gray_color)
-        axis.fill_between(cumulative_index, cumulative_min, cumulative_max, facecolor=FOREGROUND_COLOR, alpha=FOREGROUND_ALPHA)
-        cumulative_city = agg_observation_frame[city].values / numpy.timedelta64(1, 's')
-
-        axis.plot(cumulative_index, cumulative_city, c=FOREGROUND_COLOR)
-        axis.yaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(NumpyTimeDeltaConverter()))
-        axis.set_yticks([value * 60 for value in range(0, 20, 5)])
-        axis.set_ylabel('Daily Observation Time [hh:mm]')
-        axis.set_xlabel('Date')
-        fig.tight_layout()
-        save_figure('cumulative_observation_time_' + city.name)
 
     matplotlib.pyplot.close("all")
 
@@ -835,6 +958,10 @@ class ResultsSet:
             index_level = int(numpy.argwhere(distance == min_distance).flatten()[-1])
             return int(station_frame.index[index_level])
 
+        @property
+        def problem_dir(self) -> pathlib.Path:
+            return pathlib.Path(self.__problem_dir)
+
         @staticmethod
         def __concat_local_frames(local_frames) -> pandas.DataFrame:
             index_frames = [local_frame.index.to_frame().reset_index(drop=True) for local_frame in local_frames]
@@ -898,7 +1025,7 @@ class ResultsSet:
         self.__config_bundles = [ResultsSet.ConfigurationBundleEntry('/home/pmateusz/dev/quake/cache',
                                                                      problem_dir,
                                                                      os.path.join(problem_dir, 'solutions'))
-                                 for problem_dir in ['/home/pmateusz/dev/quake/current_review/{0}'.format(105.5 + raan) for raan in range(0, 11, 1)]
+                                 for problem_dir in ['/home/pmateusz/dev/quake/current_review/{0}'.format(90.5 + raan) for raan in range(0, 26, 1)]
                                  ]
 
     @property
@@ -1049,7 +1176,8 @@ def plot_week_performance(args):
 
     problem = quake.weather.problem.Problem.read_json(problem_file)
     solution = quake.weather.solution.Solution.read_json(solution_file)
-    time_period = quake.weather.time_period.TimePeriod(datetime.datetime(2013, 1, 1, 12, 0), datetime.datetime(2013, 1, 8, 12, 0))
+    time_period = quake.weather.time_period.TimePeriod(solution.observation_period.begin,
+                                                       solution.observation_period.begin + datetime.timedelta(days=7))
 
     scenario = problem.get_scenario('real')
     key_rate_frame = problem.get_key_rate_frame(scenario)
@@ -1259,15 +1387,14 @@ def plot_communication_window(args):
         axis.set_ylabel('Time [hh:mm]')
         axis.set_ylim(bottom=ref_start_date_time, top=ref_end_date_time)
         axis.set_xlim(left=min_date_time, right=max_date_time)
-        # axis.set_xticks([datetime.date(min_date_time.year, 1, 1),
-        #                  datetime.date(min_date_time.year, 4, 1),
-        #                  datetime.date(min_date_time.year, 8, 1),
-        #                  datetime.date(min_date_time.year, 12, 1)])
+        axis.set_xticks([datetime.date(year, 1, 1) for year in range(min_date_time.year, max_date_time.year + 1)])
+        axis.set_xticklabels([year for year in range(min_date_time.year, max_date_time.year + 1)])
         figure.tight_layout()
         save_figure('observation_time_' + city.name)
 
-        axis.set_xlim(left=datetime.date(min_date_time.year, 6, 1), right=datetime.date(min_date_time.year, 9, 15))
-        axis.set_xticks([datetime.date(min_date_time.year, month, 1) for month in range(6, 10, 1)])
+        axis.set_xlim(left=datetime.date(min_date_time.year, 6, 1), right=datetime.date(min_date_time.year, 10, 1))
+        axis.set_xticks([datetime.date(min_date_time.year, month, 1) for month in range(6, 11, 1)])
+        axis.set_xticklabels([datetime.date(min_date_time.year, month, 1) for month in range(6, 11, 1)])
         axis.set_ylim(bottom=datetime.datetime.combine(ref_start_date, datetime.time(23, 15)),
                       top=datetime.datetime.combine(ref_end_date, datetime.time(0, 45)))
         figure.tight_layout()
@@ -1468,15 +1595,23 @@ def plot_key_rate(args):
 
 def print_service_levels(args):
     result_set = ResultsSet()
-    import concurrent.futures
 
-    def get_service_level_summary(bundle: ResultsSet.ConfigurationBundleEntry) -> None:
+    # def get_service_level_summary(bundle: ResultsSet.ConfigurationBundleEntry) -> pandas.DataFrame:
+    #     frame = bundle.get_service_level_summary()
+    #     bundle.release()
+    #     return frame
+
+    data_set = []
+    for bundle in result_set.configuration_bundles:
         bundle.get_service_level_summary()
+        frame = bundle.get_service_level_summary()
+        problem_dir = bundle.problem_dir
+        london_global_99 = frame.loc[frame['station'] == quake.city.LONDON]['global_99'].values[0]
+        data_set.append({'problem_dir': problem_dir,
+                         'london_global_99': london_global_99})
         bundle.release()
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-        for frame in executor.map(get_service_level_summary, result_set.configuration_bundles):
-            pass
+    print(tabulate.tabulate(pandas.DataFrame(data=data_set), tablefmt='latex', headers='keys'))
 
 
 def parse_args():

@@ -572,7 +572,7 @@ def disturb(args):
         problem_copy = copy.deepcopy(problem)
         problem_copy.set_transfer_share_model(new_station_weights)
         problem_date = problem_copy.observation_period.begin.date()
-        output_file_path = os.path.join(raw_output_dir, 'week_{0}.json'.format(problem_date))
+        output_file_path = os.path.join(raw_output_dir, 'year_{0}.json'.format(problem_date))
         with open(output_file_path, 'w') as output_file:
             json.dump(problem_copy.json_object, output_file)
 

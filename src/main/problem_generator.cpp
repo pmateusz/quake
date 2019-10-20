@@ -369,7 +369,7 @@ void GetElevationData(const std::vector<quake::GroundStation> &ground_stations,
             0.0,
             Util::DegreesToRadians(46.0)
     };
-    quake::SatelliteTracker tracker{quake::KeplerElements::DEFAULT, initial_epoch, observation_period, TIME_STEP};
+    quake::SatelliteTracker tracker{initial_satellite_position, initial_epoch, observation_period, TIME_STEP};
 
     std::vector<Eci> satellite_positions;
     std::vector<boost::posix_time::time_period> umbras;

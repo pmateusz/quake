@@ -61,7 +61,21 @@ popd
 #solve_all_make_plots /home/pmateusz/dev/quake/current_review/$problem_directory
 #done
 
-for raan in $(seq 90.5 1 115.5)
+#for raan in $(seq 90.5 1 115.5)
+#do
+#solve_all /home/pmateusz/dev/quake/current_review/$raan
+#done
+
+#for raan in $(seq 90.5 1 115.5)
+#do
+#
+#pushd /home/pmateusz/dev/quake/current_review/$raan
+#/home/pmateusz/dev/quake/python/plot-quake.py communication-window --data-dir=/home/pmateusz/dev/quake/current_review/$raan
+#popd
+#
+#done
+
+for raan in $(seq 1 1 10)
 do
-solve_all /home/pmateusz/dev/quake/current_review/$raan
+solve_all /home/pmateusz/dev/quake/current_review/109.5_$raan
 done
