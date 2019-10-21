@@ -1487,7 +1487,10 @@ def plot_weights_disturbed(args):
         service_level_summary = config_bundle.get_service_level_summary()
         london_global_99 = service_level_summary.loc[service_level_summary['station'] == station]['global_99'].values.item()
         london_local_99 = service_level_summary.loc[service_level_summary['station'] == station]['local_99'].values.item()
-        data.append({'weight': config_bundle.get_transfer_share(station), 'local_99': london_local_99, 'global_99': london_global_99})
+        data.append({'weight': config_bundle.get_transfer_share(station),
+                     # 'local_99': london_local_99,
+                     'global_99': london_global_99})
+    data.sort(key=operator.itemgetter('weight'))
     print(tabulate.tabulate(pandas.DataFrame(data=data), tablefmt='latex', showindex=True, headers='keys'))
 
     stations = config_bundles[0].stations
@@ -1680,9 +1683,9 @@ def print_service_levels(args):
             bundle.get_service_level_summary()
             frame = bundle.get_service_level_summary()
             problem_dir = bundle.problem_dir
-            london_global_99 = frame.loc[frame['station'] == quake.city.LONDON]['global_99'].values[0]
-            data_set.append({'problem_dir': problem_dir,
-                             'london_global_99': london_global_99})
+            london_global_99 = frame.loc[frame['station'] == quake.city.LONDON]['global_99'].item()
+            data_set.append({'problem': os.path.basename(str(problem_dir)),
+                             'london_99': london_global_99})
             bundle.release()
 
         print(tabulate.tabulate(pandas.DataFrame(data=data_set), tablefmt='latex', headers='keys'))
@@ -1693,7 +1696,7 @@ def print_service_levels(args):
         for station in config_bundle.stations:
             station_frame = frame[frame['station'] == station]
             data.append({'city': station_frame['station'].item(),
-                         'local_99': station_frame['local_99'].item(),
+                         # 'local_99': station_frame['local_99'].item(),
                          'global_99': station_frame['global_99'].item()})
         print(tabulate.tabulate(pandas.DataFrame(data=data), tablefmt='latex', headers='keys', showindex=False))
 

@@ -8,8 +8,9 @@ set -e
 mkdir -p /home/pmateusz/dev/quake/current_review/plots
 
 pushd /home/pmateusz/dev/quake/current_review/plots
-#$PLOT_TOOL service-level --solution-dir=/home/pmateusz/dev/quake/current_review/109.5/solutions --data-dir=/home/pmateusz/dev/quake/current_review/109.5
-#$PLOT_TOOL weights-disturbed
+$PLOT_TOOL long-term-performance --data-dir=$PROBLEM_DIR --solution-dir=$PROBLEM_DIR/solutions
+$PLOT_TOOL service-level --solution-dir=/home/pmateusz/dev/quake/current_review/109.5/solutions --data-dir=/home/pmateusz/dev/quake/current_review/109.5
+$PLOT_TOOL weights-disturbed
 $PLOT_TOOL key-rate
 $PLOT_TOOL aggregate --data-dir=$PROBLEM_DIR
 $PLOT_TOOL communication-window --data-dir=$PROBLEM_DIR
