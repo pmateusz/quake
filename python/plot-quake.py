@@ -963,11 +963,31 @@ class ResultsSet:
         def get_transfer_share(self, station: quake.city.City) -> float:
             return self.__solution_bundle.solution_bundle.get_transfer_share(station)
 
-        def get_station_frame(self, station: quake.city.City) -> pandas.DataFrame:
+        def get_global_station_frame(self, station: quake.city.City) -> pandas.DataFrame:
+            global_frame = self.global_frame
+            global_station_frame = global_frame.copy()
+            transfer_share = self.get_transfer_share(station)
+            global_station_frame['working_index'] = global_station_frame['traffic_index'] * transfer_share
+
+            def no_remainder_filter(value: float) -> bool:
+                fractional, integer = math.modf(value)
+                return fractional == 0.0
+
+            filtered_global_station_frame = global_station_frame[global_station_frame['working_index'].apply(no_remainder_filter)].copy()
+            filtered_global_station_frame.set_index('working_index', inplace=True)
+            filtered_global_station_frame['level'] = (filtered_global_station_frame['total_weeks']
+                                                      - filtered_global_station_frame['negative_balance_weeks']) \
+                                                     / filtered_global_station_frame['total_weeks']
+
+            return filtered_global_station_frame
+
+        def get_local_station_frame(self, station: quake.city.City) -> pandas.DataFrame:
             local_frame = self.local_frame
-            station_frame = local_frame.loc[station].copy()
-            station_frame['level'] = (station_frame['total_weeks'] - station_frame['negative_balance_weeks']) / station_frame['total_weeks']
-            return station_frame
+            local_station_frame = local_frame.loc[station].copy()
+            local_station_frame['level'] = (local_station_frame['total_weeks']
+                                            - local_station_frame['negative_balance_weeks']) \
+                                           / local_station_frame['total_weeks']
+            return local_station_frame
 
         def get_global_traffic_index_at_level(self, level: float) -> float:
             global_frame = self.global_frame
@@ -977,8 +997,15 @@ class ResultsSet:
             index_level = int(numpy.argwhere(distance == min_distance).flatten()[-1])
             return global_frame.iloc[index_level]['traffic_index']
 
+        def get_global_consumption_at_level(self, station: quake.city.City, level: float) -> int:
+            station_frame = self.get_global_station_frame(station)
+            distance = numpy.abs(station_frame['level'] - level)
+            min_distance = numpy.min(distance)
+            index_level = int(numpy.argwhere(distance == min_distance).flatten()[-1])
+            return int(station_frame.index[index_level])
+
         def get_local_consumption_at_level(self, station: quake.city.City, level: float) -> int:
-            station_frame = self.get_station_frame(station)
+            station_frame = self.get_local_station_frame(station)
             distance = numpy.abs(station_frame['level'] - level)
             min_distance = numpy.min(distance)
             index_level = int(numpy.argwhere(distance == min_distance).flatten()[-1])
@@ -1060,12 +1087,16 @@ def plot_service_level(args):
 
     config_bundle = ResultsSet.ConfigurationBundleEntry(CACHE_DIR, problem_dir, solutions_dir)
     for station in config_bundle.stations:
-        station_frame = config_bundle.get_station_frame(station)
+        weight = config_bundle.get_transfer_share(station)
+        station_frame = config_bundle.get_global_station_frame(station)
         fig, axis = matplotlib.pyplot.subplots(figsize=(FIGURE_WIDTH_SQUARE_SIZE, FIGURE_HEIGHT_SQUARE_SIZE))
         axis.plot(station_frame.index.values, station_frame['level'])
 
         level = 0.99
-        consumption_level = config_bundle.get_local_consumption_at_level(station, level)
+        consumption_level = config_bundle.get_global_consumption_at_level(station, level)
+
+        print(station, weight, consumption_level / weight)
+
         axis.plot([consumption_level], [level], '.', c=FOREGROUND_COLOR)
         axis.annotate('({0}, {1:.2f})'.format(consumption_level, level),
                       xy=(consumption_level, level),
