@@ -55,6 +55,7 @@ import quake.weather.solution
 import quake.weather.time_period
 
 TIME_KEY = 'Time'
+CACHE_DIR = '/home/pmateusz/dev/quake/cache'
 
 
 def split_total_seconds(value):
@@ -852,16 +853,14 @@ def plot_network_traffic(args):
 
 class ResultsSet:
     class SolutionBundleEntry:
-        def __init__(self, cache_root_dir: str, problem_dir: str, solution_dir: str, year: int):
+        def __init__(self, cache_root_dir: str, problem_dir: str, solution_dir: str):
             self.__cache_root_dir = cache_root_dir
             self.__problem_dir = problem_dir
             self.__solution_dir = solution_dir
-            self.__year = year
-
             self.__solution_bundle = None
 
         @property
-        def local_frame(self):
+        def local_frame(self) -> pandas.DataFrame:
             local_frame_path = self.local_cached_frame_path
             if local_frame_path.exists():
                 return pandas.read_hdf(local_frame_path)
@@ -872,7 +871,7 @@ class ResultsSet:
             return local_frame
 
         @property
-        def global_frame(self):
+        def global_frame(self) -> pandas.DataFrame:
             global_frame_path = self.global_cached_frame_path
             if global_frame_path.exists():
                 return pandas.read_hdf(str(global_frame_path))
@@ -883,17 +882,30 @@ class ResultsSet:
             return global_frame
 
         @property
+        def solution_frame(self) -> pandas.DataFrame:
+            solution_frame_path = self.solution_cached_frame_path
+            if solution_frame_path.exists():
+                return pandas.read_hdf(str(solution_frame_path))
+
+            solution_bundle = self.solution_bundle
+            solution_frame = solution_bundle.to_frame()
+            self.__save_data_frame(solution_frame, solution_frame_path)
+            return solution_frame
+
+        @property
         def solution_bundle(self) -> quake.weather.solution.SolutionBundle:
             if self.__solution_bundle is None:
                 self.__solution_bundle = quake.weather.solution.SolutionBundle.read_from_dir(self.__problem_dir, self.__solution_dir)
             return self.__solution_bundle
 
         @property
-        def stations(self):
+        def stations(self) -> typing.List[quake.city.City]:
             local_frame_path = self.local_cached_frame_path
             if local_frame_path.exists():
                 frame = pandas.read_hdf(str(local_frame_path))
-                return frame.index.get_level_values(0).unique().tolist()
+                stations = frame.index.get_level_values(0).unique().tolist()
+                stations.sort(key=operator.attrgetter('latitude'), reverse=True)
+                return stations
 
             return self.solution_bundle.stations
 
@@ -905,8 +917,12 @@ class ResultsSet:
         def global_cached_frame_path(self) -> pathlib.Path:
             return self.cached_frame_path('global')
 
-        def cached_frame_path(self, prefix):
-            file_name = '{0}_{1}.hdf'.format(prefix, self.__year)
+        @property
+        def solution_cached_frame_path(self) -> pathlib.Path:
+            return self.cached_frame_path('solution')
+
+        def cached_frame_path(self, prefix) -> pathlib.Path:
+            file_name = '{0}.hdf'.format(prefix)
             return pathlib.Path(os.path.join(self.__cache_root_dir, self.__problem_dir.strip('/'), file_name))
 
         def __save_data_frame(self, data_frame: pandas.DataFrame, file_path: pathlib.Path) -> None:
@@ -921,12 +937,10 @@ class ResultsSet:
             self.__problem_dir = problem_dir
             self.__solution_dir = solution_dir
 
-            self.__solution_bundles = [ResultsSet.SolutionBundleEntry(self.__root_cache_dir, self.__problem_dir, self.__solution_dir, year)
-                                       for year in range(2013, 2019)]
+            self.__solution_bundle = ResultsSet.SolutionBundleEntry(self.__root_cache_dir, self.__problem_dir, self.__solution_dir)
 
         def release(self):
-            self.__solution_bundles = [ResultsSet.SolutionBundleEntry(self.__root_cache_dir, self.__problem_dir, self.__solution_dir, year)
-                                       for year in range(2013, 2019)]
+            self.__solution_bundle = ResultsSet.SolutionBundleEntry(self.__root_cache_dir, self.__problem_dir, self.__solution_dir)
 
         def get_service_level_summary(self) -> pandas.DataFrame:
             global_traffic_index_100 = self.get_global_traffic_index_at_level(1.0)
@@ -947,7 +961,7 @@ class ResultsSet:
             return pandas.DataFrame(data=data)
 
         def get_transfer_share(self, station: quake.city.City) -> float:
-            return self.__solution_bundles[0].solution_bundle.get_transfer_share(station)
+            return self.__solution_bundle.solution_bundle.get_transfer_share(station)
 
         def get_station_frame(self, station: quake.city.City) -> pandas.DataFrame:
             local_frame = self.local_frame
@@ -961,7 +975,7 @@ class ResultsSet:
             distance = numpy.abs(levels - level)
             min_distance = numpy.min(distance)
             index_level = int(numpy.argwhere(distance == min_distance).flatten()[-1])
-            return global_frame.index[index_level]
+            return global_frame.iloc[index_level]['traffic_index']
 
         def get_local_consumption_at_level(self, station: quake.city.City, level: float) -> int:
             station_frame = self.get_station_frame(station)
@@ -969,6 +983,10 @@ class ResultsSet:
             min_distance = numpy.min(distance)
             index_level = int(numpy.argwhere(distance == min_distance).flatten()[-1])
             return int(station_frame.index[index_level])
+
+        @property
+        def solution_bundle(self):
+            return self.__solution_bundle
 
         @property
         def problem_dir(self) -> pathlib.Path:
@@ -1013,32 +1031,23 @@ class ResultsSet:
 
         @property
         def stations(self):
-            return self.__solution_bundles[0].stations
+            return self.__solution_bundle.stations
 
         @property
         def local_frame(self) -> pandas.DataFrame:
-            return self.__concat_local_frames([bundle.local_frame for bundle in self.__solution_bundles])
+            return self.solution_bundle.local_frame
 
         @property
         def global_frame(self) -> pandas.DataFrame:
-            return self.__concat_global_frames([bundle.global_frame for bundle in self.__solution_bundles])
+            return self.solution_bundle.global_frame
+
+        @property
+        def solution_frame(self) -> pandas.DataFrame:
+            return self.solution_bundle.solution_frame
 
     def __init__(self):
-        # self.__results = [ResultsSet.SolutionBundleEntry('/home/pmateusz/dev/quake/cache',
-        #                                                  '/home/pmateusz/dev/quake/current_review/{0}'.format(year),
-        #                                                  '/home/pmateusz/dev/quake/current_review/{0}/solutions'.format(year),
-        #                                                  year) for year in range(2013, 2019, 1)]
-
-        # self.__results = [ResultsSet.SolutionBundleEntry('/home/pmateusz/dev/quake/cache',
-        #                                                  '/home/pmateusz/dev/quake/current_review/rc_alt566.899126024325710_inc97.631754',
-        #                                                  '/home/pmateusz/dev/quake/current_review/rc_alt566.899126024325710_inc97.631754/solutions',
-        #                                                  year) for year in range(2013, 2019)]
-
-        self.__config_bundles = [ResultsSet.ConfigurationBundleEntry('/home/pmateusz/dev/quake/cache',
-                                                                     problem_dir,
-                                                                     os.path.join(problem_dir, 'solutions'))
-                                 for problem_dir in ['/home/pmateusz/dev/quake/current_review/{0}'.format(90.5 + raan) for raan in range(0, 26, 1)]
-                                 ]
+        self.__config_bundles = [ResultsSet.ConfigurationBundleEntry(CACHE_DIR, problem_dir, os.path.join(problem_dir, 'solutions'))
+                                 for problem_dir in ['/home/pmateusz/dev/quake/current_review/{0}'.format(90.5 + raan) for raan in range(0, 26, 1)]]
 
     @property
     def configuration_bundles(self):
@@ -1046,15 +1055,17 @@ class ResultsSet:
 
 
 def plot_service_level(args):
-    result_set = ResultsSet()
+    problem_dir = getattr(args, 'data_dir')
+    solutions_dir = getattr(args, 'solution_dir')
 
-    for station in result_set.stations:
-        station_frame = result_set.get_station_frame(station)
+    config_bundle = ResultsSet.ConfigurationBundleEntry(CACHE_DIR, problem_dir, solutions_dir)
+    for station in config_bundle.stations:
+        station_frame = config_bundle.get_station_frame(station)
         fig, axis = matplotlib.pyplot.subplots(figsize=(FIGURE_WIDTH_SQUARE_SIZE, FIGURE_HEIGHT_SQUARE_SIZE))
         axis.plot(station_frame.index.values, station_frame['level'])
 
         level = 0.99
-        consumption_level = result_set.get_local_consumption_at_level(station, level)
+        consumption_level = config_bundle.get_local_consumption_at_level(station, level)
         axis.plot([consumption_level], [level], '.', c=FOREGROUND_COLOR)
         axis.annotate('({0}, {1:.2f})'.format(consumption_level, level),
                       xy=(consumption_level, level),
@@ -1434,24 +1445,33 @@ def plot_communication_window(args):
 
 
 def plot_weights_disturbed(args):
-    solution_bundles = [quake.weather.solution.SolutionBundle.read_from_dir('/home/pmateusz/dev/quake/current_review/2013_disturbed_1',
-                                                                            '/home/pmateusz/dev/quake/current_review/2013_disturbed_1/solutions'),
-                        quake.weather.solution.SolutionBundle.read_from_dir('/home/pmateusz/dev/quake/current_review/2013_disturbed_2',
-                                                                            '/home/pmateusz/dev/quake/current_review/2013_disturbed_2/solutions')]
+    config_bundles = [ResultsSet.ConfigurationBundleEntry(CACHE_DIR,
+                                                          '/home/pmateusz/dev/quake/current_review/109.5_{0}'.format(iteration),
+                                                          '/home/pmateusz/dev/quake/current_review/109.5_{0}/solutions'.format(iteration))
+                      for iteration in range(1, 11)]
 
-    stations = solution_bundles[0].stations
+    data = []
+    station = quake.city.LONDON
+    for config_bundle in config_bundles:
+        service_level_summary = config_bundle.get_service_level_summary()
+        london_global_99 = service_level_summary.loc[service_level_summary['station'] == station]['global_99'].values.item()
+        london_local_99 = service_level_summary.loc[service_level_summary['station'] == station]['local_99'].values.item()
+        data.append({'weight': config_bundle.get_transfer_share(station), 'local_99': london_local_99, 'global_99': london_global_99})
+    print(tabulate.tabulate(pandas.DataFrame(data=data), tablefmt='latex', showindex=True, headers='keys'))
+
+    stations = config_bundles[0].stations
     for station in stations:
         keys_transferred_by_weight = []
-        for solution_bundle in solution_bundles:
-            data_frame = solution_bundle.to_frame()
+        for config_bundle in config_bundles:
+            solution_frame = config_bundle.solution_frame
             keys_transferred_by_weight.append(
-                (solution_bundle.get_transfer_share(station), data_frame.loc[station]['keys_transferred'].values.tolist()))
+                (config_bundle.get_transfer_share(station), solution_frame.loc[station]['keys_transferred'].values.tolist()))
         keys_transferred_by_weight.sort(key=operator.itemgetter(0))
         data = [keys_transferred for _, keys_transferred in keys_transferred_by_weight]
 
         fig, ax = matplotlib.pyplot.subplots(figsize=(FIGURE_WIDTH_SQUARE_SIZE, FIGURE_HEIGHT_SQUARE_SIZE))
         ax.boxplot(data, flierprops=dict(marker='.'), medianprops=dict(color=FOREGROUND_COLOR))
-        ax.set_xticklabels(["{0:.4f}".format(weight) for weight, _ in keys_transferred_by_weight], rotation=90)
+        ax.set_xticklabels(["{0:.3f}".format(weight) for weight, _ in keys_transferred_by_weight], rotation=90)
         ax.set_xlabel('Weight')
         ax.set_ylabel('Keys Received')
         fig.tight_layout()
@@ -1618,24 +1638,33 @@ def plot_key_rate(args):
 
 
 def print_service_levels(args):
-    result_set = ResultsSet()
+    problem_dir = getattr(args, 'data_dir')
+    solution_dir = getattr(args, 'solution_dir')
 
-    # def get_service_level_summary(bundle: ResultsSet.ConfigurationBundleEntry) -> pandas.DataFrame:
-    #     frame = bundle.get_service_level_summary()
-    #     bundle.release()
-    #     return frame
+    if not problem_dir and not solution_dir:
+        result_set = ResultsSet()
 
-    data_set = []
-    for bundle in result_set.configuration_bundles:
-        bundle.get_service_level_summary()
-        frame = bundle.get_service_level_summary()
-        problem_dir = bundle.problem_dir
-        london_global_99 = frame.loc[frame['station'] == quake.city.LONDON]['global_99'].values[0]
-        data_set.append({'problem_dir': problem_dir,
-                         'london_global_99': london_global_99})
-        bundle.release()
+        data_set = []
+        for bundle in result_set.configuration_bundles:
+            bundle.get_service_level_summary()
+            frame = bundle.get_service_level_summary()
+            problem_dir = bundle.problem_dir
+            london_global_99 = frame.loc[frame['station'] == quake.city.LONDON]['global_99'].values[0]
+            data_set.append({'problem_dir': problem_dir,
+                             'london_global_99': london_global_99})
+            bundle.release()
 
-    print(tabulate.tabulate(pandas.DataFrame(data=data_set), tablefmt='latex', headers='keys'))
+        print(tabulate.tabulate(pandas.DataFrame(data=data_set), tablefmt='latex', headers='keys'))
+    else:
+        config_bundle = ResultsSet.ConfigurationBundleEntry(CACHE_DIR, problem_dir, solution_dir)
+        frame = config_bundle.get_service_level_summary()
+        data = []
+        for station in config_bundle.stations:
+            station_frame = frame[frame['station'] == station]
+            data.append({'city': station_frame['station'].item(),
+                         'local_99': station_frame['local_99'].item(),
+                         'global_99': station_frame['global_99'].item()})
+        print(tabulate.tabulate(pandas.DataFrame(data=data), tablefmt='latex', headers='keys', showindex=False))
 
 
 def parse_args():
@@ -1706,7 +1735,9 @@ def parse_args():
 
     subparsers.add_parser('key-rate')
 
-    subparsers.add_parser('print-service-levels')
+    service_level_parser = subparsers.add_parser('print-service-levels')
+    service_level_parser.add_argument('--solution-dir', default=None)
+    service_level_parser.add_argument('--data-dir', default=None)
 
     return parser.parse_args()
 
