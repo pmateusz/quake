@@ -950,8 +950,16 @@ class ResultsSet:
                 transfer_share = self.get_transfer_share(station)
                 local_consumption_100 = self.get_local_consumption_at_level(station, 1.0)
                 local_consumption_99 = self.get_local_consumption_at_level(station, 0.99)
-                global_consumption_100 = int(math.floor(global_traffic_index_100 * transfer_share))
-                global_consumption_99 = int(math.floor(global_traffic_index_99 * transfer_share))
+
+                prev_global_consumption_100 = int(math.floor(global_traffic_index_100 * transfer_share))
+                prev_global_consumption_99 = int(math.floor(global_traffic_index_99 * transfer_share))
+
+                global_consumption_100 = self.get_global_consumption_at_level(station, 1.0)
+                global_consumption_99 = self.get_global_consumption_at_level(station, 0.99)
+
+                assert prev_global_consumption_99 == global_consumption_99
+                assert prev_global_consumption_100 == global_consumption_100
+
                 data.append({'station': station,
                              'weight': transfer_share,
                              'local_100': local_consumption_100,
@@ -967,7 +975,7 @@ class ResultsSet:
             global_frame = self.global_frame
             global_station_frame = global_frame.copy()
             transfer_share = self.get_transfer_share(station)
-            global_station_frame['working_index'] = global_station_frame['traffic_index'] * transfer_share
+            global_station_frame['working_index'] = numpy.floor(global_station_frame['traffic_index'] * transfer_share)
 
             def no_remainder_filter(value: float) -> bool:
                 fractional, integer = math.modf(value)
@@ -1095,7 +1103,7 @@ def plot_service_level(args):
         level = 0.99
         consumption_level = config_bundle.get_global_consumption_at_level(station, level)
 
-        print(station, weight, consumption_level / weight)
+        print(station, weight, consumption_level, consumption_level / weight)
 
         axis.plot([consumption_level], [level], '.', c=FOREGROUND_COLOR)
         axis.annotate('({0}, {1:.2f})'.format(consumption_level, level),

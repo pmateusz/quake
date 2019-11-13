@@ -134,6 +134,8 @@ def parse_args():
     analyze_command.add_argument('--solution-dir', required=True)
     analyze_command.add_argument('--output', required=True)
 
+    sub_parsers.add_parser(PRINT_ROOT_RELAXATION_COMMAND)
+
     return parser.parse_args()
 
 
@@ -967,6 +969,7 @@ def print_weights_command(args):
 def print_root_relaxation_command(args):
     root_dir = '/home/pmateusz/dev/quake/current_review'
     root_relaxations = []
+    solution_times = []
     for problem_dir in os.listdir(root_dir):
         problem_dir_path = os.path.join(root_dir, problem_dir)
         if not os.listdir(problem_dir_path):
@@ -977,13 +980,17 @@ def print_root_relaxation_command(args):
             continue
 
         for solution_file in os.listdir(solution_dir):
+            print(solution_dir)
+
             if not solution_file.startswith('out') or not solution_file.endswith('.log'):
                 continue
 
             solution_file_path = os.path.join(solution_dir, solution_file)
             log = quake.mip_log.GurobiLog.read_from_file(solution_file_path)
             root_relaxations.append(log.root_relaxation())
+            solution_times.append(log.computation_time())
     print(numpy.mean(root_relaxations), numpy.max(root_relaxations), len(root_relaxations))
+    print(min(solution_times), max(solution_times))
 
 
 if __name__ == '__main__':
@@ -1020,7 +1027,6 @@ if __name__ == '__main__':
 
     def draw_joint_distribution(city_x, city_y, delay, samples):
         fig, ax = matplotlib.pyplot.subplots(1, 1)
-
         error_x = []
         error_y = []
 
@@ -1123,4 +1129,3 @@ if __name__ == '__main__':
         return pivot_transform(local_frame[(local_frame['Delay'] == datetime.timedelta(seconds=0))
                                            & (local_frame['DateTime'] >= date_time)
                                            & (local_frame['DateTime'] <= max_date_time)])
-
