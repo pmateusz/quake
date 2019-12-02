@@ -34,6 +34,9 @@ class TimePeriod:
     def __hash__(self):
         return hash((self.__begin_time, self.__end_time))
 
+    def __bool__(self) -> bool:
+        return self.__begin_time < self.__end_time
+
     @property
     def begin(self) -> datetime.datetime:
         return self.__begin_time

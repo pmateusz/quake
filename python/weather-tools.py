@@ -343,10 +343,10 @@ def extend_problem_definition(args):
         return __generate_var_model(pivot_frame)
 
     def __generate_var_model_from_observation(weather_cache, datetime_start, datetime_end):
-        data_source = weather_cache.observation_frame[(weather_cache.observation_frame['date_time'] >= datetime_start)
-                                                      & (weather_cache.observation_frame['date_time'] <= datetime_end)].copy()
-        data_source['City'] = data_source['city_name'].apply(quake.city.from_name)
-        pivot_frame = data_source.pivot_table(columns=['City'], index=['date_time'], values=['clouds_all'])
+        data_source = weather_cache.observation_frame[datetime_start:datetime_end].copy()
+        data_source.reset_index(level=1, inplace=True)
+        data_source.reset_index(level=0, inplace=True)
+        pivot_frame = data_source.pivot_table(columns=['City'], index=['DateTime'], values=['CloudCover'])
         pivot_frame.columns = pivot_frame.columns.droplevel()
         pivot_frame = weather_cache.fill_missing_values(pivot_frame)
         return __generate_var_model(pivot_frame)
@@ -385,7 +385,7 @@ def extend_problem_definition(args):
     else:
         # get forecast at midday of the requested day and finish at midday of the next day
         forecast_start = datetime.datetime.combine(problem.observation_period.begin.date(), noon_time)
-        forecast_end = datetime.datetime.combine((problem.observation_period.end + datetime.timedelta(days=1)).date(), noon_time)
+        forecast_end = datetime.datetime.combine(problem.observation_period.end.date(), noon_time)
         forecast_length = forecast_end - forecast_start
 
         forecast_frame = weather_cache.get_closest_forecast_frame(forecast_start, forecast_length)
@@ -449,7 +449,7 @@ def extend_problem_definition(args):
 
         time_zone = datetime.timezone(offset=datetime.timedelta())
         var_model = __generate_var_model_from_observation(weather_cache,
-                                                          datetime.datetime(2018, 1, 1, tzinfo=time_zone),
+                                                          datetime.datetime(2013, 1, 1, tzinfo=time_zone),
                                                           datetime.datetime(2019, 1, 1, tzinfo=time_zone))
 
         mean_variance_result = scenario_generator.bootstrap_mean_variance(10000)

@@ -131,12 +131,20 @@ class SampleSpace:
 
     @staticmethod
     def frame_to_sample(frame: pandas.DataFrame) -> numpy.array:
-        if not (frame.index.size == SampleSpace.NUM_OBSERVATIONS and frame.index.inferred_freq == '3H' and not frame.index.has_duplicates):
-            raise ValueError('Frame may have missing values')
+        if frame.index.inferred_freq != '3H' or frame.index.has_duplicates:
+            raise ValueError('Frame is misaligned')
+
+        num_observations = int((frame.index.max() - frame.index.min()).total_seconds() / datetime.timedelta(hours=3).total_seconds()) + 1
+        missing_observations = SampleSpace.NUM_OBSERVATIONS - num_observations
 
         sample = []
         for city in quake.city.ALL:
-            sample.extend(frame[city].values)
+            if city in frame:
+                sample.extend(frame[city].values)
+                sample.extend(numpy.zeros(missing_observations))
+            else:
+                warnings.warn('City {0} is not in the frame'.format(city.name))
+                sample.extend(numpy.zeros(SampleSpace.NUM_OBSERVATIONS))
 
         return numpy.array(sample)
 
@@ -200,6 +208,7 @@ class PastErrorsScenarioGenerator:
             sample[sample < 0.0] = 0.0
 
             frame = self.__sample_space.sample_to_frame(sample)
+            frame = frame[:len(self.__forecast_frame)].copy()
             frame.set_index(self.__forecast_frame.index, inplace=True)
             frames.append(frame)
         return frames
@@ -248,21 +257,27 @@ class PastErrorsScenarioGenerator:
         trimmed_population_mean[trimmed_population_mean < 0.0] = 0.0
 
         mean_frame = self.__sample_space.sample_to_frame(trimmed_population_mean)
+        mean_frame = mean_frame[:len(self.__forecast_frame)].copy()
         mean_frame.set_index(self.__forecast_frame.index, inplace=True)
 
         mean_lower_ci_frame = self.__sample_space.sample_to_frame(mean_lower_ci)
+        mean_lower_ci_frame = mean_lower_ci_frame[:len(self.__forecast_frame)].copy()
         mean_lower_ci_frame.set_index(self.__forecast_frame.index, inplace=True)
 
         mean_upper_ci_frame = self.__sample_space.sample_to_frame(mean_upper_ci)
+        mean_upper_ci_frame = mean_upper_ci_frame[:len(self.__forecast_frame)].copy()
         mean_upper_ci_frame.set_index(self.__forecast_frame.index, inplace=True)
 
         variance_frame = self.__sample_space.sample_to_frame(population_variance)
+        variance_frame = variance_frame[:len(self.__forecast_frame)].copy()
         variance_frame.set_index(self.__forecast_frame.index, inplace=True)
 
         variance_lower_ci_frame = self.__sample_space.sample_to_frame(variance_lower_ci)
+        variance_lower_ci_frame = variance_lower_ci_frame[:len(self.__forecast_frame)].copy()
         variance_lower_ci_frame.set_index(self.__forecast_frame.index, inplace=True)
 
         variance_upper_ci_frame = self.__sample_space.sample_to_frame(variance_upper_ci)
+        variance_upper_ci_frame = variance_upper_ci_frame[:len(self.__forecast_frame)].copy()
         variance_upper_ci_frame.set_index(self.__forecast_frame.index, inplace=True)
 
         return MeanVarianceResult(confidence,

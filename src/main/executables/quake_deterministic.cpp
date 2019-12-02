@@ -92,6 +92,14 @@ void Solve(const Arguments &args,
     }
 }
 
+// TODO: provide problem samples in order for each stage
+// TODO: solve problem instance for a given stage
+// TODO: retrieve decision from solving a stage
+// TODO: set key buffers after the stage
+// TODO: solve the next stage
+// TODO: output the solution
+// TODO: assess the solution using monte carlo
+// TODO: assess the solution using real weather
 int main(int argc, char *argv[]) {
     const auto arguments = quake::SetupLogsAndParseArgs<Arguments>(argc, argv);
 
