@@ -83,7 +83,6 @@ boost::optional<quake::Solution> Solve(const Arguments &args, const quake::Exten
 }
 
 // TODO: assess the solution using monte carlo
-// TODO: assess the solution using real weather
 int main(int argc, char *argv[]) {
     const auto arguments = quake::SetupLogsAndParseArgs<Arguments>(argc, argv);
 

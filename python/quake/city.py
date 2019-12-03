@@ -20,6 +20,9 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+import argparse
+import re
+
 
 class City:
 
@@ -123,3 +126,14 @@ def from_name(name):
 
 City.from_key = staticmethod(from_key)
 City.from_name = staticmethod(from_name)
+
+
+class ParseCitiesAction(argparse.Action):
+
+    def __call__(self, parser: argparse.ArgumentParser, namespace: argparse.Namespace, values, option_string=None):
+        stations = []
+        if values:
+            names = re.split('[^\\w]', ''.join(values))
+            stations = [from_name(name) for name in names]
+
+        setattr(namespace, self.dest, stations)

@@ -21,6 +21,8 @@
 
 #include <cstdlib>
 
+#include <regex>
+
 #include <gflags/gflags.h>
 #include <glog/logging.h>
 
@@ -37,6 +39,7 @@ DEFINE_string(from, "2019-03-01", "The start date for which the elevation angle 
 DEFINE_string(to, "2019-03-02", "The end date for which the elevation angle should be computed.");
 DEFINE_string(initial_epoch, "", "Initial epoch. Should be set to the same value for problems with a rolling horizon.");
 DEFINE_string(output, "", "The output solution file.");
+DEFINE_string(stations, "", "Station names separated by a non-alpha character");
 DEFINE_double(altitude, quake::KeplerElements::DEFAULT_ALTITUDE, "Altitude.");
 DEFINE_double(inclination, quake::KeplerElements::DEFAULT_INCLINATION, "Inclination.");
 DEFINE_double(raan, quake::KeplerElements::DEFAULT_RAAN, "RAAN");
@@ -63,6 +66,7 @@ struct Arguments {
     boost::filesystem::path ProblemOutputPath;
     boost::posix_time::time_period ObservationTime;
     boost::posix_time::ptime InitialEpoch;
+    std::vector<quake::GroundStation> Stations;
 };
 
 boost::posix_time::ptime ParseDateIgnoreTime(const std::string &value) {
@@ -93,6 +97,18 @@ Arguments SetupLogsAndParseArgs(int argc, char *argv[]) {
     args.RAAN = FLAGS_raan;
     args.ProblemOutputPath = FLAGS_output;
 
+    std::vector<quake::GroundStation> stations;
+    std::regex split_pattern{"[^\\w]+"};
+    std::sregex_token_iterator end;
+    for (std::sregex_token_iterator iterator(FLAGS_stations.begin(), FLAGS_stations.end(), split_pattern, -1); iterator != end; ++iterator) {
+        stations.emplace_back(quake::GroundStation::FromName(*iterator));
+    }
+
+    if (stations.empty()) {
+        stations = quake::GroundStation::All;
+    }
+    args.Stations = stations;
+
     const auto start_time = ParseDateIgnoreTime(FLAGS_from);
     const auto end_time = ParseDateIgnoreTime(FLAGS_to);
     CHECK_LE(start_time, end_time);
@@ -122,19 +138,8 @@ void Save(const Arguments &arguments, const quake::ExtendedProblem &problem) {
 int main(int argc, char *argv[]) {
     const auto arguments = SetupLogsAndParseArgs(argc, argv);
 
-    std::vector<quake::GroundStation> ground_stations{quake::GroundStation::Belfast,
-                                                      quake::GroundStation::Birmingham,
-                                                      quake::GroundStation::Bristol,
-                                                      quake::GroundStation::Glasgow,
-                                                      quake::GroundStation::Cambridge,
-                                                      quake::GroundStation::Ipswich,
-                                                      quake::GroundStation::Manchester,
-                                                      quake::GroundStation::York,
-                                                      quake::GroundStation::Thurso,
-                                                      quake::GroundStation::London};
-
     quake::ProblemGenerator generator;
-    const auto problem = generator.CreateExtendedProblem(ground_stations,
+    const auto problem = generator.CreateExtendedProblem(arguments.Stations,
                                                          arguments.Altitude,
                                                          arguments.Inclination,
                                                          arguments.RAAN,

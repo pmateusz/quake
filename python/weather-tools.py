@@ -64,6 +64,7 @@ VAR_COMMAND = 'compute-var'
 EXTEND_COMMAND = 'extend'
 GENERATE_COMMAND = 'generate'
 PRINT_WEIGHTS_COMMAND = 'print-weights'
+TABULATE_COMMAND = 'tabulate'
 
 BBOX_STYLE = {'boxstyle': 'square,pad=0.0', 'lw': 0, 'fc': 'w', 'alpha': 0.8}
 
@@ -109,6 +110,10 @@ def parse_args():
     generate_parser.add_argument('--time-horizon', action=quake.util.ParseTimeDeltaAction, default=datetime.timedelta(days=1))
     generate_parser.add_argument('--problem-prefix')
     generate_parser.add_argument('--num-scenarios', default=0, type=int)
+    generate_parser.add_argument('--stations',
+                                 action=quake.city.ParseCitiesAction,
+                                 default=[quake.city.LONDON, quake.city.BIRMINGHAM, quake.city.BRISTOL, quake.city.MANCHESTER, quake.city.GLASGOW],
+                                 type=list)
 
     generate_parser.add_argument('--scenario-generator', default='', choices=scenario_generation_models_to_use, required=False)
 
@@ -134,6 +139,7 @@ def parse_args():
     analyze_command.add_argument('--solution-dir', required=True)
     analyze_command.add_argument('--output', required=True)
 
+    sub_parsers.add_parser(TABULATE_COMMAND)
     sub_parsers.add_parser(PRINT_ROOT_RELAXATION_COMMAND)
 
     return parser.parse_args()
@@ -483,6 +489,7 @@ def generate_command(args):
     time_step = getattr(args, 'time_step')
     time_horizon = getattr(args, 'time_horizon')
     initial_epoch = getattr(args, 'initial_epoch')
+    stations = getattr(args, 'stations')
 
     configurations = []
     current_date = from_date_arg
@@ -496,6 +503,7 @@ def generate_command(args):
         subprocess.run([GENERATE_PROGRAM_PATH,
                         "--from={0}".format(from_date.date()),
                         "--to={0}".format(to_date.date()),
+                        "--stations={0}".format(','.join([station.name for station in stations])),
                         "--initial-epoch",
                         initial_epoch.strftime('%Y-%m-%d %H:%M:%S'),
                         "--output={0}".format(temp_problem)], check=True)
@@ -799,6 +807,27 @@ def plot_coregionalization(args):
     matplotlib.pyplot.close(fig)
 
 
+def get_traffic_index(solution: quake.weather.solution.Solution, problem: quake.weather.problem.Problem, scenario) -> float:
+    traffic_indices = []
+    for station in solution.stations:
+        station_keys_transferred = problem.get_initial_buffer(station)
+        for observation in solution.get_observations(station):
+            station_keys_transferred += problem.get_transferred_keys(station, observation, scenario)
+        station_transfer_share = problem.get_transfer_share(station)
+        traffic_indices.append(station_keys_transferred / station_transfer_share)
+    return min(traffic_indices)
+
+
+def get_monte_carlo_traffic_index(solution: quake.weather.solution.Solution, problem: quake.weather.problem.Problem) -> float:
+    traffic_indices = []
+    num_scenarios = problem.scenarios
+    for scenario_number in range(num_scenarios):
+        scenario_name = 'scenario_{0}'.format(scenario_number)
+        scenario = problem.get_scenario(scenario_name)
+        traffic_indices.append(get_traffic_index(solution, problem, scenario))
+    return numpy.mean(traffic_indices)
+
+
 def analyze_command(args):
     problem_dir = getattr(args, 'problem_dir')
     solution_dir = getattr(args, 'solution_dir')
@@ -896,6 +925,26 @@ def analyze_command(args):
     with pandas.ExcelWriter(output_path, engine='xlsxwriter') as writer:
         master_solution_frame.to_excel(writer, worksheet_name)
         writer.save()
+
+
+def tabulate_command(args):
+    with open('/home/pmateusz/dev/quake/current_review/week_2019-10-01.json', 'r') as input_stream:
+        json_object = json.load(input_stream)
+        problem = quake.weather.problem.Problem(json_object)
+
+    with open('/home/pmateusz/dev/quake/cmake-build-debug/solution_one_step.json', 'r') as input_stream:
+        solution_json = json.load(input_stream)
+        one_step_solution = quake.weather.solution.Solution(solution_json)
+
+    print(get_traffic_index(one_step_solution, problem, problem.get_scenario('real')))
+    print(get_monte_carlo_traffic_index(one_step_solution, problem))
+
+    with open('/home/pmateusz/dev/quake/cmake-build-debug/solution_multiple_steps.json', 'r') as input_stream:
+        solution_json = json.load(input_stream)
+        multi_step_solution = quake.weather.solution.Solution(solution_json)
+
+    print(get_traffic_index(multi_step_solution, problem, problem.get_scenario('real')))
+    print(get_monte_carlo_traffic_index(multi_step_solution, problem))
 
 
 def print_weights_command(args):
@@ -1021,6 +1070,8 @@ if __name__ == '__main__':
         print_weights_command(args)
     elif command == PRINT_ROOT_RELAXATION_COMMAND:
         print_root_relaxation_command(args)
+    elif command == TABULATE_COMMAND:
+        tabulate_command(args)
 
     import matplotlib.cm
 

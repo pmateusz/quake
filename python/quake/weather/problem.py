@@ -50,7 +50,7 @@ class Problem:
         self.__json_object['stations'] = updated_stations
 
     def set_metadata(self, key, value) -> None:
-        metadata = quake.weather.metadata.from_json(self.__json_object['metadata'])
+        metadata = self.__metadata
         metadata[key] = value
         self.__json_object['metadata'] = quake.weather.metadata.to_json(metadata)
 
@@ -197,6 +197,10 @@ class Problem:
         transfer_shares = self.__get_transfer_shares()
         return transfer_shares[station]
 
+    def get_initial_buffer(self, station: quake.city.City) -> float:
+        initial_buffers = self.__get_initial_buffers()
+        return initial_buffers[station]
+
     def get_communication_windows(self, station: quake.city.City) -> typing.List[quake.weather.time_period.TimePeriod]:
         windows = []
         for station_json in self.__json_object['stations']:
@@ -224,19 +228,25 @@ class Problem:
 
     @property
     def observation_period(self) -> quake.weather.time_period.TimePeriod:
-        metadata = quake.weather.metadata.from_json(self.__json_object['metadata'])
-        return metadata[quake.weather.metadata.OBSERVATION_PERIOD]
+        return self.__metadata[quake.weather.metadata.OBSERVATION_PERIOD]
+
+    @property
+    def scenarios(self) -> int:
+        return self.__metadata[quake.weather.metadata.SCENARIOS_NUMBER]
 
     @property
     def scenario_generator(self):
-        metadata = quake.weather.metadata.from_json(self.__json_object['metadata'])
-        return metadata[quake.weather.metadata.SCENARIO_GENERATOR]
+        return self.__metadata[quake.weather.metadata.SCENARIO_GENERATOR]
 
     @staticmethod
     def read_json(file_path: str) -> 'Problem':
         with open(file_path, 'r') as input_stream:
             json_body = json.load(input_stream)
             return Problem(json_body)
+
+    @property
+    def __metadata(self) -> dict:
+        return quake.weather.metadata.from_json(self.__json_object['metadata'])
 
     def __get_transfer_shares(self):
         return {quake.city.City.from_name(station_json['station']): station_json['transfer_share'] for station_json in
@@ -279,6 +289,10 @@ class Problem:
             index[station] = communication_frames
 
         return index
+
+    def __get_initial_buffers(self):
+        return {quake.city.City.from_name(station_json['station']): station_json['initial_buffer'] for station_json in
+                self.__json_object['stations']}
 
     @staticmethod
     def __frame_to_dict(frame):
