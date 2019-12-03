@@ -106,6 +106,8 @@ namespace quake {
     struct MultiStageArguments : Arguments {
 
         virtual void Fill() {
+            Arguments::Fill();
+
             CHECK(!FLAGS_problems.empty()) << "The problem files are required";
 
             ProblemPaths = ParsePaths(FLAGS_problems);

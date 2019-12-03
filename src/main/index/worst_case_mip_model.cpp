@@ -19,8 +19,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <limits>
-
 #include <glog/logging.h>
 
 #include "worst_case_mip_model.h"

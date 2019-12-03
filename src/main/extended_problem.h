@@ -225,6 +225,9 @@ namespace quake {
 
         std::vector<Forecast> GetWeatherSamples(ExtendedProblem::WeatherSample sample, std::size_t size) const;
 
+        double GetTrafficIndex(const std::unordered_map<GroundStation, std::vector<boost::posix_time::time_period> > &observations,
+                               const Forecast &forecast) const;
+
         void OverwriteInitialConditions(const Solution &previous_solution);
 
     private:

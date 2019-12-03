@@ -117,7 +117,7 @@ std::ostream &operator<<(std::ostream &out, quake::Metadata::SolutionType method
 
 template<typename ValueType>
 void quake::Metadata::SetProperty(quake::Metadata::Property property, ValueType value) {
-    properties_.emplace(property, value);
+    properties_[property] = value;
 }
 
 template<typename ValueType>

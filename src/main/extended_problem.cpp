@@ -498,6 +498,30 @@ bool quake::ExtendedProblem::TrackConsumption() const {
     return false;
 }
 
+double quake::ExtendedProblem::GetTrafficIndex(const std::unordered_map<GroundStation, std::vector<boost::posix_time::time_period>> &observations,
+                                               const Forecast &forecast) const {
+    std::unordered_map<GroundStation, double> traffic_index;
+    for (const auto &station : this->Stations()) {
+        traffic_index[station] = this->InitialBuffer(station);
+    }
+
+    for (const auto &observation_group : observations) {
+        for (const auto &observation : observation_group.second) {
+            traffic_index[observation_group.first] += this->KeyRate(observation_group.first, observation, forecast);
+        }
+    }
+
+    for (const auto &station : this->Stations()) {
+        traffic_index[station] /= this->TransferShare(station);
+    }
+
+    auto output_traffic_index = std::numeric_limits<double>::max();
+    for (const auto &station : this->Stations()) {
+        output_traffic_index = std::min(output_traffic_index, traffic_index[station]);
+    }
+    return output_traffic_index;
+}
+
 void quake::from_json(const nlohmann::json &json, quake::ExtendedProblem::StationVarModel &station_var_model) {
     std::unordered_map<GroundStation, ExtendedProblem::StationVarModel::Parameter> parameters;
     std::unordered_map<GroundStation, double> correlations;
